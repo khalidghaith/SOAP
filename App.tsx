@@ -247,7 +247,26 @@ export default function App() {
 
     // --- Room Handlers ---
     const updateRoom = useCallback((id: string, updates: Partial<Room>) => {
-        setRooms(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+        setRooms(prev => prev.map(r => {
+            if (r.id !== id) return r;
+
+            const updatedRoom = { ...r, ...updates };
+
+            // Auto-resize bubble if Area changes without explicit dimension updates
+            // Only applies to standard bubbles (no polygon)
+            if (updates.area !== undefined &&
+                updates.width === undefined &&
+                updates.height === undefined &&
+                !r.polygon &&
+                !updates.polygon) {
+
+                const side = Math.sqrt(Math.max(0, updates.area)) * PIXELS_PER_METER;
+                updatedRoom.width = side;
+                updatedRoom.height = side;
+            }
+
+            return updatedRoom;
+        }));
     }, []);
 
     const deleteRoom = useCallback((id: string) => {
