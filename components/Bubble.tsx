@@ -419,6 +419,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 strokeWidth={diagramStyle.borderWidth / zoomScale}
                                 strokeDasharray={diagramStyle.sketchy ? `${10 / zoomScale},${10 / zoomScale}` : "none"}
                                 fillOpacity={diagramStyle.opacity}
+                                style={{
+                                    filter: diagramStyle.shadow === 'shadow-md' ? 'drop-shadow(0 4px 6px rgb(0 0 0 / 0.1))' :
+                                        diagramStyle.shadow === 'shadow-sm' ? 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))' :
+                                            diagramStyle.shadow === 'shadow-none' ? 'none' : 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))'
+                                }}
                             />
                             {/* Polygon Edges (Hit Areas for Editing) */}
                             {isSelected && activePoints.map((p, i) => {
@@ -479,12 +484,15 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 </div>
 
                 {/* Mini Toolset */}
-                <div className={`absolute top-0 right-0 -mr-8 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0'}`}>
-                    <button onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} className="p-1 bg-white border border-slate-200 rounded-full shadow-sm hover:text-primary">
+                <div
+                    className={`absolute top-0 right-0 -mr-8 transition-opacity origin-top-left ${isSelected ? 'opacity-100' : 'opacity-0'}`}
+                    style={{ transform: `scale(${1 / zoomScale})` }}
+                >
+                    <button onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} className="p-1 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-full shadow-sm hover:text-primary dark:text-gray-300">
                         {showTools ? <X size={12} /> : <Pencil size={12} />}
                     </button>
                     {showTools && (
-                        <div className="absolute top-8 right-0 bg-white shadow-2xl rounded-xl border border-slate-200 flex flex-col p-1 z-50 min-w-[140px] slide-in-bottom">
+                        <div className="absolute top-8 right-0 bg-white dark:bg-dark-surface shadow-2xl rounded-xl border border-slate-200 dark:border-dark-border flex flex-col p-1 z-50 min-w-[140px] slide-in-bottom">
                             {room.polygon ? (
                                 <button onClick={(e) => {
                                     e.stopPropagation();
@@ -496,7 +504,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                     const side = Math.sqrt(room.area * 400);
                                     updateRoom(room.id, { polygon: null, width: side, height: side });
                                     setShowTools(false);
-                                }} className="p-2.5 hover:bg-slate-50 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 rounded-lg transition-colors">
+                                }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
                                     <Box size={14} className="text-primary" /> Convert to Bubble
                                 </button>
                             ) : (
@@ -504,19 +512,19 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                     e.stopPropagation();
                                     updateRoom(room.id, { polygon: activePoints });
                                     setShowTools(false);
-                                }} className="p-2.5 hover:bg-slate-50 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 rounded-lg transition-colors">
+                                }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
                                     <LandPlot size={14} className="text-primary" /> Convert to Polygon
                                 </button>
                             )}
 
-                            <button onClick={() => onLinkToggle?.(room.id)} className={`p-2.5 hover:bg-slate-50 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap rounded-lg transition-colors ${isLinkingSource ? 'text-yellow-600 bg-yellow-50' : 'text-slate-600'}`}>
+                            <button onClick={() => onLinkToggle?.(room.id)} className={`p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap rounded-lg transition-colors ${isLinkingSource ? 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400' : 'text-slate-600 dark:text-gray-300'}`}>
                                 <LinkIcon size={14} className={isLinkingSource ? 'text-yellow-500' : 'text-primary'} />
                                 {isLinkingSource ? 'Cancel Linking' : 'Link Logic'}
                             </button>
-                            <div className="h-px bg-slate-100 my-1 mx-1" />
+                            <div className="h-px bg-slate-100 dark:bg-white/10 my-1 mx-1" />
                             <div className="flex justify-between px-1">
-                                <button onClick={(e) => { e.stopPropagation(); const idx = FLOORS.findIndex(f => f.id === room.floor); if (idx < FLOORS.length - 1) updateRoom(room.id, { floor: FLOORS[idx + 1].id }); }} className="p-2 hover:bg-slate-50 text-slate-400 hover:text-primary rounded-lg" title="Level Up"><ArrowUpFromLine size={14} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); const idx = FLOORS.findIndex(f => f.id === room.floor); if (idx > 0) updateRoom(room.id, { floor: FLOORS[idx - 1].id }); }} className="p-2 hover:bg-slate-50 text-slate-400 hover:text-primary rounded-lg" title="Level Down"><ArrowDownToLine size={14} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); const idx = FLOORS.findIndex(f => f.id === room.floor); if (idx < FLOORS.length - 1) updateRoom(room.id, { floor: FLOORS[idx + 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Up"><ArrowUpFromLine size={14} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); const idx = FLOORS.findIndex(f => f.id === room.floor); if (idx > 0) updateRoom(room.id, { floor: FLOORS[idx - 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Down"><ArrowDownToLine size={14} /></button>
                             </div>
                         </div>
                     )}

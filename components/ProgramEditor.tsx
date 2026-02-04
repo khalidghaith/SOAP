@@ -64,23 +64,23 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     };
 
     return (
-        <div className="h-screen w-screen bg-slate-50 flex flex-col font-sans text-slate-900">
+        <div className="h-screen w-screen bg-slate-50 dark:bg-dark-bg flex flex-col font-sans text-slate-900 dark:text-gray-100 transition-colors duration-300">
             {/* Header */}
-            <div className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 shadow-sm relative z-10">
+            <div className="h-20 bg-white dark:bg-dark-surface border-b border-slate-200 dark:border-dark-border flex items-center justify-between px-8 shrink-0 shadow-sm relative z-10 transition-colors duration-300">
                 <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                    <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200 dark:shadow-none">
                         <LayoutGrid size={20} />
                     </div>
                     <div>
-                        <h1 className="font-black text-2xl tracking-tighter text-slate-900">Program Editor</h1>
+                        <h1 className="font-black text-2xl tracking-tighter text-slate-900 dark:text-gray-100">Program Editor</h1>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Define your architectural requirements</p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-4">
-                    <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                        <button onClick={() => setActiveTab('table')} className={`px-5 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'table' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>Table View</button>
-                        <button onClick={() => setActiveTab('analytics')} className={`px-5 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'analytics' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>Analytics</button>
+                    <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl border border-slate-200 dark:border-dark-border">
+                        <button onClick={() => setActiveTab('table')} className={`px-5 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'table' ? 'bg-white dark:bg-dark-surface text-primary shadow-sm' : 'text-slate-500 dark:text-gray-500 hover:text-slate-800 dark:hover:text-gray-300'}`}>Table View</button>
+                        <button onClick={() => setActiveTab('analytics')} className={`px-5 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'analytics' ? 'bg-white dark:bg-dark-surface text-primary shadow-sm' : 'text-slate-500 dark:text-gray-500 hover:text-slate-800 dark:hover:text-gray-300'}`}>Analytics</button>
                     </div>
                     <div className="w-px h-8 bg-slate-200 mx-2" />
                     <button onClick={onStartCanvas} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-primary transition-all shadow-xl shadow-slate-200 hover:shadow-blue-200 flex items-center gap-2 group">
@@ -97,23 +97,23 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                         <div className="flex items-center justify-between mb-6">
                             <div className="relative flex-1 max-w-md">
                                 <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                                <input className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary focus:outline-none shadow-sm" placeholder="Filter spaces..." />
+                                <input className="w-full pl-12 pr-4 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary focus:outline-none shadow-sm dark:text-gray-200" placeholder="Filter spaces..." />
                             </div>
                             <div className="flex gap-3">
-                                <button onClick={() => setShowAiModal(true)} className="px-4 py-3 bg-purple-50 text-purple-600 border border-purple-100 rounded-xl text-xs font-bold hover:bg-purple-100 flex items-center gap-2 uppercase tracking-wider transition-colors">
+                                <button onClick={() => setShowAiModal(true)} className="px-4 py-3 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-800/30 rounded-xl text-xs font-bold hover:bg-purple-100 dark:hover:bg-purple-900/30 flex items-center gap-2 uppercase tracking-wider transition-colors">
                                     <Wand2 size={16} /> AI Suggest
                                 </button>
-                                <button onClick={() => addRoom({ name: 'New Space', area: 15, zone: 'Default' })} className="px-5 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:border-primary hover:text-primary flex items-center gap-2 uppercase tracking-wider shadow-sm transition-all">
+                                <button onClick={() => addRoom({ name: 'New Space', area: 15, zone: 'Default' })} className="px-5 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border text-slate-700 dark:text-gray-300 rounded-xl text-xs font-bold hover:border-primary hover:text-primary flex items-center gap-2 uppercase tracking-wider shadow-sm transition-all">
                                     <Plus size={16} /> Add Manual Space
                                 </button>
                             </div>
                         </div>
 
                         {/* Table */}
-                        <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div className="flex-1 bg-white dark:bg-dark-surface rounded-2xl shadow-sm border border-slate-200 dark:border-dark-border overflow-hidden flex flex-col transition-colors">
                             <div className="overflow-y-auto flex-1">
                                 <table className="w-full text-left">
-                                    <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
+                                    <thead className="bg-slate-50 dark:bg-white/5 sticky top-0 z-10 border-b border-slate-200 dark:border-dark-border">
                                         <tr>
                                             <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-16">#</th>
                                             <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Space Name</th>
@@ -135,11 +135,11 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                             </tr>
                                         )}
                                         {rooms.map((room, idx) => (
-                                            <tr key={room.id} className="group hover:bg-slate-50/80 transition-colors">
+                                            <tr key={room.id} className="group hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors">
                                                 <td className="px-8 py-4 text-xs font-mono text-slate-400">{idx + 1}</td>
                                                 <td className="px-8 py-4">
                                                     <input
-                                                        className="w-full bg-transparent font-bold text-slate-700 text-sm focus:outline-none focus:text-primary transition-colors border-b border-transparent focus:border-primary/20"
+                                                        className="w-full bg-transparent font-bold text-slate-700 dark:text-gray-200 text-sm focus:outline-none focus:text-primary transition-colors border-b border-transparent focus:border-primary/20"
                                                         value={room.name}
                                                         onChange={(e) => updateRoom(room.id, { name: e.target.value })}
                                                         placeholder="Space Name"
@@ -149,7 +149,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                     <div className="flex items-center gap-2">
                                                         <input
                                                             type="number"
-                                                            className="w-20 bg-slate-100/50 rounded-lg px-3 py-2 text-sm font-black text-slate-600 focus:outline-none focus:bg-white focus:ring-1 focus:ring-primary transition-all text-right"
+                                                            className="w-20 bg-slate-100/50 dark:bg-white/5 rounded-lg px-3 py-2 text-sm font-black text-slate-600 dark:text-gray-300 focus:outline-none focus:bg-white dark:focus:bg-white/10 focus:ring-1 focus:ring-primary transition-all text-right"
                                                             value={room.area}
                                                             onChange={(e) => updateRoom(room.id, { area: Number(e.target.value) })}
                                                         />
@@ -158,7 +158,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                 <td className="px-8 py-4">
                                                     <div className="relative">
                                                         <select
-                                                            className={`w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider focus:outline-none cursor-pointer border border-transparent hover:border-slate-200 focus:border-primary transition-all ${ZONE_COLORS[room.zone]?.bg} ${ZONE_COLORS[room.zone]?.text}`}
+                                                            className={`w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider focus:outline-none cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-white/20 focus:border-primary transition-all ${ZONE_COLORS[room.zone]?.bg} ${ZONE_COLORS[room.zone]?.text}`}
                                                             value={room.zone}
                                                             onChange={(e) => updateRoom(room.id, { zone: e.target.value })}
                                                         >
@@ -177,7 +177,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                     </tbody>
                                 </table>
                             </div>
-                            <div className="bg-slate-50 border-t border-slate-200 p-4 flex justify-between items-center text-xs font-bold text-slate-500">
+                            <div className="bg-slate-50 dark:bg-white/5 border-t border-slate-200 dark:border-dark-border p-4 flex justify-between items-center text-xs font-bold text-slate-500 dark:text-gray-400">
                                 <span>{rooms.length} Spaces</span>
                                 <span>Total Area: {totalArea} m²</span>
                             </div>
@@ -186,16 +186,16 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                 ) : (
                     <div className="h-full max-w-5xl mx-auto py-8 px-8 overflow-y-auto">
                         <div className="grid grid-cols-2 gap-8">
-                            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
+                            <div className="bg-white dark:bg-dark-surface p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-dark-border transition-colors">
                                 <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Zone Distribution</h3>
                                 <div className="space-y-6">
                                     {Object.entries(totalsByZone).map(([zone, area]) => (
                                         <div key={zone}>
-                                            <div className="flex justify-between text-sm font-bold text-slate-700 mb-2">
+                                            <div className="flex justify-between text-sm font-bold text-slate-700 dark:text-gray-300 mb-2">
                                                 <span>{zone}</span>
                                                 <span>{(area as number).toFixed(1)} m² <span className="text-slate-400 ml-1 font-normal">({(((area as number) / (totalArea as number)) * 100).toFixed(0)}%)</span></span>
                                             </div>
-                                            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                                            <div className="h-2 w-full bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
                                                 <div
                                                     className={`h-full ${ZONE_COLORS[zone]?.bg.replace('bg-', 'bg-') || 'bg-slate-400'} ${ZONE_COLORS[zone]?.border?.replace('border-', 'bg-')} transition-all duration-1000`}
                                                     style={{ width: `${((area as number) / (totalArea as number)) * 100}%` }}
@@ -206,18 +206,18 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                 </div>
                             </div>
                             <div className="space-y-8">
-                                <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center justify-center text-center">
-                                    <div className="w-40 h-40 rounded-full border-[12px] border-slate-50 flex flex-col items-center justify-center mb-6 shadow-inner bg-white relative">
-                                        <div className="absolute inset-0 rounded-full border border-slate-200" />
-                                        <span className="text-4xl font-black text-slate-800 tracking-tight">{(totalArea as number).toFixed(0)}</span>
+                                <div className="bg-white dark:bg-dark-surface p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-dark-border flex flex-col items-center justify-center text-center transition-colors">
+                                    <div className="w-40 h-40 rounded-full border-[12px] border-slate-50 dark:border-white/5 flex flex-col items-center justify-center mb-6 shadow-inner bg-white dark:bg-dark-surface relative">
+                                        <div className="absolute inset-0 rounded-full border border-slate-200 dark:border-white/10" />
+                                        <span className="text-4xl font-black text-slate-800 dark:text-gray-100 tracking-tight">{(totalArea as number).toFixed(0)}</span>
                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Net m²</span>
                                     </div>
                                     <div className="grid grid-cols-2 gap-4 w-full">
-                                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
                                             <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Gross Estimate (x1.3)</span>
-                                            <span className="text-lg font-black text-slate-700">{((totalArea as number) * 1.3).toFixed(0)} m²</span>
+                                            <span className="text-lg font-black text-slate-700 dark:text-gray-200">{((totalArea as number) * 1.3).toFixed(0)} m²</span>
                                         </div>
-                                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
                                             <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Space Count</span>
                                             <span className="text-lg font-black text-primary">{rooms.length}</span>
                                         </div>

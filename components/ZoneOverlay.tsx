@@ -8,9 +8,11 @@ interface ZoneOverlayProps {
     scale: number;
     onZoneDrag: (zone: string, dx: number, dy: number) => void;
     onSelectZone?: (zone: string) => void;
+    onDragStart?: () => void;
+    onDragEnd?: () => void;
 }
 
-export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, scale, onZoneDrag, onSelectZone }) => {
+export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, scale, onZoneDrag, onSelectZone, onDragStart, onDragEnd }) => {
     const [draggedZone, setDraggedZone] = useState<string | null>(null);
     const lastMousePos = useRef<{ x: number, y: number } | null>(null);
 
@@ -77,6 +79,7 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
         };
 
         const handleMouseUp = () => {
+            if (draggedZone) onDragEnd?.();
             setDraggedZone(null);
             lastMousePos.current = null;
         };
@@ -96,6 +99,7 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
         e.stopPropagation(); // Prevent canvas panning
         setDraggedZone(zone);
         lastMousePos.current = { x: e.clientX, y: e.clientY };
+        onDragStart?.();
         if (onSelectZone) onSelectZone(zone);
     };
 
@@ -106,9 +110,7 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
                     {/* Stroke */}
                     <path
                         d={z.path}
-                        fill="none"
-                        stroke={z.color.border.replace('border-', '#')}
-                        className={`${z.color.border.replace('border-', 'stroke-')} opacity-60`}
+                        className={`${z.color.border.replace('border-', 'stroke-')} opacity-60 transition-colors`}
                         strokeWidth={4 / scale}
                         strokeLinejoin="round"
                         strokeLinecap="round"
@@ -117,8 +119,7 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
                     {/* Interactive Fill */}
                     <path
                         d={z.path}
-                        fill={z.color.bg.replace('bg-', '#')}
-                        className={`${z.color.bg.replace('bg-', 'fill-')} opacity-20 hover:opacity-30 cursor-grab active:cursor-grabbing pointer-events-auto`}
+                        className={`${z.color.bg.replace('bg-', 'fill-')} opacity-20 hover:opacity-30 cursor-grab active:cursor-grabbing pointer-events-auto transition-colors`}
                         stroke="none"
                         onMouseDown={(e) => handleZoneMouseDown(e, z.zone)}
                     />

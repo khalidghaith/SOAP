@@ -1,9 +1,13 @@
 /* Base Styles for A.Zone - Pure CSS only as we use Tailwind CDN */
 body {
     background-color: #f8fafc;
-    /* canvas color */
     color: #0f172a;
-    /* slate-900 */
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.dark body {
+    background-color: #1E1E1E;
+    color: #f1f5f9;
 }
 
 .canvas-viewport {
@@ -43,3 +47,4 @@ body {
         linear-gradient(to right, #e2e8f0 1px, transparent 1px),
         linear-gradient(to bottom, #e2e8f0 1px, transparent 1px);
 }
+.no-transition, .no-transition * { transition: none !important; }

@@ -57,13 +57,13 @@ export interface AnalysisResponse {
 }
 
 export const ZONE_COLORS: Record<string, ZoneColor> = {
-  'Public': { bg: 'bg-orange-100', border: 'border-orange-400', text: 'text-orange-900' },
-  'Private': { bg: 'bg-blue-100', border: 'border-blue-400', text: 'text-blue-900' },
-  'Service': { bg: 'bg-gray-200', border: 'border-gray-400', text: 'text-gray-900' },
-  'Circulation': { bg: 'bg-yellow-100', border: 'border-yellow-400', text: 'text-yellow-900' },
-  'Outdoor': { bg: 'bg-green-100', border: 'border-green-400', text: 'text-green-900' },
-  'Admin': { bg: 'bg-purple-100', border: 'border-purple-400', text: 'text-purple-900' },
-  'Default': { bg: 'bg-white', border: 'border-slate-300', text: 'text-slate-700' },
+  'Public': { bg: 'bg-orange-100 dark:bg-orange-500/20', border: 'border-orange-400 dark:border-orange-400/50', text: 'text-orange-900 dark:text-orange-100' },
+  'Private': { bg: 'bg-blue-100 dark:bg-blue-500/20', border: 'border-blue-400 dark:border-blue-400/50', text: 'text-blue-900 dark:text-blue-100' },
+  'Service': { bg: 'bg-gray-200 dark:bg-gray-500/20', border: 'border-gray-400 dark:border-gray-400/50', text: 'text-gray-900 dark:text-gray-200' },
+  'Circulation': { bg: 'bg-yellow-100 dark:bg-yellow-500/20', border: 'border-yellow-400 dark:border-yellow-400/50', text: 'text-yellow-900 dark:text-yellow-100' },
+  'Outdoor': { bg: 'bg-green-100 dark:bg-green-500/20', border: 'border-green-400 dark:border-green-400/50', text: 'text-green-900 dark:text-green-100' },
+  'Admin': { bg: 'bg-purple-100 dark:bg-purple-500/20', border: 'border-purple-400 dark:border-purple-400/50', text: 'text-purple-900 dark:text-purple-100' },
+  'Default': { bg: 'bg-white dark:bg-white/10', border: 'border-slate-300 dark:border-white/20', text: 'text-slate-700 dark:text-slate-300' },
 };
 
 export const DIAGRAM_STYLES: DiagramStyle[] = [

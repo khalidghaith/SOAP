@@ -10,7 +10,7 @@ import {
     Plus, Layers, Map as MapIcon, Box, Download, Settings2,
     TableProperties, LayoutPanelLeft, MousePointer2, Link,
     LandPlot, Undo2, ChevronRight, ChevronLeft, SlidersHorizontal, Palette, Trash2, Key,
-    Zap, Magnet, Grid, Ruler
+    Zap, Magnet, Grid, Ruler, Moon, Sun
 } from 'lucide-react';
 
 // Shim process for libs that might expect it in Vite
@@ -50,6 +50,25 @@ export default function App() {
     const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
     const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
     const [snapGuides, setSnapGuides] = useState<{ x?: number, y?: number } | null>(null);
+    const [isZoneDragging, setIsZoneDragging] = useState(false);
+
+    // Dark Mode Local State
+    const [darkMode, setDarkMode] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('A_ZONE_DARK_MODE') === 'true';
+        }
+        return false;
+    });
+
+    useEffect(() => {
+        if (darkMode) {
+            document.documentElement.classList.add('dark');
+            localStorage.setItem('A_ZONE_DARK_MODE', 'true');
+        } else {
+            document.documentElement.classList.remove('dark');
+            localStorage.setItem('A_ZONE_DARK_MODE', 'false');
+        }
+    }, [darkMode]);
 
     // --- Utilities ---
     const getSnappedPosition = useCallback((room: Room, excludeId: string) => {
@@ -163,7 +182,7 @@ export default function App() {
         setOffset({ x: newOffsetX, y: newOffsetY });
     };
 
-    const handleMouseDown = (e: React.MouseEvent) => {
+    const handlePanStart = (e: React.MouseEvent) => {
         // Allow pan on Middle Button OR Left Click on Background
         if (e.button === 1 || (e.button === 0 && (e.shiftKey || e.target === e.currentTarget))) {
             isPanning.current = true;
@@ -296,6 +315,11 @@ export default function App() {
         }));
     }, [currentFloor]);
 
+    const handleZoneClick = useCallback((z: string) => {
+        setSelectedZone(z);
+        setSelectedRoomIds(new Set());
+    }, []);
+
     const renameZone = useCallback((oldZone: string, newZone: string) => {
         if (!newZone.trim()) return;
         setRooms(prev => prev.map(r => r.zone === oldZone ? { ...r, zone: newZone } : r));
@@ -330,23 +354,23 @@ export default function App() {
     }
 
     return (
-        <div className="h-screen w-screen flex flex-col bg-slate-50 overflow-hidden font-sans selection:bg-primary/20">
+        <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-dark-bg overflow-hidden font-sans selection:bg-primary/20 transition-colors duration-300">
             {/* Premium Header */}
-            <header className="h-16 bg-white/70 backdrop-blur-xl border-b border-slate-200/50 flex items-center justify-between px-6 shrink-0 z-40 shadow-[0_1px_10px_rgba(0,0,0,0.02)]">
+            <header className="h-16 bg-white/70 dark:bg-dark-surface/70 backdrop-blur-xl border-b border-slate-200/50 dark:border-dark-border flex items-center justify-between px-6 shrink-0 z-40 shadow-[0_1px_10px_rgba(0,0,0,0.02)] transition-colors duration-300">
                 <div className="flex items-center gap-6">
                     <div className="flex items-center gap-3 group cursor-pointer">
-                        <div className="w-10 h-10 bg-gradient-to-br from-primary to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-200 group-hover:scale-105 transition-transform duration-300">
+                        <div className="w-10 h-10 bg-gradient-to-br from-primary to-orange-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-orange-200/50 group-hover:scale-105 transition-transform duration-300">
                             <MapIcon size={20} />
                         </div>
                         <div>
-                            <h1 className="font-black text-slate-900 tracking-tight leading-none mb-0.5">{projectName}</h1>
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Architectural Project</p>
+                            <h1 className="font-black text-slate-900 dark:text-gray-100 tracking-tight leading-none mb-0.5">{projectName}</h1>
+                            <p className="text-[9px] font-bold text-slate-400 dark:text-gray-500 uppercase tracking-widest">Architectural Project</p>
                         </div>
                     </div>
-                    <div className="h-8 w-px bg-slate-200/60 mx-1" />
+                    <div className="h-8 w-px bg-slate-200/60 dark:bg-dark-border mx-1" />
                     <button
                         onClick={() => setViewMode('EDITOR')}
-                        className="flex items-center gap-2.5 px-4 py-2 bg-slate-100/50 border border-slate-200/50 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-white hover:shadow-md hover:border-primary transition-all duration-300"
+                        className="flex items-center gap-2.5 px-4 py-2 bg-slate-100/50 dark:bg-white/5 border border-slate-200/50 dark:border-dark-border rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-gray-400 hover:bg-white dark:hover:bg-white/10 hover:shadow-md hover:border-primary transition-all duration-300"
                     >
                         <TableProperties size={14} className="text-primary" /> Program Editor
                     </button>
@@ -364,12 +388,12 @@ export default function App() {
 
                 </div>
 
-                <div className="flex items-center bg-slate-100/80 p-1.5 rounded-2xl gap-1 border border-slate-200 relative shadow-inner">
+                <div className="flex items-center bg-slate-100/80 dark:bg-white/5 p-1.5 rounded-2xl gap-1 border border-slate-200 dark:border-dark-border relative shadow-inner">
                     {FLOORS.map(f => (
                         <button
                             key={f.id}
                             onClick={() => setCurrentFloor(f.id)}
-                            className={`px-5 py-2 text-[10px] font-black uppercase tracking-tighter rounded-xl transition-all duration-300 ${currentFloor === f.id ? 'bg-white text-primary shadow-lg shadow-black/5' : 'text-slate-400 hover:text-slate-700'}`}
+                            className={`px-5 py-2 text-[10px] font-black uppercase tracking-tighter rounded-xl transition-all duration-300 ${currentFloor === f.id ? 'bg-white dark:bg-dark-surface text-primary shadow-lg shadow-black/5' : 'text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300'}`}
                         >
                             {f.label}
                         </button>
@@ -377,6 +401,13 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => setDarkMode(!darkMode)}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!darkMode ? 'text-slate-400 hover:text-amber-500 hover:bg-amber-50' : 'text-slate-400 hover:text-indigo-400 hover:bg-white/5'}`}
+                        title="Toggle Dark Mode"
+                    >
+                        {darkMode ? <Moon size={18} /> : <Sun size={18} />}
+                    </button>
                     <button
                         onClick={() => setShowApiKeyModal(true)}
                         className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${apiKey ? 'text-slate-400 hover:text-primary hover:bg-blue-50' : 'text-orange-500 bg-orange-50 animate-pulse border border-orange-200 shadow-lg shadow-orange-100'}`}
@@ -387,13 +418,13 @@ export default function App() {
 
                     <div className="w-px h-8 bg-slate-200/60 mx-1" />
 
-                    <div className="flex items-center bg-slate-100/50 rounded-xl p-1 border border-slate-200/50">
+                    <div className="flex items-center bg-slate-100/50 dark:bg-white/5 rounded-xl p-1 border border-slate-200/50 dark:border-dark-border">
                         {DIAGRAM_STYLES.map(s => (
                             <button
                                 key={s.id}
                                 onClick={() => setCurrentStyle(s)}
                                 title={s.name}
-                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${currentStyle.id === s.id ? 'bg-white text-primary shadow-md' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${currentStyle.id === s.id ? 'bg-white dark:bg-dark-surface text-primary shadow-md' : 'text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 hover:bg-white/50 dark:hover:bg-white/10'}`}
                             >
                                 {s.id === 'standard' ? <LayoutPanelLeft size={16} /> : s.id === 'minimal' ? <MousePointer2 size={16} /> : s.id === 'sketchy' ? <Palette size={16} /> : <SlidersHorizontal size={16} />}
                             </button>
@@ -402,7 +433,7 @@ export default function App() {
 
                     <button
                         onClick={() => setShowGrid(!showGrid)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 hover:bg-slate-50' : 'bg-blue-50 text-blue-600 border border-blue-100'}`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800/50'}`}
                         title="Toggle Grid"
                     >
                         <Grid size={18} />
@@ -410,7 +441,7 @@ export default function App() {
 
                     <button
                         onClick={() => setIsMagnetMode(!isMagnetMode)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 hover:bg-slate-50' : 'bg-purple-50 text-purple-600 border border-purple-100 shadow-inner'}`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-800/50 shadow-inner'}`}
                         title="Magnetic Zones Response"
                     >
                         <Magnet size={18} className={isMagnetMode ? "animate-pulse" : ""} />
@@ -418,14 +449,14 @@ export default function App() {
 
                     <button
                         onClick={() => setIs3DMode(!is3DMode)}
-                        className={`h-10 px-5 rounded-xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all duration-300 ${is3DMode ? 'bg-primary border-primary text-white shadow-xl shadow-blue-200' : 'bg-white border-slate-200 text-slate-600 hover:border-primary hover:text-primary shadow-sm hover:shadow-md'}`}
+                        className={`h-10 px-5 rounded-xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all duration-300 ${is3DMode ? 'bg-primary border-primary text-white shadow-xl shadow-blue-200' : 'bg-white dark:bg-dark-surface border-slate-200 dark:border-dark-border text-slate-600 dark:text-gray-400 hover:border-primary hover:text-primary shadow-sm hover:shadow-md'}`}
                     >
                         <Box size={16} /> 3D Perspective
                     </button>
 
                     <button
                         onClick={() => downloadDXF(projectName, rooms)}
-                        className="h-10 px-6 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all duration-500 flex items-center gap-2.5 shadow-xl shadow-slate-200 hover:shadow-blue-200 group"
+                        className="h-10 px-6 bg-slate-900 dark:bg-black text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all duration-500 flex items-center gap-2.5 shadow-xl shadow-slate-200 hover:shadow-blue-200 group"
                     >
                         <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" /> Export CAD
                     </button>
@@ -433,24 +464,23 @@ export default function App() {
             </header>
 
             <div className="flex-1 flex overflow-hidden">
-                {/* Sleek Catalog Sidebar */}
-                <aside className="w-80 bg-white border-r border-slate-200/50 flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] translate-x-0 transition-transform duration-500">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
+                <aside className="w-80 bg-white dark:bg-dark-surface border-r border-slate-200/50 dark:border-dark-border flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] translate-x-0 transition-transform duration-500">
+                    <div className="p-6 border-b border-slate-100 dark:border-dark-border flex justify-between items-center bg-slate-50/30 dark:bg-white/5">
                         <div>
-                            <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-1">
+                            <h2 className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-2 mb-1">
                                 <Zap size={12} className="text-yellow-500" /> Space Inventory
                             </h2>
-                            <p className="text-[10px] font-bold text-slate-500">{unplacedRooms.length} spaces pending placement</p>
+                            <p className="text-[10px] font-bold text-slate-500 dark:text-gray-400">{unplacedRooms.length} spaces pending placement</p>
                         </div>
-                        <span className="w-8 h-8 flex items-center justify-center bg-slate-200/50 rounded-xl text-xs font-black text-slate-600 border border-slate-200/50">{unplacedRooms.length}</span>
+                        <span className="w-8 h-8 flex items-center justify-center bg-slate-200/50 dark:bg-white/10 rounded-xl text-xs font-black text-slate-600 dark:text-gray-300 border border-slate-200/50 dark:border-white/5">{unplacedRooms.length}</span>
                     </div>
-                    <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-white to-slate-50/50">
+                    <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-white to-slate-50/50 dark:from-dark-surface dark:to-dark-bg">
                         {unplacedRooms.length > 0 ? unplacedRooms.map(room => (
                             <div
                                 key={room.id}
                                 draggable
                                 onDragStart={(e) => handleDragStart(e, room)}
-                                className="p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:border-primary/20 hover:-translate-y-1 transition-all duration-300 cursor-grab active:cursor-grabbing group bg-white"
+                                className="p-5 rounded-2xl border border-slate-100 dark:border-dark-border shadow-sm hover:shadow-xl hover:border-primary/20 hover:-translate-y-1 transition-all duration-300 cursor-grab active:cursor-grabbing group bg-white dark:bg-dark-surface"
                                 onClick={() => {
                                     /* Optional: keep click to place at center if drag fails or as alternative */
                                     /* placeRoom(room); */
@@ -458,29 +488,29 @@ export default function App() {
                             >
                                 <div className="flex justify-between items-start mb-3">
                                     <div>
-                                        <span className="font-black text-slate-800 text-sm tracking-tight block group-hover:text-primary transition-colors">{room.name}</span>
-                                        <span className="text-[10px] text-slate-400 font-medium">Drag to canvas to place</span>
+                                        <span className="font-black text-slate-800 dark:text-gray-200 text-sm tracking-tight block group-hover:text-primary transition-colors">{room.name}</span>
+                                        <span className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">Drag to canvas to place</span>
                                     </div>
-                                    <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                                    <div className="w-8 h-8 rounded-lg bg-slate-50 dark:bg-white/5 flex items-center justify-center text-slate-300 dark:text-gray-500 group-hover:bg-primary/10 group-hover:text-primary transition-all">
                                         <Plus size={16} />
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <span className="px-2 py-1 bg-slate-100 rounded-lg text-[10px] font-black text-slate-500 uppercase tracking-wider">{room.area} m²</span>
+                                    <span className="px-2 py-1 bg-slate-100 dark:bg-white/5 rounded-lg text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-wider">{room.area} m²</span>
                                     <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm ${ZONE_COLORS[room.zone]?.bg || 'bg-slate-100'} ${ZONE_COLORS[room.zone]?.text || 'text-slate-500'}`}>{room.zone}</span>
                                 </div>
                             </div>
                         )) : (
                             <div className="text-center py-24 opacity-30 px-10">
-                                <div className="w-16 h-16 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                                    <Box size={32} className="text-slate-400" />
+                                <div className="w-16 h-16 bg-slate-100 dark:bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                                    <Box size={32} className="text-slate-400 dark:text-gray-500" />
                                 </div>
-                                <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Inventory Clear<br />All elements are in the design context.</p>
+                                <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed text-slate-500 dark:text-gray-500">Inventory Clear<br />All elements are in the design context.</p>
                             </div>
                         )}
                     </div>
-                    <div className="p-6 bg-slate-50/50 border-t border-slate-100">
-                        <button onClick={() => addRoom({})} className="w-full py-4 bg-white border border-slate-200/80 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-700 hover:border-primary hover:text-primary hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-3 shadow-sm group">
+                    <div className="p-6 bg-slate-50/50 dark:bg-white/5 border-t border-slate-100 dark:border-dark-border">
+                        <button onClick={() => addRoom({})} className="w-full py-4 bg-white dark:bg-dark-surface border border-slate-200/80 dark:border-dark-border rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300 hover:border-primary hover:text-primary hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-3 shadow-sm group">
                             <Plus size={18} className="group-hover:rotate-90 transition-transform" /> Add Manual Space
                         </button>
                     </div>
@@ -488,21 +518,26 @@ export default function App() {
 
                 <main
                     ref={mainRef}
-                    className={`flex-1 relative overflow-hidden bg-[#f0f2f5] transition-colors duration-500 ${showGrid ? 'grid-pattern' : ''}`}
+                    className={`flex-1 relative overflow-hidden bg-[#f0f2f5] dark:bg-dark-bg transition-colors duration-500 ${isZoneDragging ? 'no-transition' : ''}`}
                     onWheel={handleWheel}
-                    onMouseDown={(e) => {
-                        handleMouseDown(e);
-                        // Reset selection if clicking background (unless panning)
-                        if (e.target === e.currentTarget && !e.shiftKey) {
-                            setSelectedRoomIds(new Set());
-                            setSelectedZone(null);
-                        }
-                    }}
+                    onMouseDown={handlePanStart}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onDragOver={handleDragOver}
                     onDrop={handleDrop}
-                >
+                    style={{
+                        cursor: isPanning.current ? 'grabbing' : 'grab',
+                        ...(showGrid ? {
+                            backgroundImage: `
+                                linear-gradient(to right, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px),
+                                linear-gradient(to bottom, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px)
+                            `,
+                            backgroundSize: `${40 * scale}px ${40 * scale}px`,
+                            backgroundPosition: `${offset.x}px ${offset.y}px`
+                        } : {})
+                    }}
+                >        {/* Reset selection if clicking background (unless panning) */}
+                    {/* The onMouseDown handler above already handles this */}
                     {/* Zone Overlay Layer - Behind everything */}
                     <div
                         className="absolute inset-0 transition-transform duration-75 origin-top-left pointer-events-none"
@@ -513,10 +548,9 @@ export default function App() {
                             currentFloor={currentFloor}
                             scale={scale}
                             onZoneDrag={handleZoneDrag}
-                            onSelectZone={(z) => {
-                                setSelectedZone(z);
-                                setSelectedRoomIds(new Set());
-                            }}
+                            onSelectZone={handleZoneClick}
+                            onDragStart={() => setIsZoneDragging(true)}
+                            onDragEnd={() => setIsZoneDragging(false)}
                         />
                     </div>
 
@@ -609,27 +643,27 @@ export default function App() {
                     </div>
 
                     <div className="absolute bottom-6 left-6 flex flex-col gap-2 scale-110 origin-bottom-left">
-                        <div className="bg-white/90 backdrop-blur-md p-3 rounded-2xl border border-white shadow-2xl flex items-center gap-4">
+                        <div className="bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md p-3 rounded-2xl border border-white dark:border-dark-border shadow-2xl flex items-center gap-4">
                             <div className="flex items-center gap-2">
                                 <div className="w-6 h-6 bg-primary/10 rounded-md flex items-center justify-center text-primary">
                                     <MousePointer2 size={12} />
                                 </div>
-                                <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest">ArchiMode</span>
+                                <span className="text-[10px] font-black text-slate-800 dark:text-gray-200 uppercase tracking-widest">ArchiMode</span>
                             </div>
-                            <div className="w-px h-3 bg-slate-200" />
+                            <div className="w-px h-3 bg-slate-200 dark:bg-white/10" />
                             <div className="flex items-center gap-3 px-1">
-                                <button className="text-slate-400 hover:text-slate-600 transition-colors"><Link size={14} /></button>
-                                <button className="text-slate-400 hover:text-slate-600 transition-colors"><LandPlot size={14} /></button>
-                                <div className="w-px h-3 bg-slate-200" />
-                                <button className="text-slate-400 hover:text-slate-600 transition-colors"><Undo2 size={14} /></button>
+                                <button className="text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 transition-colors"><Link size={14} /></button>
+                                <button className="text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 transition-colors"><LandPlot size={14} /></button>
+                                <div className="w-px h-3 bg-slate-200 dark:bg-white/10" />
+                                <button className="text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 transition-colors"><Undo2 size={14} /></button>
                             </div>
                         </div>
                     </div>
 
                     <div className="absolute top-6 right-6 flex flex-col gap-2">
-                        <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-slate-100 shadow-lg flex items-center gap-3">
-                            <span className="text-[10px] font-black text-slate-400 uppercase">Zoom</span>
-                            <span className="text-xs font-mono font-bold text-slate-700">{(scale * 100).toFixed(0)}%</span>
+                        <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-sm px-4 py-2 rounded-full border border-slate-100 dark:border-dark-border shadow-lg flex items-center gap-3">
+                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Zoom</span>
+                            <span className="text-xs font-mono font-bold text-slate-700 dark:text-gray-300">{(scale * 100).toFixed(0)}%</span>
                         </div>
                     </div>
 
@@ -645,50 +679,50 @@ export default function App() {
                 </main>
 
                 {isRightSidebarOpen && (
-                    <aside className="w-72 bg-white border-l border-slate-200 flex flex-col z-20 shadow-2xl">
-                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                            <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <aside className="w-72 bg-white dark:bg-dark-surface border-l border-slate-200 dark:border-dark-border flex flex-col z-20 shadow-2xl">
+                        <div className="p-4 border-b border-slate-100 dark:border-dark-border flex justify-between items-center bg-slate-50/50 dark:bg-white/5">
+                            <h2 className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">
                                 {selectedRoom ? 'Space Detail' : selectedZone ? 'Zone Detail' : 'Properties'}
                             </h2>
-                            <button onClick={() => setIsRightSidebarOpen(false)} className="text-slate-300 hover:text-slate-600"><ChevronRight size={18} /></button>
+                            <button onClick={() => setIsRightSidebarOpen(false)} className="text-slate-300 dark:text-gray-600 hover:text-slate-600 dark:hover:text-gray-400"><ChevronRight size={18} /></button>
                         </div>
                         <div className="flex-1 p-6 overflow-y-auto">
                             {selectedRoom ? (
                                 <div className="space-y-6 slide-in-bottom">
                                     <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Space Name</label>
+                                        <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Space Name</label>
                                         <input
-                                            className="w-full text-xl font-black text-slate-800 focus:outline-none focus:text-primary transition-colors bg-transparent"
+                                            className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-primary transition-colors bg-transparent border-b border-transparent focus:border-primary pb-1"
                                             value={selectedRoom.name}
                                             onChange={(e) => updateRoom(selectedRoom.id, { name: e.target.value })}
                                         />
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Area</span>
-                                            <span className="text-lg font-mono font-bold text-slate-700">{selectedRoom.area} <small className="text-[10px] opacity-40">m²</small></span>
+                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
+                                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Area</span>
+                                            <span className="text-lg font-mono font-bold text-slate-700 dark:text-gray-200">{selectedRoom.area} <small className="text-[10px] opacity-40">m²</small></span>
                                         </div>
-                                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Floor</span>
-                                            <span className="text-lg font-mono font-bold text-slate-700">{selectedRoom.floor}</span>
+                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
+                                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
+                                            <span className="text-lg font-mono font-bold text-slate-700 dark:text-gray-200">{selectedRoom.floor}</span>
                                         </div>
                                     </div>
                                     <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">Zone Category</label>
+                                        <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-3 block">Zone Category</label>
                                         <div className="grid grid-cols-2 gap-2">
                                             {Object.keys(ZONE_COLORS).map(z => (
                                                 <button
                                                     key={z}
                                                     onClick={() => updateRoom(selectedRoom.id, { zone: z })}
-                                                    className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all ${selectedRoom.zone === z ? 'bg-primary border-primary text-white shadow-lg shadow-blue-200' : 'bg-white border-slate-100 text-slate-500 hover:border-slate-300'}`}
+                                                    className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all ${selectedRoom.zone === z ? 'bg-primary border-primary text-white shadow-lg shadow-blue-200' : 'bg-white dark:bg-white/5 border-slate-100 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:border-slate-300 dark:hover:border-white/20'}`}
                                                 >
                                                     {z}
                                                 </button>
                                             ))}
                                         </div>
                                     </div>
-                                    <div className="pt-6 border-t border-slate-100">
-                                        <button onClick={() => deleteRoom(selectedRoom.id)} className="w-full py-3 bg-red-50 text-red-500 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2">
+                                    <div className="pt-6 border-t border-slate-100 dark:border-dark-border">
+                                        <button onClick={() => deleteRoom(selectedRoom.id)} className="w-full py-3 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2">
                                             <Trash2 size={16} /> Delete Space
                                         </button>
                                     </div>
@@ -696,10 +730,10 @@ export default function App() {
                             ) : selectedZone ? (
                                 <div className="space-y-6 slide-in-bottom">
                                     <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Zone Name</label>
+                                        <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Zone Name</label>
                                         <div className="flex items-center gap-2">
                                             <input
-                                                className="w-full text-xl font-black text-slate-800 focus:outline-none focus:text-primary transition-colors bg-transparent border-b border-dashed border-slate-300 focus:border-primary pb-1"
+                                                className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-primary transition-colors bg-transparent border-b border-dashed border-slate-300 dark:border-dark-border focus:border-primary pb-1"
                                                 value={selectedZone}
                                                 onChange={(e) => renameZone(selectedZone, e.target.value)}
                                             />
@@ -707,26 +741,26 @@ export default function App() {
                                         </div>
                                     </div>
 
-                                    <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
+                                    <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
                                         <div className="flex justify-between items-center mb-4">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase">Total Stats</span>
+                                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Stats</span>
                                             <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-1 rounded-md">{selectedZoneRooms.length} Spaces</span>
                                         </div>
-                                        <div className="text-3xl font-mono font-bold text-slate-800 tracking-tight">
-                                            {zoneArea} <span className="text-sm font-sans text-slate-400 font-bold">m²</span>
+                                        <div className="text-3xl font-mono font-bold text-slate-800 dark:text-gray-100 tracking-tight">
+                                            {zoneArea} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
                                         </div>
                                     </div>
 
                                     <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block flex justify-between">
+                                        <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-3 block flex justify-between">
                                             Included Spaces
                                         </label>
                                         <div className="space-y-2">
                                             {selectedZoneRooms.map(r => (
-                                                <div key={r.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl hover:shadow-md transition-all cursor-pointer"
+                                                <div key={r.id} className="flex items-center justify-between p-3 bg-white dark:bg-white/5 border border-slate-100 dark:border-dark-border rounded-xl hover:shadow-md transition-all cursor-pointer group"
                                                     onClick={() => setSelectedRoomIds(new Set([r.id]))}>
-                                                    <span className="text-xs font-bold text-slate-700">{r.name}</span>
-                                                    <span className="text-[10px] font-mono text-slate-400">{r.area} m²</span>
+                                                    <span className="text-xs font-bold text-slate-700 dark:text-gray-300 group-hover:text-primary">{r.name}</span>
+                                                    <span className="text-[10px] font-mono text-slate-400 dark:text-gray-500">{r.area} m²</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -734,8 +768,8 @@ export default function App() {
                                 </div>
                             ) : (
                                 <div className="text-center py-20">
-                                    <Settings2 size={48} className="mx-auto text-slate-50 mb-6" />
-                                    <p className="text-xs font-black text-slate-300 uppercase tracking-widest leading-relaxed px-10 text-center">Select an object to modify its geometry and metadata.</p>
+                                    <Settings2 size={48} className="mx-auto text-slate-50 dark:text-white/5 mb-6" />
+                                    <p className="text-xs font-black text-slate-300 dark:text-gray-600 uppercase tracking-widest leading-relaxed px-10 text-center">Select an object to modify its geometry and metadata.</p>
                                 </div>
                             )}
                         </div>

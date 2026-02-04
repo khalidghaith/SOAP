@@ -9,12 +9,18 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
+      darkMode: 'class',
       theme: {
         extend: {
           colors: {
-            primary: '#2563eb',
+            primary: '#FF6B00',
             secondary: '#475569',
             canvas: '#f8fafc',
+            dark: {
+              bg: '#1E1E1E',
+              surface: '#252525',
+              border: '#333333'
+            }
           },
           fontFamily: {
             sans: ['Inter', 'sans-serif'],
