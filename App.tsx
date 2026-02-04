@@ -475,7 +475,7 @@ export default function App() {
 
                     <button
                         onClick={() => downloadDXF(projectName, rooms)}
-                        className="h-10 px-6 bg-slate-900 dark:bg-black text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all duration-500 flex items-center gap-2.5 shadow-xl shadow-slate-200 hover:shadow-blue-200 group"
+                        className="h-10 px-6 bg-slate-900 dark:bg-black text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all duration-500 flex items-center gap-2.5 group"
                     >
                         <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" /> Export CAD
                     </button>
@@ -733,7 +733,7 @@ export default function App() {
                                                 <button
                                                     key={z}
                                                     onClick={() => updateRoom(selectedRoom.id, { zone: z })}
-                                                    className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all ${selectedRoom.zone === z ? 'bg-primary border-primary text-white shadow-lg shadow-blue-200' : 'bg-white dark:bg-white/5 border-slate-100 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:border-slate-300 dark:hover:border-white/20'}`}
+                                                    className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all ${selectedRoom.zone === z ? 'bg-primary border-primary text-white' : 'bg-white dark:bg-white/5 border-slate-100 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:border-slate-300 dark:hover:border-white/20'}`}
                                                 >
                                                     {z}
                                                 </button>

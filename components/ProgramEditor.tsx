@@ -83,7 +83,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                         <button onClick={() => setActiveTab('analytics')} className={`px-5 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'analytics' ? 'bg-white dark:bg-dark-surface text-primary shadow-sm' : 'text-slate-500 dark:text-gray-500 hover:text-slate-800 dark:hover:text-gray-300'}`}>Analytics</button>
                     </div>
                     <div className="w-px h-8 bg-slate-200 mx-2" />
-                    <button onClick={onStartCanvas} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-primary transition-all shadow-xl shadow-slate-200 hover:shadow-blue-200 flex items-center gap-2 group">
+                    <button onClick={onStartCanvas} className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-primary transition-all flex items-center gap-2 group">
                         Start Design <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
                     </button>
                 </div>
