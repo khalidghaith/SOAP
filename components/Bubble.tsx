@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Room, ZONE_COLORS, Point, DiagramStyle, FLOORS } from '../types';
+import { Room, ZONE_COLORS, Point, DiagramStyle } from '../types';
 import { Pencil, X, LandPlot, Link as LinkIcon, ArrowUpFromLine, ArrowDownToLine, Box } from 'lucide-react';
 import { createRoundedPath } from '../utils/geometry';
 
@@ -15,6 +15,8 @@ interface BubbleProps {
     getSnappedPosition?: (room: Room, excludeId: string) => { x: number, y: number };
     onLinkToggle?: (id: string) => void;
     isLinkingSource?: boolean;
+    pixelsPerMeter: number;
+    floors: { id: number; label: string }[];
 }
 
 // area utility
@@ -30,7 +32,7 @@ const calculatePolygonArea = (points: Point[]): number => {
 
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource
+    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [resizeHandle, setResizeHandle] = useState<string | null>(null);
@@ -81,7 +83,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                 const newPoints = activePoints.filter((_, i) => !selectedVertices.has(i));
 
-                const newArea = Math.round(calculatePolygonArea(newPoints) / 400);
+                const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
                 setSelectedVertices(new Set());
             }
@@ -105,12 +107,14 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 let nH = s.roomH;
 
                 if (resizeHandle === 'se') {
-                    nW = Math.max(minSize, s.roomW + dxWorld);
-                    if (snapEnabled) nW = snap(nW);
-                    nH = (s.roomW * s.roomH) / nW;
+                    const areaPx = s.roomW * s.roomH;
+                    const targetW = Math.max(minSize, s.roomW + dxWorld);
+                    const targetH = Math.max(minSize, s.roomH + dyWorld);
+                    const ratio = targetW / targetH;
+                    nW = Math.sqrt(areaPx * ratio);
+                    nH = areaPx / nW;
+                    updateRoom(room.id, { width: nW, height: nH });
                 }
-
-                updateRoom(room.id, { width: nW, height: nH });
 
             } else if (draggedVertex !== null && polygonSnapshot) {
                 // Moving Vertex (or multiple)
@@ -147,7 +151,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     newPoints[index] = { x: nx, y: ny };
                 });
 
-                const newArea = Math.round(calculatePolygonArea(newPoints) / 400);
+                const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
 
             } else if (draggedEdge !== null && polygonSnapshot) {
@@ -192,7 +196,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     newPoints[idx2] = { x: nx2, y: ny2 };
                 }
 
-                const newArea = Math.round(calculatePolygonArea(newPoints) / 400);
+                const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
 
             } else if (isDragging) {
@@ -341,7 +345,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             // Insert at index + 1 (after the start node of the edge)
             newPoints.splice(index + 1, 0, { x: localX, y: localY });
 
-            const newArea = Math.round(calculatePolygonArea(newPoints) / 400);
+            const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
             updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
 
             // Select the new vertex
@@ -390,16 +394,23 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
     const RenderCorner = ({ cursor, pos }: { cursor: string, pos: React.CSSProperties }) => (
         <div
-            className="absolute w-3 h-3 bg-white border-2 border-primary rounded-full z-[70] hover:bg-primary transition-all cursor-pointer shadow-lg active:scale-150"
-            style={{ ...pos, cursor, transform: 'translate(-50%, -50%)' }}
-            onMouseDown={(e) => handleResizeStart(e, cursor.replace('-resize', ''))}
-        />
+            className="absolute z-[70]"
+            style={{ ...pos, transform: `translate(-50%, -50%) scale(${1 / zoomScale})` }}
+        >
+            <div
+                className="w-3 h-3 bg-white border-2 border-primary rounded-full hover:bg-primary transition-all cursor-pointer shadow-lg active:scale-150"
+                style={{ cursor }}
+                onMouseDown={(e) => handleResizeStart(e, cursor.replace('-resize', ''))}
+            />
+        </div>
     );
+
+    const isInteracting = isDragging || resizeHandle !== null || draggedVertex !== null || draggedEdge !== null;
 
     return (
         <div
             ref={bubbleRef}
-            className={`absolute bubble-transition pointer-events-auto ${isSelected ? 'z-20' : 'z-10'} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
+            className={`absolute ${isInteracting ? '' : 'bubble-transition'} pointer-events-auto ${isSelected ? 'z-20' : 'z-10'} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
             style={{
                 transform: `translate3d(${room.x}px, ${room.y}px, 0)`,
                 width: room.polygon ? 0 : room.width,
@@ -446,7 +457,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         {isSelected && activePoints.map((p, i) => (
                             <div
                                 key={`v-${i}`}
-                                className={`absolute border rounded-full z-[80] hover:scale-150 transition-all cursor-crosshair ${selectedVertices.has(i) ? 'bg-primary border-white scale-125' : 'bg-white border-primary'}`}
+                                className={`absolute border rounded-full z-[80] hover:scale-150 ${isInteracting ? '' : 'transition-all'} cursor-crosshair ${selectedVertices.has(i) ? 'bg-primary border-white scale-125' : 'bg-white border-primary'}`}
                                 style={{
                                     left: p.x, top: p.y,
                                     width: 10 / zoomScale, height: 10 / zoomScale,
@@ -462,7 +473,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     </div>
                 ) : (
                     <div
-                        className={`absolute top-0 left-0 ${diagramStyle.cornerRadius} ${visualStyle.bg} ${visualStyle.border} ${diagramStyle.shadow} transition-all`}
+                        className={`absolute top-0 left-0 ${diagramStyle.cornerRadius} ${visualStyle.bg} ${visualStyle.border} ${diagramStyle.shadow} ${isInteracting ? '' : 'transition-all'}`}
                         style={{ width: room.width, height: room.height, borderWidth: diagramStyle.borderWidth / zoomScale, opacity: diagramStyle.opacity }}
                     />
                 )}
@@ -470,6 +481,18 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 {/* Handles - RESIZE ONLY SE */}
                 {!room.polygon && isSelected && !isDragging && (
                     <RenderCorner cursor="se-resize" pos={{ top: '100%', left: '100%' }} />
+                )}
+
+                {/* Dimensions Display during Resize */}
+                {resizeHandle && (
+                    <>
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md pointer-events-none whitespace-nowrap backdrop-blur-sm z-[100]" style={{ transform: `scale(${1 / zoomScale})` }}>
+                            {(room.width / pixelsPerMeter).toFixed(2)}m
+                        </div>
+                        <div className="absolute top-1/2 -left-8 -translate-y-1/2 -translate-x-full bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md pointer-events-none whitespace-nowrap backdrop-blur-sm z-[100]" style={{ transform: `scale(${1 / zoomScale})` }}>
+                            {(room.height / pixelsPerMeter).toFixed(2)}m
+                        </div>
+                    </>
                 )}
 
                 {/* Content */}
@@ -523,8 +546,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                             </button>
                             <div className="h-px bg-slate-100 dark:bg-white/10 my-1 mx-1" />
                             <div className="flex justify-between px-1">
-                                <button onClick={(e) => { e.stopPropagation(); const idx = FLOORS.findIndex(f => f.id === room.floor); if (idx < FLOORS.length - 1) updateRoom(room.id, { floor: FLOORS[idx + 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Up"><ArrowUpFromLine size={14} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); const idx = FLOORS.findIndex(f => f.id === room.floor); if (idx > 0) updateRoom(room.id, { floor: FLOORS[idx - 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Down"><ArrowDownToLine size={14} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx < floors.length - 1) updateRoom(room.id, { floor: floors[idx + 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Up"><ArrowUpFromLine size={14} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx > 0) updateRoom(room.id, { floor: floors[idx - 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Down"><ArrowDownToLine size={14} /></button>
                             </div>
                         </div>
                     )}

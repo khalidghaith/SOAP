@@ -9,8 +9,8 @@ import { downloadDXF } from './utils/dxf';
 import {
     Plus, Layers, Map as MapIcon, Box, Download, Settings2,
     TableProperties, LayoutPanelLeft, MousePointer2, Link,
-    LandPlot, Undo2, ChevronRight, ChevronLeft, SlidersHorizontal, Palette, Trash2, Key,
-    Zap, Magnet, Grid, Ruler, Moon, Sun
+    LandPlot, Undo2, ChevronRight, ChevronLeft, SlidersHorizontal, Palette, Trash2, Key, X,
+    Zap, Magnet, Grid, Ruler, Moon, Sun, Maximize, ChevronUp, ChevronDown, Activity
 } from 'lucide-react';
 
 // Shim process for libs that might expect it in Vite
@@ -35,6 +35,7 @@ export default function App() {
     const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
     // View State
+    const [floors, setFloors] = useState(FLOORS);
     const [currentFloor, setCurrentFloor] = useState(0);
     const [scale, setScale] = useState(1);
     const [offset, setOffset] = useState<Point>({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -45,12 +46,17 @@ export default function App() {
     // Tools State
     const [isMagnetMode, setIsMagnetMode] = useState(false);
     const [showGrid, setShowGrid] = useState(true);
+    const [snapEnabled, setSnapEnabled] = useState(true);
+    const GRID_SIZES = [0.5, 1, 2, 5, 10];
+    const [gridSizeIndex, setGridSizeIndex] = useState(2); // Default 2m
+    const gridSize = GRID_SIZES[gridSizeIndex];
 
     // UI State
     const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
     const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
     const [snapGuides, setSnapGuides] = useState<{ x?: number, y?: number } | null>(null);
     const [isZoneDragging, setIsZoneDragging] = useState(false);
+    const [editingFloorId, setEditingFloorId] = useState<number | null>(null);
 
     // Dark Mode Local State
     const [darkMode, setDarkMode] = useState(() => {
@@ -72,6 +78,10 @@ export default function App() {
 
     // --- Utilities ---
     const getSnappedPosition = useCallback((room: Room, excludeId: string) => {
+        if (!snapEnabled) {
+            setSnapGuides(null);
+            return { x: room.x, y: room.y };
+        }
         if (!excludeId) {
             setSnapGuides(null);
             return { x: room.x, y: room.y };
@@ -120,7 +130,7 @@ export default function App() {
 
         setSnapGuides(activeGuideX || activeGuideY ? { x: activeGuideX, y: activeGuideY } : null);
         return { x: snappedX, y: snappedY };
-    }, [rooms, currentFloor]);
+    }, [rooms, currentFloor, snapEnabled]);
 
     // Canvas Refs
     const mainRef = useRef<HTMLElement>(null);
@@ -208,6 +218,71 @@ export default function App() {
         isPanning.current = false;
     };
 
+    const handleZoomToFit = () => {
+        const currentFloorRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+        if (currentFloorRooms.length === 0) {
+            setScale(1);
+            setOffset({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+            return;
+        }
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        currentFloorRooms.forEach(r => {
+            minX = Math.min(minX, r.x);
+            minY = Math.min(minY, r.y);
+            maxX = Math.max(maxX, r.x + r.width);
+            maxY = Math.max(maxY, r.y + r.height);
+        });
+
+        const padding = 100;
+        const contentWidth = maxX - minX + padding * 2;
+        const contentHeight = maxY - minY + padding * 2;
+
+        if (mainRef.current) {
+            const { width, height } = mainRef.current.getBoundingClientRect();
+            const scaleX = width / contentWidth;
+            const scaleY = height / contentHeight;
+            const newScale = Math.min(Math.max(scaleX, scaleY, 0.1), 2);
+            const newOffsetX = (width / 2) - ((minX + maxX) / 2) * newScale;
+            const newOffsetY = (height / 2) - ((minY + maxY) / 2) * newScale;
+            setScale(newScale);
+            setOffset({ x: newOffsetX, y: newOffsetY });
+        }
+    };
+
+    const handleAddFloor = () => {
+        const newId = floors.length > 0 ? Math.max(...floors.map(f => f.id)) + 1 : 0;
+        const newFloor = { id: newId, label: `Floor ${newId}` };
+        setFloors([...floors, newFloor]);
+        setCurrentFloor(newId);
+    };
+
+    const handleDeleteFloor = (e: React.MouseEvent, id: number) => {
+        e.stopPropagation();
+        // Return rooms to inventory
+        setRooms(prev => prev.map(r => r.floor === id ? { ...r, isPlaced: false } : r));
+
+        const newFloors = floors.filter(f => f.id !== id);
+        setFloors(newFloors);
+
+        if (currentFloor === id) {
+            if (newFloors.length > 0) {
+                const deletedIndex = floors.findIndex(f => f.id === id);
+                const newIndex = Math.max(0, deletedIndex - 1);
+                setCurrentFloor(newFloors[newIndex].id);
+            } else {
+                // If all floors deleted, create a default one
+                const defaultFloor = { id: 0, label: 'Ground Floor' };
+                setFloors([defaultFloor]);
+                setCurrentFloor(0);
+            }
+        }
+    };
+
+    const handleRenameFloor = (id: number, newName: string) => {
+        setFloors(prev => prev.map(f => f.id === id ? { ...f, label: newName } : f));
+    };
+
     // --- Drag & Drop Handlers ---
     const handleDragStart = (e: React.DragEvent, room: Room) => {
         e.dataTransfer.setData('roomId', room.id);
@@ -242,6 +317,20 @@ export default function App() {
 
             updateRoom(roomId, { isPlaced: true, floor: currentFloor, x: worldX, y: worldY });
             setSelectedRoomIds(new Set([roomId]));
+        }
+    };
+
+    const handleInventoryDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    };
+
+    const handleInventoryDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        const roomId = e.dataTransfer.getData('roomId');
+        if (roomId) {
+            updateRoom(roomId, { isPlaced: false });
+            setSelectedRoomIds(new Set());
         }
     };
 
@@ -367,7 +456,11 @@ export default function App() {
                             <MapIcon size={20} />
                         </div>
                         <div>
-                            <h1 className="font-black text-slate-900 dark:text-gray-100 tracking-tight leading-none mb-0.5">{projectName}</h1>
+                            <input
+                                className="font-black text-slate-900 dark:text-gray-100 tracking-tight leading-none mb-0.5 bg-transparent border-none focus:outline-none focus:ring-0 w-full p-0 text-lg"
+                                value={projectName}
+                                onChange={(e) => setProjectName(e.target.value)}
+                            />
                             <p className="text-[9px] font-bold text-slate-400 dark:text-gray-500 uppercase tracking-widest">Architectural Project</p>
                         </div>
                     </div>
@@ -405,20 +498,6 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-4">
-                    {viewMode === 'CANVAS' && (
-                        <div className="flex items-center bg-slate-100/80 dark:bg-white/5 p-1.5 rounded-2xl gap-1 border border-slate-200 dark:border-dark-border relative shadow-inner">
-                            {FLOORS.map(f => (
-                                <button
-                                    key={f.id}
-                                    onClick={() => setCurrentFloor(f.id)}
-                                    className={`px-5 py-2 text-[10px] font-black uppercase tracking-tighter rounded-xl transition-all duration-300 ${currentFloor === f.id ? 'bg-white dark:bg-dark-surface text-primary shadow-lg shadow-black/5' : 'text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300'}`}
-                                >
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-                    )}
-
                     <button
                         onClick={() => setDarkMode(!darkMode)}
                         className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!darkMode ? 'text-slate-400 hover:text-amber-500 hover:bg-amber-50' : 'text-slate-400 hover:text-indigo-400 hover:bg-white/5'}`}
@@ -451,20 +530,29 @@ export default function App() {
                                 ))}
                             </div>
 
-                            <button
-                                onClick={() => setShowGrid(!showGrid)}
-                                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800/50'}`}
-                                title="Toggle Grid"
-                            >
-                                <Grid size={18} />
-                            </button>
+                            <div className="flex items-center bg-slate-100/50 dark:bg-white/5 rounded-xl p-1 border border-slate-200/50 dark:border-dark-border">
+                                <button
+                                    onClick={() => setShowGrid(!showGrid)}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-blue-600 dark:text-blue-400 shadow-sm'}`}
+                                    title="Toggle Grid"
+                                >
+                                    <Grid size={16} />
+                                </button>
+                                <div className="flex flex-col items-center justify-center px-1 gap-0.5">
+                                    <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-primary"><ChevronUp size={10} /></button>
+                                    <span className="text-[8px] font-bold font-mono w-6 text-center">{gridSize}m</span>
+                                    <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-primary"><ChevronDown size={10} /></button>
+                                </div>
+                            </div>
+
+                            <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-100 dark:border-green-800/50'}`} title="Toggle Snapping"><Magnet size={18} /></button>
 
                             <button
                                 onClick={() => setIsMagnetMode(!isMagnetMode)}
                                 className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-800/50 shadow-inner'}`}
-                                title="Magnetic Zones Response"
+                                title="Physics / Magnetic Zones"
                             >
-                                <Magnet size={18} className={isMagnetMode ? "animate-pulse" : ""} />
+                                <Activity size={18} className={isMagnetMode ? "animate-pulse" : ""} />
                             </button>
 
                             <button
@@ -498,7 +586,11 @@ export default function App() {
                     />
                 ) : (
                     <>
-                        <aside className="w-80 bg-white dark:bg-dark-surface border-r border-slate-200/50 dark:border-dark-border flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] translate-x-0 transition-transform duration-500">
+                        <aside 
+                            className="w-80 bg-white dark:bg-dark-surface border-r border-slate-200/50 dark:border-dark-border flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] translate-x-0 transition-transform duration-500"
+                            onDragOver={handleInventoryDragOver}
+                            onDrop={handleInventoryDrop}
+                        >
                             <div className="p-6 border-b border-slate-100 dark:border-dark-border flex justify-between items-center bg-slate-50/30 dark:bg-white/5">
                                 <div>
                                     <h2 className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-2 mb-1">
@@ -566,7 +658,7 @@ export default function App() {
                                         linear-gradient(to right, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px),
                                         linear-gradient(to bottom, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px)
                                     `,
-                                    backgroundSize: `${40 * scale}px ${40 * scale}px`,
+                                    backgroundSize: `${gridSize * PIXELS_PER_METER * scale}px ${gridSize * PIXELS_PER_METER * scale}px`,
                                     backgroundPosition: `${offset.x}px ${offset.y}px`
                                 } : {})
                             }}
@@ -670,39 +762,26 @@ export default function App() {
                                             if (!multi) setSelectedZone(null); // Clear zone selection on room click unless multi?
                                         }}
                                         diagramStyle={currentStyle}
-                                        snapEnabled={true}
-                                        snapPixelUnit={10}
+                                        snapEnabled={snapEnabled}
+                                        snapPixelUnit={gridSize * PIXELS_PER_METER}
+                                        pixelsPerMeter={PIXELS_PER_METER}
+                                        floors={floors}
                                     />
                                 ))}
                             </div>
 
-                            <div className="absolute bottom-6 left-6 flex flex-col gap-2 scale-110 origin-bottom-left">
-                                <div className="bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md p-3 rounded-2xl border border-white dark:border-dark-border shadow-2xl flex items-center gap-4">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-6 h-6 bg-primary/10 rounded-md flex items-center justify-center text-primary">
-                                            <MousePointer2 size={12} />
-                                        </div>
-                                        <span className="text-[10px] font-black text-slate-800 dark:text-gray-200 uppercase tracking-widest">ArchiMode</span>
-                                    </div>
-                                    <div className="w-px h-3 bg-slate-200 dark:bg-white/10" />
-                                    <div className="flex items-center gap-3 px-1">
-                                        <button className="text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 transition-colors"><Link size={14} /></button>
-                                        <button className="text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 transition-colors"><LandPlot size={14} /></button>
-                                        <div className="w-px h-3 bg-slate-200 dark:bg-white/10" />
-                                        <button className="text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 transition-colors"><Undo2 size={14} /></button>
-                                    </div>
-                                </div>
-                            </div>
-
                             <div className="absolute top-6 right-6 flex flex-col gap-2">
-                                <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-sm px-4 py-2 rounded-full border border-slate-100 dark:border-dark-border shadow-lg flex items-center gap-3">
-                                    <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Zoom</span>
-                                    <span className="text-xs font-mono font-bold text-slate-700 dark:text-gray-300">{(scale * 100).toFixed(0)}%</span>
+                                <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-sm px-2 py-2 rounded-full border border-slate-100 dark:border-dark-border shadow-lg flex items-center gap-2">
+                                    <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase pl-2">Zoom</span>
+                                    <span className="text-xs font-mono font-bold text-slate-700 dark:text-gray-300 w-10 text-center">{(scale * 100).toFixed(0)}%</span>
+                                    <button onClick={handleZoomToFit} className="w-6 h-6 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-600 dark:text-gray-300 hover:bg-primary hover:text-white transition-colors" title="Zoom to Fit">
+                                        <Maximize size={12} />
+                                    </button>
                                 </div>
                             </div>
 
                             {/* Scale Bar on Canvas - Dynamic */}
-                            <div className="absolute bottom-6 right-6 flex flex-col items-end gap-1 pointer-events-none">
+                            <div className="absolute bottom-12 right-6 flex flex-col items-end gap-1 pointer-events-none">
                                 <div className="flex items-center gap-2">
                                     <span className="text-[9px] font-bold text-slate-400 text-shadow-sm">10 meters</span>
                                     <div className="h-2 border-x border-b border-slate-400/80 bg-white/20 backdrop-blur-sm"
@@ -710,6 +789,58 @@ export default function App() {
                                 </div>
                             </div>
 
+                            {/* Floor Tabs Bar */}
+                            <div className="absolute bottom-0 left-0 right-0 h-8 bg-slate-200/50 dark:bg-black/40 flex items-start px-4 gap-1 z-40 backdrop-blur-sm border-t border-slate-200/50 dark:border-dark-border">
+                                {floors.map(f => (
+                                    <div
+                                        key={f.id}
+                                        onClick={() => setCurrentFloor(f.id)}
+                                        onDoubleClick={() => setEditingFloorId(f.id)}
+                                        className={`
+                                            relative px-4 py-1.5 text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all rounded-b-lg flex items-center gap-2 select-none border-b border-x border-transparent
+                                            ${currentFloor === f.id
+                                                ? 'bg-[#f0f2f5] dark:bg-dark-bg text-primary border-slate-200/50 dark:border-dark-border !border-t-transparent h-full -translate-y-px'
+                                                : 'bg-slate-300/50 dark:bg-white/5 text-slate-500 dark:text-gray-500 hover:bg-slate-100/50 dark:hover:bg-white/10 h-[85%] mt-0'
+                                            }
+                                        `}
+                                    >
+                                        {editingFloorId === f.id ? (
+                                            <input
+                                                autoFocus
+                                                className="bg-transparent border-none outline-none w-20 text-center font-black uppercase tracking-widest p-0 text-[9px] text-primary"
+                                                value={f.label}
+                                                onChange={(e) => handleRenameFloor(f.id, e.target.value)}
+                                                onBlur={() => setEditingFloorId(null)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') setEditingFloorId(null);
+                                                    e.stopPropagation();
+                                                }}
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                        ) : (
+                                            <>
+                                                {f.label}
+                                                {currentFloor === f.id && (
+                                                    <button
+                                                        onClick={(e) => handleDeleteFloor(e, f.id)}
+                                                        className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors ml-1"
+                                                        title="Delete Floor"
+                                                    >
+                                                        <X size={8} />
+                                                    </button>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                ))}
+                                <button
+                                    onClick={handleAddFloor}
+                                    className="h-[85%] w-8 flex items-center justify-center rounded-b-lg bg-slate-300/50 dark:bg-white/5 hover:bg-primary hover:text-white text-slate-500 transition-colors"
+                                    title="Add Floor"
+                                >
+                                    <Plus size={12} />
+                                </button>
+                            </div>
                         </main>
 
                         {isRightSidebarOpen && (
