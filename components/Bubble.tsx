@@ -14,6 +14,7 @@ interface BubbleProps {
     snapPixelUnit: number;
     getSnappedPosition?: (room: Room, excludeId: string) => { x: number, y: number };
     onLinkToggle?: (id: string) => void;
+    onDragStart?: () => void;
     isLinkingSource?: boolean;
     pixelsPerMeter: number;
     floors: { id: number; label: string }[];
@@ -35,7 +36,7 @@ const calculatePolygonArea = (points: Point[]): number => {
 
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd
+    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [resizeHandle, setResizeHandle] = useState<string | null>(null);
@@ -256,6 +257,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
     const handleResizeStart = (e: React.MouseEvent, handle: string) => {
         e.stopPropagation();
+        onDragStart?.();
         setResizeHandle(handle);
         startDragState.current = {
             startX: e.clientX, startY: e.clientY,
@@ -273,6 +275,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         if (selectedVertices.size > 0 && !e.ctrlKey && !e.shiftKey) setSelectedVertices(new Set());
 
         onSelect(room.id, e.shiftKey || e.ctrlKey || e.metaKey);
+        onDragStart?.();
         setIsDragging(true);
         startDragState.current = {
             startX: e.clientX, startY: e.clientY,
@@ -283,6 +286,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     // Polygon Handling
     const handleVertexDown = (e: React.MouseEvent, index: number) => {
         e.stopPropagation();
+        onDragStart?.();
         setDraggedVertex(index);
 
         // Multi-selection logic
@@ -346,6 +350,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
     const handleEdgeDown = (e: React.MouseEvent, index: number) => {
         e.stopPropagation();
+        onDragStart?.();
 
         // Clear vertex selection when starting to drag an edge
         if (selectedVertices.size > 0) setSelectedVertices(new Set());

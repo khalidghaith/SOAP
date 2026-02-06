@@ -10,7 +10,7 @@ import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
 import {
-    Plus, Layers, Map as MapIcon, Box, Download, Settings2,
+    Plus, Layers, Map as MapIcon, Box, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties,
     LandPlot, ChevronRight, ChevronLeft, Trash2, Key, X, Settings, LayoutTemplate,
     Zap, Magnet, Grid, Ruler, Moon, Sun, Maximize, ChevronUp, ChevronDown, Activity
@@ -27,12 +27,24 @@ const PIXELS_PER_METER = 20;
 type ViewMode = 'EDITOR' | 'CANVAS';
 
 export default function App() {
+    // Load autosave data
+    const [initialData] = useState(() => {
+        if (typeof window === 'undefined') return null;
+        try {
+            const saved = localStorage.getItem('A_ZONE_PROJECT_AUTOSAVE');
+            return saved ? JSON.parse(saved) : null;
+        } catch (e) {
+            console.error("Failed to load autosave", e);
+            return null;
+        }
+    });
+
     // App State
     const [viewMode, setViewMode] = useState<ViewMode>('EDITOR');
-    const [projectName, setProjectName] = useState("New Project");
-    const [rooms, setRooms] = useState<Room[]>([]);
-    const [connections, setConnections] = useState<Connection[]>([]);
-    const [zoneColors, setZoneColors] = useState<Record<string, ZoneColor>>(ZONE_COLORS);
+    const [projectName, setProjectName] = useState(initialData?.projectName || "New Project");
+    const [rooms, setRooms] = useState<Room[]>(initialData?.rooms || []);
+    const [connections, setConnections] = useState<Connection[]>(initialData?.connections || []);
+    const [zoneColors, setZoneColors] = useState<Record<string, ZoneColor>>(initialData?.zoneColors || ZONE_COLORS);
 
     // API Key State
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('A_ZONE_GEMINI_KEY') || import.meta.env.VITE_GEMINI_API_KEY || "");
@@ -40,7 +52,7 @@ export default function App() {
     const [showExportModal, setShowExportModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
 
-    const [appSettings, setAppSettings] = useState<AppSettings>({
+    const [appSettings, setAppSettings] = useState<AppSettings>(initialData?.appSettings || {
         zoneTransparency: 0.5,
         zonePadding: 10,
         strokeWidth: 2,
@@ -53,8 +65,8 @@ export default function App() {
     });
 
     // View State
-    const [floors, setFloors] = useState(FLOORS);
-    const [currentFloor, setCurrentFloor] = useState(0);
+    const [floors, setFloors] = useState(initialData?.floors || FLOORS);
+    const [currentFloor, setCurrentFloor] = useState(initialData?.currentFloor || 0);
     const [scale, setScale] = useState(1);
     const [offset, setOffset] = useState<Point>({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     const [is3DMode, setIs3DMode] = useState(false);
@@ -93,6 +105,105 @@ export default function App() {
             localStorage.setItem('A_ZONE_DARK_MODE', 'false');
         }
     }, [darkMode]);
+
+    // Auto-save
+    useEffect(() => {
+        const saveData = {
+            projectName,
+            rooms,
+            connections,
+            zoneColors,
+            appSettings,
+            floors,
+            currentFloor
+        };
+        localStorage.setItem('A_ZONE_PROJECT_AUTOSAVE', JSON.stringify(saveData));
+    }, [projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor]);
+
+    // --- History System ---
+    const [history, setHistory] = useState<{
+        rooms: Room[];
+        connections: Connection[];
+        floors: typeof floors;
+        zoneColors: Record<string, ZoneColor>;
+        projectName: string;
+    }[]>([]);
+    const [future, setFuture] = useState<{
+        rooms: Room[];
+        connections: Connection[];
+        floors: typeof floors;
+        zoneColors: Record<string, ZoneColor>;
+        projectName: string;
+    }[]>([]);
+
+    const addToHistory = useCallback(() => {
+        setHistory(prev => {
+            const newHistory = [...prev, { rooms, connections, floors, zoneColors, projectName }];
+            if (newHistory.length > 50) newHistory.shift();
+            return newHistory;
+        });
+        setFuture([]);
+    }, [rooms, connections, floors, zoneColors, projectName]);
+
+    const undo = useCallback(() => {
+        if (history.length === 0) return;
+        const previous = history[history.length - 1];
+        const newHistory = history.slice(0, -1);
+
+        setFuture(prev => [{ rooms, connections, floors, zoneColors, projectName }, ...prev]);
+
+        setRooms(previous.rooms);
+        setConnections(previous.connections);
+        setFloors(previous.floors);
+        setZoneColors(previous.zoneColors);
+        setProjectName(previous.projectName);
+        setHistory(newHistory);
+    }, [history, rooms, connections, floors, zoneColors, projectName]);
+
+    const redo = useCallback(() => {
+        if (future.length === 0) return;
+        const next = future[0];
+        const newFuture = future.slice(1);
+
+        setHistory(prev => [...prev, { rooms, connections, floors, zoneColors, projectName }]);
+
+        setRooms(next.rooms);
+        setConnections(next.connections);
+        setFloors(next.floors);
+        setZoneColors(next.zoneColors);
+        setProjectName(next.projectName);
+        setFuture(newFuture);
+    }, [future, rooms, connections, floors, zoneColors, projectName]);
+
+    // Keyboard Shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                if (e.shiftKey) redo();
+                else undo();
+                e.preventDefault();
+            } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                redo();
+                e.preventDefault();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [undo, redo]);
+
+    const handleResetProject = () => {
+        if (window.confirm("Are you sure you want to reset the project? This will clear all data and cannot be undone.")) {
+            localStorage.removeItem('A_ZONE_PROJECT_AUTOSAVE');
+            setProjectName("New Project");
+            setRooms([]);
+            setConnections([]);
+            setFloors(FLOORS);
+            setCurrentFloor(0);
+            setZoneColors(ZONE_COLORS);
+            setHistory([]);
+            setFuture([]);
+        }
+    };
 
     // --- Utilities ---
     const getSnappedPosition = useCallback((room: Room, excludeId: string) => {
@@ -277,6 +388,7 @@ export default function App() {
     };
 
     const handleAddFloor = () => {
+        addToHistory();
         const newId = floors.length > 0 ? Math.max(...floors.map(f => f.id)) + 1 : 0;
         const newFloor = { id: newId, label: `Floor ${newId}` };
         setFloors([...floors, newFloor]);
@@ -285,6 +397,7 @@ export default function App() {
 
     const handleDeleteFloor = (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
+        addToHistory();
         // Return rooms to inventory
         setRooms(prev => prev.map(r => r.floor === id ? { ...r, isPlaced: false } : r));
 
@@ -361,6 +474,7 @@ export default function App() {
     };
 
     const handleAddZone = (name: string) => {
+        addToHistory();
         if (zoneColors[name] || !name.trim()) return;
         // Assign a random color style from existing ones for now
         const styles = Object.values(ZONE_COLORS);
@@ -369,15 +483,50 @@ export default function App() {
     };
 
     const handleAutoArrange = () => {
+        addToHistory();
         setRooms(prev => arrangeRooms(prev, currentFloor));
     };
 
     const handleClearCanvas = () => {
+        addToHistory();
         if (window.confirm("Are you sure you want to clear the canvas and return all spaces to the inventory?")) {
             setRooms(prev => prev.map(r => ({ ...r, isPlaced: false })));
             setSelectedRoomIds(new Set());
             setSelectedZone(null);
         }
+    };
+
+    const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const content = event.target?.result as string;
+                const data = JSON.parse(content);
+                
+                if (data.rooms && Array.isArray(data.rooms)) {
+                    addToHistory();
+                    if (data.projectName) setProjectName(data.projectName);
+                    setRooms(data.rooms);
+                    if (data.connections) setConnections(data.connections);
+                    if (data.floors) setFloors(data.floors);
+                    if (data.currentFloor !== undefined) setCurrentFloor(data.currentFloor);
+                    if (data.zoneColors) setZoneColors(data.zoneColors);
+                    if (data.appSettings) setAppSettings(data.appSettings);
+                    
+                    setViewMode('CANVAS');
+                } else {
+                    alert("Invalid project file.");
+                }
+            } catch (error) {
+                console.error("Failed to import project:", error);
+                alert("Failed to import project file.");
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = ''; 
     };
 
     // --- Room Handlers ---
@@ -405,6 +554,7 @@ export default function App() {
     }, []);
 
     const deleteRoom = useCallback((id: string) => {
+        addToHistory();
         setRooms(prev => prev.filter(r => r.id !== id));
         setSelectedRoomIds(prev => {
             const next = new Set(prev);
@@ -414,6 +564,7 @@ export default function App() {
     }, []);
 
     const addRoom = useCallback((roomData: Partial<Room>) => {
+        addToHistory();
         const area = roomData.area || 15;
         const side = Math.sqrt(area) * PIXELS_PER_METER;
         const newRoom: Room = {
@@ -475,6 +626,7 @@ export default function App() {
     }, []);
 
     const renameZone = useCallback((oldZone: string, newZone: string) => {
+        addToHistory();
         if (!newZone.trim()) return;
         setRooms(prev => prev.map(r => r.zone === oldZone ? { ...r, zone: newZone } : r));
         setSelectedZone(newZone);
@@ -543,6 +695,21 @@ export default function App() {
                         </button>
                         <button onClick={() => setShowSettingsModal(true)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5 transition-all" title="Settings">
                             <Settings size={16} />
+                        </button>
+                    </div>
+
+                    <div className="h-8 w-px bg-slate-200/60 dark:bg-dark-border mx-1" />
+
+                    <div className="flex items-center gap-1">
+                        <button onClick={undo} disabled={history.length === 0} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30 transition-all" title="Undo (Ctrl+Z)">
+                            <Undo2 size={16} />
+                        </button>
+                        <button onClick={redo} disabled={future.length === 0} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30 transition-all" title="Redo (Ctrl+Y)">
+                            <Redo2 size={16} />
+                        </button>
+                        <div className="w-px h-4 bg-slate-200 dark:bg-dark-border mx-1" />
+                        <button onClick={handleResetProject} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all" title="Reset Project">
+                            <RotateCcw size={16} />
                         </button>
                     </div>
 
@@ -631,6 +798,11 @@ export default function App() {
                             >
                                 <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" /> Export
                             </button>
+
+                            <label className="h-10 px-6 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border text-slate-700 dark:text-gray-300 rounded-xl text-[10px] font-black uppercase tracking-widest hover:border-orange-500 hover:text-orange-600 transition-all duration-300 flex items-center gap-2.5 cursor-pointer group">
+                                <Upload size={16} className="group-hover:-translate-y-0.5 transition-transform" /> Import
+                                <input type="file" accept=".json" className="hidden" onChange={handleImportProject} />
+                            </label>
                         </>
                     )}
                 </div>
@@ -648,6 +820,7 @@ export default function App() {
                         setRooms={setRooms}
                         zoneColors={zoneColors}
                         onAddZone={handleAddZone}
+                        onInteractionStart={addToHistory}
                     />
                 ) : (
                     <>
@@ -741,7 +914,7 @@ export default function App() {
                                     scale={scale}
                                     onZoneDrag={handleZoneDrag}
                                     onSelectZone={handleZoneClick}
-                                    onDragStart={() => setIsZoneDragging(true)}
+                                    onDragStart={() => { setIsZoneDragging(true); addToHistory(); }}
                                     onDragEnd={() => setIsZoneDragging(false)}
                                     appSettings={appSettings}
                                     zoneColors={zoneColors}
@@ -837,6 +1010,7 @@ export default function App() {
                                         appSettings={appSettings}
                                         zoneColors={zoneColors}
                                         onDragEnd={handleBubbleDragEnd}
+                                        onDragStart={addToHistory}
                                     />
                                 ))}
                             </div>
@@ -1048,7 +1222,7 @@ export default function App() {
                 <ExportModal
                     onClose={() => setShowExportModal(false)}
                     onExport={(format) => {
-                        handleExport(format, projectName, rooms, connections, currentFloor, darkMode, zoneColors);
+                        handleExport(format, projectName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings);
                         setShowExportModal(false);
                     }}
                 />

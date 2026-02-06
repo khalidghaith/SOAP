@@ -1,8 +1,8 @@
-import { Room, Connection, Point, ZoneColor } from '../types';
+import { Room, Connection, Point, ZoneColor, AppSettings } from '../types';
 import { downloadDXF } from './dxf';
 import { getConvexHull, createRoundedPath } from './geometry';
 
-export type ExportFormat = 'png' | 'jpeg' | 'svg' | 'dxf';
+export type ExportFormat = 'png' | 'jpeg' | 'svg' | 'dxf' | 'json';
 const PIXELS_PER_METER = 20;
 
 export const handleExport = async (
@@ -12,8 +12,28 @@ export const handleExport = async (
     connections: Connection[],
     currentFloor: number,
     darkMode: boolean,
-    zoneColors: Record<string, ZoneColor>
+    zoneColors: Record<string, ZoneColor>,
+    floors: { id: number; label: string }[],
+    appSettings: AppSettings
 ) => {
+    if (format === 'json') {
+        const data = {
+            version: 1,
+            timestamp: new Date().toISOString(),
+            projectName,
+            rooms,
+            connections,
+            floors,
+            currentFloor,
+            zoneColors,
+            appSettings
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        triggerDownload(url, `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`);
+        return;
+    }
+
     if (format === 'dxf') {
         downloadDXF(projectName, rooms);
         return;

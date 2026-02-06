@@ -17,10 +17,11 @@ interface ProgramEditorProps {
     setRooms: (rooms: Room[]) => void;
     zoneColors: Record<string, ZoneColor>;
     onAddZone: (name: string) => void;
+    onInteractionStart?: () => void;
 }
 
 export const ProgramEditor: React.FC<ProgramEditorProps> = ({
-    rooms, updateRoom, deleteRoom, addRoom, apiKey, onSaveApiKey, setRooms, zoneColors, onAddZone
+    rooms, updateRoom, deleteRoom, addRoom, apiKey, onSaveApiKey, setRooms, zoneColors, onAddZone, onInteractionStart
 }) => {
     const [showAiModal, setShowAiModal] = useState(false);
     const [aiPrompt, setAiPrompt] = useState("");
@@ -117,6 +118,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                     className="w-full bg-transparent font-bold text-slate-700 dark:text-gray-200 text-sm focus:outline-none focus:text-orange-600 transition-colors border-b border-transparent focus:border-orange-500/20"
                                                     value={room.name}
                                                     onChange={(e) => updateRoom(room.id, { name: e.target.value })}
+                                                    onFocus={onInteractionStart}
                                                     placeholder="Space Name"
                                                 />
                                             </td>
@@ -127,6 +129,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                         className="w-20 bg-slate-100/50 dark:bg-white/5 rounded-lg px-3 py-2 text-sm font-black text-slate-600 dark:text-gray-300 focus:outline-none focus:bg-white dark:focus:bg-white/10 focus:ring-1 focus:ring-orange-500 transition-all text-right"
                                                         value={room.area}
                                                         onChange={(e) => updateRoom(room.id, { area: Number(e.target.value) })}
+                                                        onFocus={onInteractionStart}
                                                     />
                                                 </div>
                                             </td>
@@ -136,6 +139,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                         className={`w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider focus:outline-none cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-white/20 focus:border-orange-500 transition-all ${zoneColors[room.zone]?.bg} ${zoneColors[room.zone]?.text}`}
                                                         value={room.zone}
                                                         onChange={(e) => updateRoom(room.id, { zone: e.target.value })}
+                                                        onFocus={onInteractionStart}
                                                     >
                                                         {Object.keys(zoneColors).map(z => <option key={z} value={z}>{z}</option>)}
                                                     </select>
