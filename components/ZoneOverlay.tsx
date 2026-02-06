@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Room, ZONE_COLORS, Point, AppSettings } from '../types';
+import { Room, Point, AppSettings, ZoneColor } from '../types';
 import { getConvexHull, createRoundedPath } from '../utils/geometry';
 
 interface ZoneOverlayProps {
@@ -11,9 +11,10 @@ interface ZoneOverlayProps {
     onDragStart?: () => void;
     onDragEnd?: () => void;
     appSettings: AppSettings;
+    zoneColors: Record<string, ZoneColor>;
 }
 
-export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, scale, onZoneDrag, onSelectZone, onDragStart, onDragEnd, appSettings }) => {
+export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, scale, onZoneDrag, onSelectZone, onDragStart, onDragEnd, appSettings, zoneColors }) => {
     const [draggedZone, setDraggedZone] = useState<string | null>(null);
     const lastMousePos = useRef<{ x: number, y: number } | null>(null);
 
@@ -62,10 +63,10 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
             return {
                 zone,
                 path: d,
-                color: ZONE_COLORS[zone] || ZONE_COLORS['Default']
+                color: zoneColors[zone] || zoneColors['Default']
             };
         }).filter(Boolean);
-    }, [rooms, currentFloor, scale, appSettings.cornerRadius, appSettings.zonePadding]);
+    }, [rooms, currentFloor, scale, appSettings.cornerRadius, appSettings.zonePadding, zoneColors]);
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Room, ZONE_COLORS, Point, DiagramStyle, AppSettings } from '../types';
+import { Room, Point, DiagramStyle, AppSettings, ZoneColor } from '../types';
 import { Pencil, X, LandPlot, Link as LinkIcon, ArrowUpFromLine, ArrowDownToLine, Box } from 'lucide-react';
 import { createRoundedPath } from '../utils/geometry';
 
@@ -18,6 +18,8 @@ interface BubbleProps {
     pixelsPerMeter: number;
     floors: { id: number; label: string }[];
     appSettings: AppSettings;
+    zoneColors: Record<string, ZoneColor>;
+    onDragEnd?: (room: Room, e: MouseEvent) => void;
 }
 
 // area utility
@@ -33,7 +35,7 @@ const calculatePolygonArea = (points: Point[]): number => {
 
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings
+    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [resizeHandle, setResizeHandle] = useState<string | null>(null);
@@ -56,8 +58,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     });
 
     const getZoneStyle = (z: string) => {
-        const key = Object.keys(ZONE_COLORS).find(k => z.toLowerCase().includes(k.toLowerCase()));
-        return key ? ZONE_COLORS[key] : ZONE_COLORS['Default'];
+        const key = Object.keys(zoneColors).find(k => z.toLowerCase().includes(k.toLowerCase()));
+        return key ? zoneColors[key] : zoneColors['Default'];
     };
     const visualStyle = getZoneStyle(room.zone);
 
@@ -229,7 +231,10 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             }
         };
 
-        const handleMouseUp = () => {
+        const handleMouseUp = (e: MouseEvent) => {
+            if (isDragging && onDragEnd) {
+                onDragEnd(room, e);
+            }
             setIsDragging(false);
             setResizeHandle(null);
             setDraggedVertex(null);
@@ -247,7 +252,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isDragging, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition]);
+    }, [isDragging, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd]);
 
     const handleResizeStart = (e: React.MouseEvent, handle: string) => {
         e.stopPropagation();
@@ -414,7 +419,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             style={{ ...pos, transform: `translate(-50%, -50%) scale(${1 / zoomScale})` }}
         >
             <div
-                className="w-3 h-3 bg-white border-2 border-primary rounded-full hover:bg-primary transition-all cursor-pointer shadow-lg active:scale-150"
+                className="w-3 h-3 bg-white border-2 border-orange-600 rounded-full hover:bg-orange-600 transition-all cursor-pointer shadow-lg active:scale-150"
                 style={{ cursor }}
                 onMouseDown={(e) => handleResizeStart(e, cursor.replace('-resize', ''))}
             />
@@ -461,7 +466,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                         x1={p.x} y1={p.y} x2={next.x} y2={next.y}
                                         stroke="transparent"
                                         strokeWidth={10 / zoomScale}
-                                        className="cursor-move hover:stroke-primary/20 transition-colors"
+                                        className="cursor-move hover:stroke-orange-600/20 transition-colors"
                                         onMouseEnter={() => setHoveredEdge(i)}
                                         onMouseLeave={() => setHoveredEdge(null)}
                                         onMouseDown={(e) => handleEdgeDown(e, i)}
@@ -473,7 +478,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         {isSelected && activePoints.map((p, i) => (
                             <div
                                 key={`v-${i}`}
-                                className={`absolute border rounded-full z-[80] hover:scale-150 ${isInteracting ? '' : 'transition-all'} cursor-crosshair ${selectedVertices.has(i) ? 'bg-primary border-white scale-125' : 'bg-white border-primary'}`}
+                                className={`absolute border rounded-full z-[80] hover:scale-150 ${isInteracting ? '' : 'transition-all'} cursor-crosshair ${selectedVertices.has(i) ? 'bg-orange-600 border-white scale-125' : 'bg-white border-orange-600'}`}
                                 style={{
                                     left: p.x, top: p.y,
                                     width: 10 / zoomScale, height: 10 / zoomScale,
@@ -507,10 +512,24 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 {/* Dimensions Display during Resize */}
                 {resizeHandle && (
                     <>
-                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md pointer-events-none whitespace-nowrap backdrop-blur-sm z-[100]" style={{ transform: `scale(${1 / zoomScale})` }}>
+                        <div 
+                            className="absolute top-0 left-1/2 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md pointer-events-none whitespace-nowrap backdrop-blur-sm z-[100]" 
+                            style={{ 
+                                transform: `translate(-50%, -100%) scale(${1 / zoomScale})`,
+                                transformOrigin: 'bottom center',
+                                marginTop: `${-4 / zoomScale}px`
+                            }}
+                        >
                             {(room.width / pixelsPerMeter).toFixed(2)}m
                         </div>
-                        <div className="absolute top-1/2 -left-8 -translate-y-1/2 -translate-x-full bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md pointer-events-none whitespace-nowrap backdrop-blur-sm z-[100]" style={{ transform: `scale(${1 / zoomScale})` }}>
+                        <div 
+                            className="absolute top-1/2 left-0 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md pointer-events-none whitespace-nowrap backdrop-blur-sm z-[100]" 
+                            style={{ 
+                                transform: `translate(-100%, -50%) scale(${1 / zoomScale})`,
+                                transformOrigin: 'right center',
+                                marginLeft: `${-4 / zoomScale}px`
+                            }}
+                        >
                             {(room.height / pixelsPerMeter).toFixed(2)}m
                         </div>
                     </>
@@ -521,57 +540,52 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     className="absolute top-0 left-0 flex flex-col items-center justify-center pointer-events-none"
                     style={{ width: room.width, height: room.height }}
                 >
-                    <div style={{ transform: `scale(${1 / zoomScale})`, fontSize: appSettings.fontSize }} className={`flex flex-col items-center p-2 text-center ${visualStyle.text} ${diagramStyle.fontFamily}`}>
-                        <span className="font-bold text-xs whitespace-nowrap">{room.name}</span>
-                        <span className="text-[10px] opacity-60 font-mono">{room.area}m²</span>
-                    </div>
-                </div>
-
-                {/* Mini Toolset */}
-                <div
-                    className={`absolute top-0 right-0 -mr-8 transition-opacity origin-top-left ${isSelected ? 'opacity-100' : 'opacity-0'}`}
-                    style={{ transform: `scale(${1 / zoomScale})` }}
-                >
-                    <button onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} className="p-1 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-full shadow-sm hover:text-primary dark:text-gray-300">
-                        {showTools ? <X size={12} /> : <Pencil size={12} />}
-                    </button>
-                    {showTools && (
-                        <div className="absolute top-8 right-0 bg-white dark:bg-dark-surface shadow-2xl rounded-xl border border-slate-200 dark:border-dark-border flex flex-col p-1 z-50 min-w-[140px] slide-in-bottom">
-                            {room.polygon ? (
-                                <button onClick={(e) => {
-                                    e.stopPropagation();
-                                    // Convert to Bubble
-                                    // Calculate area to maintain size
-                                    // Area = width * height (approx)
-                                    // We have room.area (m2).
-                                    // W = sqrt(area * 400) (since 20px/m, 400px2/m2)
-                                    const side = Math.sqrt(room.area * 400);
-                                    updateRoom(room.id, { polygon: null, width: side, height: side });
-                                    setShowTools(false);
-                                }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
-                                    <Box size={14} className="text-primary" /> Convert to Bubble
-                                </button>
-                            ) : (
-                                <button onClick={(e) => {
-                                    e.stopPropagation();
-                                    updateRoom(room.id, { polygon: activePoints });
-                                    setShowTools(false);
-                                }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
-                                    <LandPlot size={14} className="text-primary" /> Convert to Polygon
-                                </button>
-                            )}
-
-                            <button onClick={() => onLinkToggle?.(room.id)} className={`p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap rounded-lg transition-colors ${isLinkingSource ? 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400' : 'text-slate-600 dark:text-gray-300'}`}>
-                                <LinkIcon size={14} className={isLinkingSource ? 'text-yellow-500' : 'text-primary'} />
-                                {isLinkingSource ? 'Cancel Linking' : 'Link Logic'}
+                    <div style={{ transform: `scale(${1 / zoomScale})` }} className="relative flex flex-col items-center">
+                        
+                        {/* Edit Button - Centered above text */}
+                        <div className={`mb-1 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0'} pointer-events-auto`}>
+                             <button onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} className="p-1.5 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-full shadow-sm hover:text-orange-600 dark:text-gray-300 flex items-center justify-center hover:scale-110 transition-all">
+                                {showTools ? <X size={12} /> : <Pencil size={12} />}
                             </button>
-                            <div className="h-px bg-slate-100 dark:bg-white/10 my-1 mx-1" />
-                            <div className="flex justify-between px-1">
-                                <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx < floors.length - 1) updateRoom(room.id, { floor: floors[idx + 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Up"><ArrowUpFromLine size={14} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx > 0) updateRoom(room.id, { floor: floors[idx - 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-primary dark:hover:text-primary rounded-lg" title="Level Down"><ArrowDownToLine size={14} /></button>
-                            </div>
+                             {showTools && (
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-white dark:bg-dark-surface shadow-2xl rounded-xl border border-slate-200 dark:border-dark-border flex flex-col p-1 z-50 min-w-[140px] slide-in-bottom">
+                                    {room.polygon ? (
+                                        <button onClick={(e) => {
+                                            e.stopPropagation();
+                                            const side = Math.sqrt(room.area * 400);
+                                            updateRoom(room.id, { polygon: null, width: side, height: side });
+                                            setShowTools(false);
+                                        }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
+                                            <Box size={14} className="text-orange-600" /> Convert to Bubble
+                                        </button>
+                                    ) : (
+                                        <button onClick={(e) => {
+                                            e.stopPropagation();
+                                            updateRoom(room.id, { polygon: activePoints });
+                                            setShowTools(false);
+                                        }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
+                                            <LandPlot size={14} className="text-orange-600" /> Convert to Polygon
+                                        </button>
+                                    )}
+
+                                    <button onClick={() => onLinkToggle?.(room.id)} className={`p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap rounded-lg transition-colors ${isLinkingSource ? 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400' : 'text-slate-600 dark:text-gray-300'}`}>
+                                        <LinkIcon size={14} className={isLinkingSource ? 'text-yellow-500' : 'text-orange-600'} />
+                                        {isLinkingSource ? 'Cancel Linking' : 'Link Logic'}
+                                    </button>
+                                    <div className="h-px bg-slate-100 dark:bg-white/10 my-1 mx-1" />
+                                    <div className="flex justify-between px-1">
+                                        <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx < floors.length - 1) updateRoom(room.id, { floor: floors[idx + 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-600 rounded-lg" title="Level Up"><ArrowUpFromLine size={14} /></button>
+                                        <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx > 0) updateRoom(room.id, { floor: floors[idx - 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-600 rounded-lg" title="Level Down"><ArrowDownToLine size={14} /></button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    )}
+
+                        <div style={{ fontSize: appSettings.fontSize }} className={`flex flex-col items-center p-2 text-center ${visualStyle.text} ${diagramStyle.fontFamily}`}>
+                            <span className="font-bold text-xs whitespace-nowrap">{room.name}</span>
+                            <span className="text-[10px] opacity-60 font-mono">{room.area}m²</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

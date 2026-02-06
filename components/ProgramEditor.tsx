@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Room, ZONE_COLORS } from '../types';
+import { Room, ZoneColor } from '../types';
 import {
     X, Search, Trash2, LayoutGrid,
     ChevronDown, Plus, Wand2
@@ -15,10 +15,12 @@ interface ProgramEditorProps {
     apiKey: string;
     onSaveApiKey: (key: string) => void;
     setRooms: (rooms: Room[]) => void;
+    zoneColors: Record<string, ZoneColor>;
+    onAddZone: (name: string) => void;
 }
 
 export const ProgramEditor: React.FC<ProgramEditorProps> = ({
-    rooms, updateRoom, deleteRoom, addRoom, apiKey, onSaveApiKey, setRooms
+    rooms, updateRoom, deleteRoom, addRoom, apiKey, onSaveApiKey, setRooms, zoneColors, onAddZone
 }) => {
     const [showAiModal, setShowAiModal] = useState(false);
     const [aiPrompt, setAiPrompt] = useState("");
@@ -70,13 +72,13 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                     <div className="flex items-center justify-between mb-6">
                         <div className="relative flex-1 max-w-md">
                             <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input className="w-full pl-12 pr-4 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary focus:outline-none shadow-sm dark:text-gray-200" placeholder="Filter spaces..." />
+                            <input className="w-full pl-12 pr-4 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none shadow-sm dark:text-gray-200" placeholder="Filter spaces..." />
                         </div>
                         <div className="flex gap-3">
-                            <button onClick={() => setShowAiModal(true)} className="px-4 py-3 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-800/30 rounded-xl text-xs font-bold hover:bg-purple-100 dark:hover:bg-purple-900/30 flex items-center gap-2 uppercase tracking-wider transition-colors">
+                            <button onClick={() => setShowAiModal(true)} className="px-4 py-3 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/30 rounded-xl text-xs font-bold hover:bg-orange-100 dark:hover:bg-orange-900/30 flex items-center gap-2 uppercase tracking-wider transition-colors">
                                 <Wand2 size={16} /> AI Suggest
                             </button>
-                            <button onClick={() => addRoom({ name: 'New Space', area: 15, zone: 'Default' })} className="px-5 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border text-slate-700 dark:text-gray-300 rounded-xl text-xs font-bold hover:border-primary hover:text-primary flex items-center gap-2 uppercase tracking-wider shadow-sm transition-all">
+                            <button onClick={() => addRoom({ name: 'New Space', area: 15, zone: 'Default' })} className="px-5 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border text-slate-700 dark:text-gray-300 rounded-xl text-xs font-bold hover:border-orange-500 hover:text-orange-600 flex items-center gap-2 uppercase tracking-wider shadow-sm transition-all">
                                 <Plus size={16} /> Add Manual Space
                             </button>
                         </div>
@@ -100,7 +102,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                         <tr>
                                             <td colSpan={5} className="py-20 text-center text-slate-400">
                                                 <div className="flex flex-col items-center gap-2">
-                                                    <LayoutGrid size={40} className="mb-2 opacity-20" />
+                                                    <LayoutGrid size={40} className="mb-2 opacity-20 text-orange-500" />
                                                     <p className="text-sm font-medium">No spaces defined yet.</p>
                                                     <button onClick={() => addRoom({ name: 'Living Room', area: 25, zone: 'Public' })} className="text-primary text-xs font-bold hover:underline">Add your first space</button>
                                                 </div>
@@ -112,7 +114,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                             <td className="px-8 py-4 text-xs font-mono text-slate-400">{idx + 1}</td>
                                             <td className="px-8 py-4">
                                                 <input
-                                                    className="w-full bg-transparent font-bold text-slate-700 dark:text-gray-200 text-sm focus:outline-none focus:text-primary transition-colors border-b border-transparent focus:border-primary/20"
+                                                    className="w-full bg-transparent font-bold text-slate-700 dark:text-gray-200 text-sm focus:outline-none focus:text-orange-600 transition-colors border-b border-transparent focus:border-orange-500/20"
                                                     value={room.name}
                                                     onChange={(e) => updateRoom(room.id, { name: e.target.value })}
                                                     placeholder="Space Name"
@@ -122,7 +124,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                 <div className="flex items-center gap-2">
                                                     <input
                                                         type="number"
-                                                        className="w-20 bg-slate-100/50 dark:bg-white/5 rounded-lg px-3 py-2 text-sm font-black text-slate-600 dark:text-gray-300 focus:outline-none focus:bg-white dark:focus:bg-white/10 focus:ring-1 focus:ring-primary transition-all text-right"
+                                                        className="w-20 bg-slate-100/50 dark:bg-white/5 rounded-lg px-3 py-2 text-sm font-black text-slate-600 dark:text-gray-300 focus:outline-none focus:bg-white dark:focus:bg-white/10 focus:ring-1 focus:ring-orange-500 transition-all text-right"
                                                         value={room.area}
                                                         onChange={(e) => updateRoom(room.id, { area: Number(e.target.value) })}
                                                     />
@@ -131,13 +133,13 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                             <td className="px-8 py-4">
                                                 <div className="relative">
                                                     <select
-                                                        className={`w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider focus:outline-none cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-white/20 focus:border-primary transition-all ${ZONE_COLORS[room.zone]?.bg} ${ZONE_COLORS[room.zone]?.text}`}
+                                                        className={`w-full appearance-none pl-3 pr-8 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider focus:outline-none cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-white/20 focus:border-orange-500 transition-all ${zoneColors[room.zone]?.bg} ${zoneColors[room.zone]?.text}`}
                                                         value={room.zone}
                                                         onChange={(e) => updateRoom(room.id, { zone: e.target.value })}
                                                     >
-                                                        {Object.keys(ZONE_COLORS).map(z => <option key={z} value={z}>{z}</option>)}
+                                                        {Object.keys(zoneColors).map(z => <option key={z} value={z}>{z}</option>)}
                                                     </select>
-                                                    <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${ZONE_COLORS[room.zone]?.text}`} />
+                                                    <ChevronDown size={12} className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${zoneColors[room.zone]?.text}`} />
                                                 </div>
                                             </td>
                                             <td className="px-8 py-4 text-center">
@@ -174,7 +176,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
                             <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">Count</span>
-                            <span className="text-sm font-black text-primary">{rooms.length}</span>
+                            <span className="text-sm font-black text-orange-600">{rooms.length}</span>
                         </div>
                     </div>
 
@@ -189,7 +191,18 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
 
                     {/* Zone Distribution */}
                     <div>
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Zone Distribution</h3>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Zone Distribution</h3>
+                            <button 
+                                onClick={() => {
+                                    const name = prompt("Enter new zone name:");
+                                    if (name) onAddZone(name);
+                                }}
+                                className="px-3 py-2 rounded-lg text-[10px] font-bold border border-dashed border-slate-300 dark:border-white/20 text-slate-400 hover:text-orange-600 hover:border-orange-400 transition-all flex items-center justify-center gap-1"
+                            >
+                                <Plus size={12} /> New
+                            </button>
+                        </div>
                         <div className="space-y-4">
                             {Object.entries(totalsByZone).map(([zone, area]) => (
                                 <div key={zone}>
@@ -199,7 +212,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                     </div>
                                     <div className="h-1.5 w-full bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
                                         <div
-                                            className={`h-full ${ZONE_COLORS[zone]?.bg.replace('bg-', 'bg-') || 'bg-slate-400'} ${ZONE_COLORS[zone]?.border?.replace('border-', 'bg-')} transition-all duration-1000`}
+                                            className={`h-full ${zoneColors[zone]?.bg.replace('bg-', 'bg-') || 'bg-slate-400'} ${zoneColors[zone]?.border?.replace('border-', 'bg-')} transition-all duration-1000`}
                                             style={{ width: `${((area as number) / (totalArea as number)) * 100}%` }}
                                         />
                                     </div>

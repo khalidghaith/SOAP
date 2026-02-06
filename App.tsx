@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings } from './types';
+import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { ApiKeyModal } from './components/ApiKeyModal';
@@ -8,10 +8,11 @@ import { ExportModal } from './components/ExportModal';
 import { SettingsModal } from './components/SettingsModal';
 import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport } from './utils/exportSystem';
+import { generateAiLayout } from './utils/aiLayout';
 import {
     Plus, Layers, Map as MapIcon, Box, Download, Settings2,
     TableProperties,
-    LandPlot, ChevronRight, ChevronLeft, Trash2, Key, X, Settings,
+    LandPlot, ChevronRight, ChevronLeft, Trash2, Key, X, Settings, LayoutTemplate, Loader2,
     Zap, Magnet, Grid, Ruler, Moon, Sun, Maximize, ChevronUp, ChevronDown, Activity
 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ export default function App() {
     const [projectName, setProjectName] = useState("New Project");
     const [rooms, setRooms] = useState<Room[]>([]);
     const [connections, setConnections] = useState<Connection[]>([]);
+    const [zoneColors, setZoneColors] = useState<Record<string, ZoneColor>>(ZONE_COLORS);
 
     // API Key State
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('A_ZONE_GEMINI_KEY') || import.meta.env.VITE_GEMINI_API_KEY || "");
@@ -73,6 +75,7 @@ export default function App() {
     const [snapGuides, setSnapGuides] = useState<{ x?: number, y?: number } | null>(null);
     const [isZoneDragging, setIsZoneDragging] = useState(false);
     const [editingFloorId, setEditingFloorId] = useState<number | null>(null);
+    const [isAiLayoutLoading, setIsAiLayoutLoading] = useState(false);
 
     // Dark Mode Local State
     const [darkMode, setDarkMode] = useState(() => {
@@ -158,6 +161,7 @@ export default function App() {
     // Canvas Refs
     const mainRef = useRef<HTMLElement>(null);
     const isPanning = useRef(false);
+    const inventoryRef = useRef<HTMLElement>(null);
     const lastMousePos = useRef<Point>({ x: 0, y: 0 });
 
     // Update offset on resize to keep center
@@ -357,6 +361,46 @@ export default function App() {
         }
     };
 
+    const handleAddZone = (name: string) => {
+        if (zoneColors[name] || !name.trim()) return;
+        // Assign a random color style from existing ones for now
+        const styles = Object.values(ZONE_COLORS);
+        const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+        setZoneColors(prev => ({ ...prev, [name]: randomStyle }));
+    };
+
+    const handleAutoArrange = async () => {
+        if (!apiKey) {
+            setShowApiKeyModal(true);
+            return;
+        }
+
+        const roomsToArrange = rooms.filter(r => !r.isPlaced || r.floor === currentFloor);
+        if (roomsToArrange.length === 0) return;
+
+        setIsAiLayoutLoading(true);
+        try {
+            const layout = await generateAiLayout(roomsToArrange, apiKey);
+            setRooms(prev => prev.map(r => {
+                if (layout[r.id]) {
+                    return {
+                        ...r,
+                        x: layout[r.id].x,
+                        y: layout[r.id].y,
+                        isPlaced: true,
+                        floor: currentFloor
+                    };
+                }
+                return r;
+            }));
+        } catch (error) {
+            console.error("Layout generation failed", error);
+            alert("Failed to generate layout. Please check your API key.");
+        } finally {
+            setIsAiLayoutLoading(false);
+        }
+    };
+
     // --- Room Handlers ---
     const updateRoom = useCallback((id: string, updates: Partial<Room>) => {
         setRooms(prev => prev.map(r => {
@@ -457,6 +501,21 @@ export default function App() {
         setSelectedZone(newZone);
     }, []);
 
+    const handleBubbleDragEnd = useCallback((room: Room, e: MouseEvent) => {
+        if (inventoryRef.current) {
+            const rect = inventoryRef.current.getBoundingClientRect();
+            if (
+                e.clientX >= rect.left &&
+                e.clientX <= rect.right &&
+                e.clientY >= rect.top &&
+                e.clientY <= rect.bottom
+            ) {
+                updateRoom(room.id, { isPlaced: false });
+                setSelectedRoomIds(new Set());
+            }
+        }
+    }, [updateRoom]);
+
     // --- Render Helpers ---
     const selectedRoom = rooms.find(r => selectedRoomIds.has(r.id));
     const unplacedRooms = rooms.filter(r => !r.isPlaced);
@@ -470,12 +529,12 @@ export default function App() {
     const zoneArea = selectedZoneRooms.reduce((acc, r) => acc + r.area, 0);
 
     return (
-        <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-dark-bg overflow-hidden font-sans selection:bg-primary/20 transition-colors duration-300">
+        <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-dark-bg overflow-hidden font-sans selection:bg-orange-500/20 transition-colors duration-300">
             {/* Premium Header */}
             <header className="h-16 bg-white/70 dark:bg-dark-surface/70 backdrop-blur-xl border-b border-slate-200/50 dark:border-dark-border flex items-center justify-between px-6 shrink-0 z-40 shadow-[0_1px_10px_rgba(0,0,0,0.02)] transition-colors duration-300">
                 <div className="flex items-center gap-6">
                     <div className="flex items-center gap-3 group cursor-pointer">
-                        <div className="w-10 h-10 bg-gradient-to-br from-primary to-orange-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-orange-200/50 group-hover:scale-105 transition-transform duration-300">
+                        <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-orange-200/50 group-hover:scale-105 transition-transform duration-300">
                             <MapIcon size={20} />
                         </div>
                         <div>
@@ -491,19 +550,19 @@ export default function App() {
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setDarkMode(!darkMode)}
-                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${!darkMode ? 'text-slate-400 hover:text-amber-500 hover:bg-amber-50' : 'text-slate-400 hover:text-indigo-400 hover:bg-white/5'}`}
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${!darkMode ? 'text-slate-400 hover:text-orange-500 hover:bg-orange-50' : 'text-slate-400 hover:text-orange-400 hover:bg-white/5'}`}
                             title="Toggle Dark Mode"
                         >
                             {darkMode ? <Moon size={16} /> : <Sun size={16} />}
                         </button>
                         <button
                             onClick={() => setShowApiKeyModal(true)}
-                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${apiKey ? 'text-slate-400 hover:text-primary hover:bg-blue-50' : 'text-orange-500 bg-orange-50 animate-pulse border border-orange-200 shadow-lg shadow-orange-100'}`}
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${apiKey ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50' : 'text-orange-500 bg-orange-50 animate-pulse border border-orange-200 shadow-lg shadow-orange-100'}`}
                             title="Gemini API Key Settings"
                         >
                             <Key size={16} />
                         </button>
-                        <button onClick={() => setShowSettingsModal(true)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all" title="Settings">
+                        <button onClick={() => setShowSettingsModal(true)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5 transition-all" title="Settings">
                             <Settings size={16} />
                         </button>
                     </div>
@@ -514,13 +573,13 @@ export default function App() {
                     <div className="flex bg-slate-100/50 dark:bg-white/5 p-1 rounded-xl border border-slate-200/50 dark:border-dark-border">
                         <button
                             onClick={() => setViewMode('EDITOR')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'EDITOR' ? 'bg-white dark:bg-dark-surface text-primary shadow-sm' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200'}`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'EDITOR' ? 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200'}`}
                         >
                             <TableProperties size={14} /> Program
                         </button>
                         <button
                             onClick={() => setViewMode('CANVAS')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'CANVAS' ? 'bg-white dark:bg-dark-surface text-primary shadow-sm' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200'}`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'CANVAS' ? 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200'}`}
                         >
                             <LandPlot size={14} /> Canvas
                         </button>
@@ -541,7 +600,7 @@ export default function App() {
                     )}
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
                     {viewMode === 'CANVAS' && (
                         <>
                             <div className="w-px h-8 bg-slate-200/60 mx-1" />
@@ -549,23 +608,32 @@ export default function App() {
                             <div className="flex items-center bg-slate-100/50 dark:bg-white/5 rounded-xl p-1 border border-slate-200/50 dark:border-dark-border">
                                 <button
                                     onClick={() => setShowGrid(!showGrid)}
-                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-blue-600 dark:text-blue-400 shadow-sm'}`}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm'}`}
                                     title="Toggle Grid"
                                 >
                                     <Grid size={16} />
                                 </button>
                                 <div className="flex flex-col items-center justify-center px-1 gap-0.5">
-                                    <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-primary"><ChevronUp size={10} /></button>
-                                    <span className="text-[8px] font-bold font-mono w-6 text-center">{gridSize}m</span>
-                                    <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-primary"><ChevronDown size={10} /></button>
+                                    <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-orange-600"><ChevronUp size={10} /></button>
+                                    <span className="text-[10px] font-bold font-mono w-6 text-center">{gridSize}m</span>
+                                    <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-orange-600"><ChevronDown size={10} /></button>
                                 </div>
                             </div>
 
-                            <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-100 dark:border-green-800/50'}`} title="Toggle Snapping"><Magnet size={18} /></button>
+                            <button
+                                onClick={handleAutoArrange}
+                                disabled={isAiLayoutLoading}
+                                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${isAiLayoutLoading ? 'bg-slate-100 dark:bg-white/10 cursor-wait' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                                title="Auto Arrange Layout (AI)"
+                            >
+                                {isAiLayoutLoading ? <Loader2 size={18} className="animate-spin text-orange-600" /> : <LayoutTemplate size={18} />}
+                            </button>
+
+                            <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50'}`} title="Toggle Snapping"><Magnet size={18} /></button>
 
                             <button
                                 onClick={() => setIsMagnetMode(!isMagnetMode)}
-                                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-800/50 shadow-inner'}`}
+                                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
                                 title="Physics / Magnetic Zones"
                             >
                                 <Activity size={18} className={isMagnetMode ? "animate-pulse" : ""} />
@@ -573,7 +641,7 @@ export default function App() {
 
                             <button
                                 onClick={() => setShowExportModal(true)}
-                                className="h-10 px-6 bg-slate-900 dark:bg-black text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all duration-500 flex items-center gap-2.5 group"
+                                className="h-10 px-6 bg-slate-900 dark:bg-black text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-orange-600 transition-all duration-500 flex items-center gap-2.5 group"
                             >
                                 <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" /> Export
                             </button>
@@ -592,10 +660,13 @@ export default function App() {
                         apiKey={apiKey}
                         onSaveApiKey={handleSaveApiKey}
                         setRooms={setRooms}
+                        zoneColors={zoneColors}
+                        onAddZone={handleAddZone}
                     />
                 ) : (
                     <>
                         <aside 
+                            ref={inventoryRef}
                             className="w-80 bg-white dark:bg-dark-surface border-r border-slate-200/50 dark:border-dark-border flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] translate-x-0 transition-transform duration-500"
                             onDragOver={handleInventoryDragOver}
                             onDrop={handleInventoryDrop}
@@ -623,10 +694,10 @@ export default function App() {
                                     >
                                         <div className="flex justify-between items-start mb-3">
                                             <div>
-                                                <span className="font-black text-slate-800 dark:text-gray-200 text-sm tracking-tight block group-hover:text-primary transition-colors">{room.name}</span>
+                                                <span className="font-black text-slate-800 dark:text-gray-200 text-sm tracking-tight block group-hover:text-orange-600 transition-colors">{room.name}</span>
                                                 <span className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">Drag to canvas to place</span>
                                             </div>
-                                            <div className="w-8 h-8 rounded-lg bg-slate-50 dark:bg-white/5 flex items-center justify-center text-slate-300 dark:text-gray-500 group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                                            <div className="w-8 h-8 rounded-lg bg-slate-50 dark:bg-white/5 flex items-center justify-center text-slate-300 dark:text-gray-500 group-hover:bg-orange-500/10 group-hover:text-orange-600 transition-all">
                                                 <Plus size={16} />
                                             </div>
                                         </div>
@@ -645,7 +716,7 @@ export default function App() {
                                 )}
                             </div>
                             <div className="p-6 bg-slate-50/50 dark:bg-white/5 border-t border-slate-100 dark:border-dark-border">
-                                <button onClick={() => addRoom({})} className="w-full py-4 bg-white dark:bg-dark-surface border border-slate-200/80 dark:border-dark-border rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300 hover:border-primary hover:text-primary hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-3 shadow-sm group">
+                                <button onClick={() => addRoom({})} className="w-full py-4 bg-white dark:bg-dark-surface border border-slate-200/80 dark:border-dark-border rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300 hover:border-orange-500 hover:text-orange-600 hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-3 shadow-sm group">
                                     <Plus size={18} className="group-hover:rotate-90 transition-transform" /> Add Manual Space
                                 </button>
                             </div>
@@ -687,6 +758,7 @@ export default function App() {
                                     onDragStart={() => setIsZoneDragging(true)}
                                     onDragEnd={() => setIsZoneDragging(false)}
                                     appSettings={appSettings}
+                                    zoneColors={zoneColors}
                                 />
                             </div>
 
@@ -777,6 +849,8 @@ export default function App() {
                                         pixelsPerMeter={PIXELS_PER_METER}
                                         floors={floors}
                                         appSettings={appSettings}
+                                        zoneColors={zoneColors}
+                                        onDragEnd={handleBubbleDragEnd}
                                     />
                                 ))}
                             </div>
@@ -785,7 +859,7 @@ export default function App() {
                                 <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-sm px-2 py-2 rounded-full border border-slate-100 dark:border-dark-border shadow-lg flex items-center gap-2">
                                     <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase pl-2">Zoom</span>
                                     <span className="text-xs font-mono font-bold text-slate-700 dark:text-gray-300 w-10 text-center">{(scale * 100).toFixed(0)}%</span>
-                                    <button onClick={handleZoomToFit} className="w-6 h-6 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-600 dark:text-gray-300 hover:bg-primary hover:text-white transition-colors" title="Zoom to Fit">
+                                    <button onClick={handleZoomToFit} className="w-6 h-6 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-600 dark:text-gray-300 hover:bg-orange-600 hover:text-white transition-colors" title="Zoom to Fit">
                                         <Maximize size={12} />
                                     </button>
                                 </div>
@@ -810,7 +884,7 @@ export default function App() {
                                         className={`
                                             relative px-4 py-1.5 text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all rounded-b-lg flex items-center gap-2 select-none border-b border-x border-transparent
                                             ${currentFloor === f.id
-                                                ? 'bg-[#f0f2f5] dark:bg-dark-bg text-primary border-slate-200/50 dark:border-dark-border !border-t-transparent h-full -translate-y-px'
+                                                ? 'bg-[#f0f2f5] dark:bg-dark-bg text-orange-600 border-slate-200/50 dark:border-dark-border !border-t-transparent h-full -translate-y-px'
                                                 : 'bg-slate-300/50 dark:bg-white/5 text-slate-500 dark:text-gray-500 hover:bg-slate-100/50 dark:hover:bg-white/10 h-[85%] mt-0'
                                             }
                                         `}
@@ -818,7 +892,7 @@ export default function App() {
                                         {editingFloorId === f.id ? (
                                             <input
                                                 autoFocus
-                                                className="bg-transparent border-none outline-none w-20 text-center font-black uppercase tracking-widest p-0 text-[9px] text-primary"
+                                                className="bg-transparent border-none outline-none w-20 text-center font-black uppercase tracking-widest p-0 text-[9px] text-orange-600"
                                                 value={f.label}
                                                 onChange={(e) => handleRenameFloor(f.id, e.target.value)}
                                                 onBlur={() => setEditingFloorId(null)}
@@ -846,7 +920,7 @@ export default function App() {
                                 ))}
                                 <button
                                     onClick={handleAddFloor}
-                                    className="h-[85%] w-8 flex items-center justify-center rounded-b-lg bg-slate-300/50 dark:bg-white/5 hover:bg-primary hover:text-white text-slate-500 transition-colors"
+                                    className="h-[85%] w-8 flex items-center justify-center rounded-b-lg bg-slate-300/50 dark:bg-white/5 hover:bg-orange-600 hover:text-white text-slate-500 transition-colors"
                                     title="Add Floor"
                                 >
                                     <Plus size={12} />
@@ -868,7 +942,7 @@ export default function App() {
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Space Name</label>
                                         <input
-                                            className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-primary transition-colors bg-transparent border-b border-transparent focus:border-primary pb-1"
+                                            className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-orange-600 transition-colors bg-transparent border-b border-transparent focus:border-orange-500 pb-1"
                                             value={selectedRoom.name}
                                             onChange={(e) => updateRoom(selectedRoom.id, { name: e.target.value })}
                                         />
@@ -876,7 +950,7 @@ export default function App() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Area</span>
-                                            <span className="text-lg font-mono font-bold text-slate-700 dark:text-gray-200">{selectedRoom.area} <small className="text-[10px] opacity-40">m²</small></span>
+                                            <span className="text-lg font-mono font-bold text-slate-700 dark:text-gray-200">{selectedRoom.area} <small className="text-xs opacity-60">m²</small></span>
                                         </div>
                                         <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
@@ -886,15 +960,24 @@ export default function App() {
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-3 block">Zone Category</label>
                                         <div className="grid grid-cols-2 gap-2">
-                                            {Object.keys(ZONE_COLORS).map(z => (
+                                            {Object.keys(zoneColors).map(z => (
                                                 <button
                                                     key={z}
                                                     onClick={() => updateRoom(selectedRoom.id, { zone: z })}
-                                                    className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all ${selectedRoom.zone === z ? 'bg-primary border-primary text-white' : 'bg-white dark:bg-white/5 border-slate-100 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:border-slate-300 dark:hover:border-white/20'}`}
+                                                    className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all ${selectedRoom.zone === z ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white dark:bg-white/5 border-slate-100 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:border-slate-300 dark:hover:border-white/20'}`}
                                                 >
                                                     {z}
                                                 </button>
                                             ))}
+                                            <button
+                                                onClick={() => {
+                                                    const name = prompt("Enter new zone name:");
+                                                    if (name) handleAddZone(name);
+                                                }}
+                                                className="px-3 py-2 rounded-lg text-[10px] font-bold border border-dashed border-slate-300 dark:border-white/20 text-slate-400 hover:text-orange-600 hover:border-orange-400 transition-all flex items-center justify-center gap-1"
+                                            >
+                                                <Plus size={12} /> New
+                                            </button>
                                         </div>
                                     </div>
                                     <div className="pt-6 border-t border-slate-100 dark:border-dark-border">
@@ -909,18 +992,18 @@ export default function App() {
                                         <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Zone Name</label>
                                         <div className="flex items-center gap-2">
                                             <input
-                                                className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-primary transition-colors bg-transparent border-b border-dashed border-slate-300 dark:border-dark-border focus:border-primary pb-1"
+                                                className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-orange-600 transition-colors bg-transparent border-b border-dashed border-slate-300 dark:border-dark-border focus:border-orange-500 pb-1"
                                                 value={selectedZone}
                                                 onChange={(e) => renameZone(selectedZone, e.target.value)}
                                             />
-                                            <div className={`w-4 h-4 rounded-full ${ZONE_COLORS[selectedZone]?.bg || 'bg-slate-200'}`} />
+                                            <div className={`w-4 h-4 rounded-full ${zoneColors[selectedZone]?.bg || 'bg-slate-200'}`} />
                                         </div>
                                     </div>
 
                                     <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
                                         <div className="flex justify-between items-center mb-4">
                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Stats</span>
-                                            <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-1 rounded-md">{selectedZoneRooms.length} Spaces</span>
+                                            <span className="text-[10px] font-bold text-orange-600 bg-orange-500/10 px-2 py-1 rounded-md">{selectedZoneRooms.length} Spaces</span>
                                         </div>
                                         <div className="text-3xl font-mono font-bold text-slate-800 dark:text-gray-100 tracking-tight">
                                             {zoneArea} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
@@ -935,7 +1018,7 @@ export default function App() {
                                             {selectedZoneRooms.map(r => (
                                                 <div key={r.id} className="flex items-center justify-between p-3 bg-white dark:bg-white/5 border border-slate-100 dark:border-dark-border rounded-xl hover:shadow-md transition-all cursor-pointer group"
                                                     onClick={() => setSelectedRoomIds(new Set([r.id]))}>
-                                                    <span className="text-xs font-bold text-slate-700 dark:text-gray-300 group-hover:text-primary">{r.name}</span>
+                                                    <span className="text-xs font-bold text-slate-700 dark:text-gray-300 group-hover:text-orange-600">{r.name}</span>
                                                     <span className="text-[10px] font-mono text-slate-400 dark:text-gray-500">{r.area} m²</span>
                                                 </div>
                                             ))}
@@ -967,7 +1050,7 @@ export default function App() {
                 <ExportModal
                     onClose={() => setShowExportModal(false)}
                     onExport={(format) => {
-                        handleExport(format, projectName, rooms, connections, currentFloor, darkMode);
+                        handleExport(format, projectName, rooms, connections, currentFloor, darkMode, zoneColors);
                         setShowExportModal(false);
                     }}
                 />

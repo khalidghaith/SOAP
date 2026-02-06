@@ -1,4 +1,4 @@
-import { Room, Connection, ZONE_COLORS, Point } from '../types';
+import { Room, Connection, Point, ZoneColor } from '../types';
 import { downloadDXF } from './dxf';
 import { getConvexHull, createRoundedPath } from './geometry';
 
@@ -11,7 +11,8 @@ export const handleExport = async (
     rooms: Room[],
     connections: Connection[],
     currentFloor: number,
-    darkMode: boolean
+    darkMode: boolean,
+    zoneColors: Record<string, ZoneColor>
 ) => {
     if (format === 'dxf') {
         downloadDXF(projectName, rooms);
@@ -78,7 +79,7 @@ export const handleExport = async (
         if (points.length < 3) return;
         const hull = getConvexHull(points);
         const d = createRoundedPath(hull, 12);
-        const color = getHexColorForZone(zone);
+        const color = getHexColorForZone(zone, zoneColors);
         svgContent += `<path d="${d}" fill="${color}" fill-opacity="0.5" stroke="${color}" stroke-width="2" stroke-dasharray="10,10" stroke-opacity="0.6" />`;
     });
 
@@ -97,7 +98,7 @@ export const handleExport = async (
 
     // Rooms
     visibleRooms.forEach(r => {
-        const fill = getHexColorForZone(r.zone);
+        const fill = getHexColorForZone(r.zone, zoneColors);
         
         if (r.polygon) {
             const points = r.polygon.map(p => `${r.x + p.x},${r.y + p.y}`).join(' ');
@@ -173,7 +174,7 @@ const triggerDownload = (url: string, filename: string) => {
     document.body.removeChild(a);
 };
 
-const getHexColorForZone = (zone: string) => {
+const getHexColorForZone = (zone: string, zoneColors: Record<string, ZoneColor>) => {
     // Simple mapping based on standard tailwind colors often used
     const map: Record<string, string> = {
         'Public': '#dbeafe', // blue-100
@@ -184,9 +185,15 @@ const getHexColorForZone = (zone: string) => {
         'Default': '#f1f5f9' // slate-100
     };
     // Try to match partial keys if exact match fails
-    if (!map[zone]) {
-        const key = Object.keys(map).find(k => zone.includes(k));
-        return key ? map[key] : map['Default'];
+    // For dynamic zones, we might need a better way to get hex from tailwind classes or just generate a hash color
+    // For now, fallback to a hash-based color or default if not in standard map
+    if (map[zone]) return map[zone];
+    
+    // Fallback for custom zones - generate a consistent color from string
+    let hash = 0;
+    for (let i = 0; i < zone.length; i++) {
+        hash = zone.charCodeAt(i) + ((hash << 5) - hash);
     }
-    return map[zone];
+    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    return '#' + "00000".substring(0, 6 - c.length) + c;
 };
