@@ -104,7 +104,7 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
     };
 
     return (
-        <svg className="absolute inset-0 overflow-visible pointer-events-none z-0">
+        <svg className="absolute inset-0 overflow-visible pointer-events-none z-10">
             {zonePaths.map((z: any) => (
                 <g key={z.zone} className="">
                     {/* Stroke */}
@@ -123,6 +123,7 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
                         className={`${z.color.bg.replace('bg-', 'fill-')} hover:opacity-60 cursor-grab active:cursor-grabbing pointer-events-auto transition-colors`}
                         style={{ fillOpacity: appSettings.zoneTransparency }}
                         stroke="none"
+                        fill="transparent"
                         onMouseDown={(e) => handleZoneMouseDown(e, z.zone)}
                     />
                 </g>
