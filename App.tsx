@@ -13,7 +13,7 @@ import {
     Plus, Layers, Map as MapIcon, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
     LandPlot, ChevronRight, ChevronLeft, Eraser, Key, X, Settings, LayoutTemplate, Trash2,
-    Zap, Magnet, Grid, Ruler, Moon, Sun, Maximize, ChevronUp, ChevronDown, Activity
+    Link, Magnet, Grid, Ruler, Moon, Sun, Maximize, ChevronUp, ChevronDown, Activity
 } from 'lucide-react';
 
 // Shim process for libs that might expect it in Vite
@@ -424,6 +424,7 @@ export default function App() {
             // Let's clear selection if we started a pan on background and it wasn't valid selection target
             if (e.target === e.currentTarget) {
                 setSelectedRoomIds(new Set());
+                if (connectionSourceId) setConnectionSourceId(null);
             }
         }
     };
@@ -799,6 +800,8 @@ export default function App() {
                     fromId: connectionSourceId,
                     toId: roomId
                 }]);
+            } else {
+                setConnections(prev => prev.filter(c => c.id !== existing.id));
             }
             setConnectionSourceId(null);
         } else {
@@ -1170,16 +1173,11 @@ export default function App() {
                                 />
                             </div>
 
-                            {/* Canvas Connection Layer (Placeholder for Polishing) */}
-                            <svg className="absolute inset-0 pointer-events-none z-0">
-                                {/* Dynamic lines will be rendered here based on connections state */}
-                            </svg>
-
+                            {/* Connection Lines Layer - Explicitly behind bubbles */}
                             <div
                                 className="absolute inset-0 transition-transform duration-75 origin-top-left pointer-events-none"
                                 style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
                             >
-                                {/* Connection Lines Layer */}
                                 <svg className="absolute inset-0 overflow-visible pointer-events-none">
                                     <defs>
                                         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -1200,13 +1198,12 @@ export default function App() {
                                             <g key={conn.id}>
                                                 <line
                                                     x1={x1} y1={y1} x2={x2} y2={y2}
-                                                    stroke="#cbd5e1"
                                                     strokeWidth={2 / scale}
                                                     strokeDasharray={currentStyle.sketchy ? "5,5" : "none"}
-                                                    className="transition-all duration-300"
+                                                    className="stroke-slate-300 dark:stroke-slate-700"
                                                 />
-                                                <circle cx={x1} cy={y1} r={4 / scale} fill="#94a3b8" />
-                                                <circle cx={x2} cy={y2} r={4 / scale} fill="#94a3b8" />
+                                                <circle cx={x1} cy={y1} r={4 / scale} className="fill-slate-400 dark:fill-slate-600" />
+                                                <circle cx={x2} cy={y2} r={4 / scale} className="fill-slate-400 dark:fill-slate-600" />
                                             </g>
                                         );
                                     })}
@@ -1231,7 +1228,13 @@ export default function App() {
                                         </>
                                     )}
                                 </svg>
+                            </div>
 
+                            {/* Bubbles Layer */}
+                            <div
+                                className="absolute inset-0 transition-transform duration-75 origin-top-left pointer-events-none"
+                                style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                            >
                                 {rooms.filter(r => r.isPlaced && r.floor === currentFloor).map(room => (
                                     <Bubble
                                         key={room.id}
@@ -1244,6 +1247,10 @@ export default function App() {
                                         onLinkToggle={toggleLink}
                                         getSnappedPosition={getSnappedPosition}
                                         onSelect={(id, multi) => {
+                                            if (connectionSourceId) {
+                                                toggleLink(id);
+                                                return;
+                                            }
                                             setSelectedRoomIds(prev => {
                                                 const next = new Set(multi ? prev : []);
                                                 if (next.has(id)) next.delete(id);
@@ -1419,6 +1426,56 @@ export default function App() {
                                         </div>
                                     </div>
 
+                                    {/* Link Logic Button */}
+                                    {!isMultiSelection && (
+                                        <div className="space-y-3">
+                                            <button 
+                                                onClick={() => toggleLink(selectedRoom!.id)}
+                                                className={`w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all flex items-center justify-center gap-2 ${connectionSourceId === selectedRoom!.id ? 'bg-yellow-50 border-yellow-300 text-yellow-600 dark:bg-yellow-900/20 dark:border-yellow-700 dark:text-yellow-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-dark-border text-slate-500 dark:text-gray-400 hover:border-orange-500 hover:text-orange-600'}`}
+                                            >
+                                                <Link size={14} className={connectionSourceId === selectedRoom!.id ? 'fill-current' : ''} /> {connectionSourceId === selectedRoom!.id ? 'Cancel Linking' : 'Link Logic'}
+                                            </button>
+
+                                            {/* Linked Spaces List */}
+                                            {(() => {
+                                                const linkedConnections = connections.filter(c => c.fromId === selectedRoom!.id || c.toId === selectedRoom!.id);
+                                                if (linkedConnections.length > 0) {
+                                                    return (
+                                                        <div className="bg-slate-50 dark:bg-white/5 rounded-xl p-3 border border-slate-100 dark:border-dark-border">
+                                                            <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-2">Linked Spaces</span>
+                                                            <div className="space-y-1.5">
+                                                                {linkedConnections.map(conn => {
+                                                                    const otherId = conn.fromId === selectedRoom!.id ? conn.toId : conn.fromId;
+                                                                    const otherRoom = rooms.find(r => r.id === otherId);
+                                                                    if (!otherRoom) return null;
+                                                                    return (
+                                                                        <div key={conn.id} className="flex items-center justify-between text-xs group">
+                                                                            <span className="font-bold text-slate-600 dark:text-gray-300 flex items-center gap-2">
+                                                                                <div className={`w-2 h-2 rounded-full ${zoneColors[otherRoom.zone]?.bg || 'bg-slate-300'}`} />
+                                                                                {otherRoom.name}
+                                                                            </span>
+                                                                            <button 
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setConnections(prev => prev.filter(c => c.id !== conn.id));
+                                                                                }}
+                                                                                className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                                                                title="Unlink"
+                                                                            >
+                                                                                <X size={12} />
+                                                                            </button>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+                                        </div>
+                                    )}
+
                                     {!isMultiSelection ? (
                                         <>
                                     <div className="grid grid-cols-2 gap-4">
@@ -1436,9 +1493,39 @@ export default function App() {
                                                 <small className="text-xs opacity-60">m²</small>
                                             </div>
                                         </div>
-                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
-                                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
+                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border flex justify-between items-center">
+                                            <div>
+                                                <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
                                                 <span className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200">{floors.find(f => f.id === selectedRoom!.floor)?.label || 'N/A'}</span>
+                                            </div>
+                                            <div className="flex flex-col gap-1">
+                                                <button 
+                                                    onClick={() => {
+                                                        const currentIdx = floors.findIndex(f => f.id === selectedRoom!.floor);
+                                                        if (currentIdx < floors.length - 1) {
+                                                            updateRoom(selectedRoom!.id, { floor: floors[currentIdx + 1].id });
+                                                        }
+                                                    }}
+                                                    disabled={floors.findIndex(f => f.id === selectedRoom!.floor) >= floors.length - 1}
+                                                    className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30 transition-colors"
+                                                    title="Move Up"
+                                                >
+                                                    <ChevronUp size={14} />
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        const currentIdx = floors.findIndex(f => f.id === selectedRoom!.floor);
+                                                        if (currentIdx > 0) {
+                                                            updateRoom(selectedRoom!.id, { floor: floors[currentIdx - 1].id });
+                                                        }
+                                                    }}
+                                                    disabled={floors.findIndex(f => f.id === selectedRoom!.floor) <= 0}
+                                                    className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30 transition-colors"
+                                                    title="Move Down"
+                                                >
+                                                    <ChevronDown size={14} />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div>

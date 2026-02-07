@@ -861,19 +861,6 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 >
                     <div className="relative flex flex-col items-center w-full">
                         
-                        {/* Link Button - Only show when selected */}
-                        {isSelected && (
-                            <div className="absolute bottom-full mb-1 pointer-events-auto">
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); onLinkToggle?.(room.id); }} 
-                                    className={`p-1.5 rounded-full shadow-sm border transition-all hover:scale-110 ${isLinkingSource ? 'bg-yellow-100 border-yellow-300 text-yellow-600' : 'bg-white dark:bg-dark-surface border-slate-200 dark:border-dark-border text-slate-400 hover:text-orange-600'}`}
-                                    title="Link Logic"
-                                >
-                                        <LinkIcon size={14} className={isLinkingSource ? 'text-yellow-500' : 'text-orange-600'} />
-                                </button>
-                            </div>
-                        )}
-
                         <div 
                             lang="en"
                             style={{ 
