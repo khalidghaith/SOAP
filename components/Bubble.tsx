@@ -974,7 +974,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                             borderStyle: 'solid',
                             borderWidth: (room.style?.strokeWidth ?? appSettings.strokeWidth) / zoomScale, 
                             opacity: room.style?.opacity ?? diagramStyle.opacity,
-                            borderRadius: (room.style?.cornerRadius ?? appSettings.cornerRadius) / zoomScale
+                            borderRadius: (room.style?.cornerRadius ?? appSettings.cornerRadius)
                         }}
                     />
                 )}

@@ -50,8 +50,8 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
 
     const zonePaths = useMemo(() => {
         const zones: Record<string, Point[]> = {};
-        const padding = appSettings.zonePadding / scale;
-        const cornerRadius = appSettings.cornerRadius / scale;
+        const padding = appSettings.zonePadding;
+        const cornerRadius = appSettings.cornerRadius;
 
         // Group points by zone
         rooms.filter(r => r.isPlaced && r.floor === currentFloor).forEach(r => {
