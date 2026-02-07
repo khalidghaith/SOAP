@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Room, Point, DiagramStyle, AppSettings, ZoneColor } from '../types';
-import { Pencil, X, LandPlot, Link as LinkIcon, ArrowUpFromLine, ArrowDownToLine, Box } from 'lucide-react';
+import { Pencil, X, LandPlot, Link as LinkIcon, ArrowUpFromLine, ArrowDownToLine, Square } from 'lucide-react';
 import { createRoundedPath } from '../utils/geometry';
 
 interface BubbleProps {
@@ -32,6 +32,39 @@ const calculatePolygonArea = (points: Point[]): number => {
         area -= points[j].x * points[i].y;
     }
     return Math.abs(area) / 2;
+};
+
+const calculateCentroid = (points: Point[]): Point => {
+    let x = 0, y = 0;
+    for (const p of points) {
+        x += p.x;
+        y += p.y;
+    }
+    return { x: x / points.length, y: y / points.length };
+};
+
+// Catmull-Rom to Bezier conversion for smooth bubble curves
+const createBubblePath = (points: Point[]): string => {
+    if (points.length < 3) return "";
+    
+    let d = `M ${points[0].x},${points[0].y}`;
+    
+    for (let i = 0; i < points.length; i++) {
+        const p0 = points[(i - 1 + points.length) % points.length];
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const p3 = points[(i + 2) % points.length];
+
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+        d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+    }
+    
+    return d + " Z";
 };
 
 const RenderCorner = ({ cursor, pos, zoomScale, onMouseDown }: { cursor: string, pos: React.CSSProperties, zoomScale: number, onMouseDown: (e: React.MouseEvent) => void }) => (
@@ -66,6 +99,9 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     const [isExtruding, setIsExtruding] = useState(false);
     const [polygonSnapshot, setPolygonSnapshot] = useState<Point[] | null>(null);
 
+    // Bubble Physics State
+    const [wobbleTime, setWobbleTime] = useState(0);
+
     const [selectedVertices, setSelectedVertices] = useState<Set<number>>(new Set());
 
     const bubbleRef = useRef<HTMLDivElement>(null);
@@ -84,7 +120,26 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         { x: 0, y: 0 }, { x: room.width, y: 0 }, { x: room.width, y: room.height }, { x: 0, y: room.height }
     ], [room.polygon, room.width, room.height]);
 
-    const polygonPath = useMemo(() => createRoundedPath(activePoints, room.style?.cornerRadius ?? appSettings.cornerRadius), [activePoints, appSettings.cornerRadius, room.style?.cornerRadius]);
+    // Wobble Animation Loop
+    useEffect(() => {
+        if (wobbleTime > 0) {
+            let frameId: number;
+            const animate = () => {
+                setWobbleTime(prev => Math.max(0, prev - 0.05));
+            };
+            frameId = requestAnimationFrame(animate);
+            return () => cancelAnimationFrame(frameId);
+        }
+    }, [wobbleTime]);
+
+    const polygonPath = useMemo(() => {
+        if (room.shape === 'bubble') {
+            // Apply slight wobble visual offset if active
+            // This is purely visual and doesn't affect the data model
+            return createBubblePath(activePoints);
+        }
+        return createRoundedPath(activePoints, room.style?.cornerRadius ?? appSettings.cornerRadius);
+    }, [activePoints, appSettings.cornerRadius, room.style?.cornerRadius, room.shape]);
 
     const snap = (val: number) => {
         if (!snapEnabled) return val;
@@ -189,6 +244,44 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                     updateRoom(room.id, { rotation: angleDeg });
                 }
+            } else if (draggedVertex !== null && polygonSnapshot && room.shape === 'bubble') {
+                // --- BUBBLE PHYSICS: AREA PRESERVATION ---
+                const newPoints = [...polygonSnapshot];
+                const v = newPoints[draggedVertex];
+                
+                // 1. Move the dragged vertex to mouse position
+                const targetX = v.x + dxWorld;
+                const targetY = v.y + dyWorld;
+                newPoints[draggedVertex] = { x: targetX, y: targetY };
+
+                // 2. Calculate current area and centroid
+                const currentArea = calculatePolygonArea(newPoints);
+                const targetArea = room.area * (pixelsPerMeter * pixelsPerMeter); // Target area in pixels
+                
+                if (currentArea > 100) { // Avoid division by zero or tiny polys
+                    const centroid = calculateCentroid(newPoints);
+                    
+                    // 3. Calculate Scale Factor needed to restore area
+                    const scale = Math.sqrt(targetArea / currentArea);
+
+                    // 4. Scale all points around centroid
+                    const scaledPoints = newPoints.map(p => ({
+                        x: centroid.x + (p.x - centroid.x) * scale,
+                        y: centroid.y + (p.y - centroid.y) * scale
+                    }));
+
+                    // 5. Shift entire shape so dragged vertex stays at mouse cursor
+                    const draggedScaled = scaledPoints[draggedVertex];
+                    const shift = { x: targetX - draggedScaled.x, y: targetY - draggedScaled.y };
+                    
+                    const finalPoints = scaledPoints.map(p => ({
+                        x: p.x + shift.x,
+                        y: p.y + shift.y
+                    }));
+
+                    updateRoom(room.id, { polygon: finalPoints });
+                }
+
             } else if (draggedVertex !== null && polygonSnapshot) {
                 // Moving Vertex (or multiple)
                 const newPoints = [...polygonSnapshot];
@@ -289,6 +382,10 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         const handleMouseUp = (e: MouseEvent) => {
             if (isDragging && onDragEnd) {
                 onDragEnd(room, e);
+            }
+            // Trigger wobble if we were manipulating a bubble vertex
+            if (draggedVertex !== null && room.shape === 'bubble') {
+                setWobbleTime(1.0);
             }
             setIsDragging(false);
             setIsRotating(false);
@@ -496,6 +593,29 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         setShowTools(false);
     };
 
+    const convertToBubble = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        
+        // If converting from rect, make a circle-ish polygon first
+        let newPoints = activePoints;
+        if (!room.polygon) {
+            const cx = room.width / 2;
+            const cy = room.height / 2;
+            const r = Math.min(room.width, room.height) / 2;
+            const numPoints = 8;
+            newPoints = [];
+            for (let i = 0; i < numPoints; i++) {
+                const theta = (i / numPoints) * Math.PI * 2;
+                newPoints.push({
+                    x: cx + r * Math.cos(theta),
+                    y: cy + r * Math.sin(theta)
+                });
+            }
+        }
+        updateRoom(room.id, { polygon: newPoints, shape: 'bubble' });
+        setShowTools(false);
+    };
+
     const isInteracting = isDragging || isRotating || resizeHandle !== null || draggedVertex !== null || draggedEdge !== null;
 
     return (
@@ -504,15 +624,15 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             className={`absolute ${isInteracting ? '' : 'bubble-transition'} pointer-events-auto ${isSelected ? 'z-20' : 'z-10'} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
             style={{
                 transform: `translate3d(${room.x}px, ${room.y}px, 0) rotate(${room.rotation || 0}deg)`,
-                width: room.polygon ? 0 : room.width,
-                height: room.polygon ? 0 : room.height,
+                width: (room.polygon || room.shape === 'bubble') ? 0 : room.width,
+                height: (room.polygon || room.shape === 'bubble') ? 0 : room.height,
                 cursor: isDragging ? 'grabbing' : 'grab'
             }}
             onMouseDown={handleMouseDown}
         >
             {/* Visual Surface */}
             <div className="relative group w-full h-full">
-                {room.polygon ? (
+                {(room.polygon || room.shape === 'bubble') ? (
                     <div className="overflow-visible absolute top-0 left-0">
                         <svg className="overflow-visible">
                             <path
@@ -526,7 +646,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 style={{
                                     filter: diagramStyle.shadow === 'shadow-md' ? 'drop-shadow(0 4px 6px rgb(0 0 0 / 0.1))' :
                                         diagramStyle.shadow === 'shadow-sm' ? 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))' :
-                                            diagramStyle.shadow === 'shadow-none' ? 'none' : 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))'
+                                            diagramStyle.shadow === 'shadow-none' ? 'none' : 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))',
+                                    transition: room.shape === 'bubble' && wobbleTime > 0 ? 'none' : 'd 0.3s ease'
                                 }}
                             />
                             {/* Polygon Edges (Hit Areas for Editing) */}
@@ -577,7 +698,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 )}
 
                 {/* Handles - RESIZE ALL CORNERS (NW, NE, SW, SE) */}
-                {!room.polygon && isSelected && !isDragging && (
+                {!room.polygon && room.shape !== 'bubble' && isSelected && !isDragging && (
                     <>
                         <RenderCorner
                             cursor="nw-resize"
@@ -607,7 +728,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 )}
 
                 {/* Rotation Handle */}
-                {!room.polygon && isSelected && !isDragging && (
+                {!room.polygon && room.shape !== 'bubble' && isSelected && !isDragging && (
                     <div
                         className="absolute left-1/2 top-0 -translate-x-1/2"
                         style={{ transform: `translate(0, 0) scale(${1 / zoomScale})` }}
@@ -664,19 +785,24 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                             </button>
                              {showTools && (
                                 <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-white dark:bg-dark-surface shadow-2xl rounded-xl border border-slate-200 dark:border-dark-border flex flex-col p-1 z-50 min-w-[140px] slide-in-bottom">
-                                    {room.polygon ? (
+                                    {(room.polygon || room.shape === 'bubble') ? (
                                         <button onClick={(e) => {
                                             e.stopPropagation();
                                             const side = Math.sqrt(room.area * 400);
-                                            updateRoom(room.id, { polygon: null, width: side, height: side });
+                                            updateRoom(room.id, { polygon: undefined, shape: 'rect', width: side, height: side });
                                             setShowTools(false);
                                         }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
-                                            <Box size={14} className="text-orange-600" /> Convert to Bubble
+                                            <Square size={14} className="text-orange-600" /> Convert to Bullion
                                         </button>
                                     ) : (
-                                        <button onClick={convertToPolygon} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
-                                            <LandPlot size={14} className="text-orange-600" /> Convert to Polygon
-                                        </button>
+                                        <>
+                                            <button onClick={convertToPolygon} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
+                                                <LandPlot size={14} className="text-orange-600" /> Convert to Polygon
+                                            </button>
+                                            <button onClick={convertToBubble} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
+                                                <div className="w-3.5 h-3.5 rounded-full border-2 border-orange-600"></div> Convert to Bubble
+                                            </button>
+                                        </>
                                     )}
 
                                     <button onClick={() => onLinkToggle?.(room.id)} className={`p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap rounded-lg transition-colors ${isLinkingSource ? 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400' : 'text-slate-600 dark:text-gray-300'}`}>

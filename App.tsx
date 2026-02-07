@@ -10,7 +10,7 @@ import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
 import {
-    Plus, Layers, Map as MapIcon, Box, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
+    Plus, Layers, Map as MapIcon, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties,
     LandPlot, ChevronRight, ChevronLeft, Eraser, Key, X, Settings, LayoutTemplate, Trash2,
     Zap, Magnet, Grid, Ruler, Moon, Sun, Maximize, ChevronUp, ChevronDown, Activity
@@ -760,6 +760,14 @@ export default function App() {
             <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
                 :root, body, .font-sans { font-family: 'Inter', sans-serif; }
+                input[type=number]::-webkit-inner-spin-button, 
+                input[type=number]::-webkit-outer-spin-button { 
+                    -webkit-appearance: none; 
+                    margin: 0; 
+                }
+                input[type=number] {
+                    -moz-appearance: textfield;
+                }
             `}</style>
             {/* Premium Header */}
             <header className="h-12 bg-white/70 dark:bg-dark-surface/70 backdrop-blur-xl border-b border-slate-200/50 dark:border-dark-border flex items-center justify-between px-4 shrink-0 z-40 shadow-[0_1px_10px_rgba(0,0,0,0.02)] transition-colors duration-300">
@@ -919,7 +927,7 @@ export default function App() {
                                 )) : (
                                     <div className="text-center py-24 opacity-30 px-10">
                                         <div className="w-16 h-16 bg-slate-100 dark:bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                                            <Box size={32} className="text-slate-400 dark:text-gray-500" />
+                                            <Package size={32} className="text-slate-400 dark:text-gray-500" />
                                         </div>
                                         <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed text-slate-500 dark:text-gray-500">Inventory Clear<br />All elements are in the design context.</p>
                                     </div>

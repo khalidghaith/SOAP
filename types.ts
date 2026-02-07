@@ -29,6 +29,7 @@ export interface Room {
 
   // Custom Shape
   polygon?: Point[];
+  shape?: 'rect' | 'polygon' | 'bubble';
   style?: RoomStyle;
 }
 
