@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Room, Point, DiagramStyle, AppSettings, ZoneColor } from '../types';
-import { Pencil, X, LandPlot, Link as LinkIcon, ArrowUpFromLine, ArrowDownToLine, Square } from 'lucide-react';
+import { Link as LinkIcon } from 'lucide-react';
 import { createRoundedPath } from '../utils/geometry';
 
 interface BubbleProps {
@@ -37,13 +37,43 @@ const calculatePolygonArea = (points: Point[]): number => {
     return Math.abs(area) / 2;
 };
 
-const calculateCentroid = (points: Point[]): Point => {
-    let x = 0, y = 0;
-    for (const p of points) {
-        x += p.x;
-        y += p.y;
+// Calculate area of the rendered spline (Curved Area)
+// Flattens the curve into high-density segments for precision
+const calculateCurvedArea = (points: Point[]): number => {
+    if (points.length < 3) return 0;
+    let area = 0;
+    const steps = 20; // High density for precision
+
+    for (let i = 0; i < points.length; i++) {
+        const p0 = points[(i - 1 + points.length) % points.length];
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const p3 = points[(i + 2) % points.length];
+
+        // Catmull-Rom to Bezier control points
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+        let prevX = p1.x;
+        let prevY = p1.y;
+
+        for (let j = 1; j <= steps; j++) {
+            const t = j / steps;
+            const it = 1 - t;
+            // Cubic Bezier formula
+            const x = it*it*it*p1.x + 3*it*it*t*cp1x + 3*it*t*t*cp2x + t*t*t*p2.x;
+            const y = it*it*it*p1.y + 3*it*it*t*cp1y + 3*it*t*t*cp2y + t*t*t*p2.y;
+
+            // Shoelace formula step
+            area += prevX * y - x * prevY;
+            
+            prevX = x;
+            prevY = y;
+        }
     }
-    return { x: x / points.length, y: y / points.length };
+    return Math.abs(area) / 2;
 };
 
 // Catmull-Rom to Bezier conversion for smooth bubble curves
@@ -70,6 +100,15 @@ const createBubblePath = (points: Point[]): string => {
     return d + " Z";
 };
 
+const calculateCentroid = (points: Point[]): Point => {
+    let x = 0, y = 0;
+    for (const p of points) {
+        x += p.x;
+        y += p.y;
+    }
+    return { x: x / points.length, y: y / points.length };
+};
+
 const RenderCorner = ({ cursor, pos, zoomScale, onMouseDown }: { cursor: string, pos: React.CSSProperties, zoomScale: number, onMouseDown: (e: React.MouseEvent) => void }) => (
     <div
         className="absolute z-[70]"
@@ -93,7 +132,6 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     const [isRotating, setIsRotating] = useState(false);
     const [resizeHandle, setResizeHandle] = useState<string | null>(null);
     const [rotateTooltip, setRotateTooltip] = useState<{ x: number, y: number, angle: number } | null>(null);
-    const [showTools, setShowTools] = useState(false);
 
     // Polygon Editing State
     const [hoveredVertex, setHoveredVertex] = useState<number | null>(null);
@@ -176,7 +214,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                 const newPoints = activePoints.filter((_, i) => !selectedVertices.has(i));
 
-                const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
+                const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+                const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
                 setSelectedVertices(new Set());
             }
@@ -184,7 +223,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedVertices, activePoints, room.id, updateRoom]);
+    }, [selectedVertices, activePoints, room.id, updateRoom, room.shape, pixelsPerMeter]);
 
     const handleRotateStart = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -282,7 +321,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 newPoints[draggedVertex] = { x: targetX, y: targetY };
 
                 // 2. Calculate current area and centroid
-                const currentArea = calculatePolygonArea(newPoints);
+                const currentArea = calculateCurvedArea(newPoints);
                 const targetArea = room.area * (pixelsPerMeter * pixelsPerMeter); // Target area in pixels
                 
                 if (currentArea > 100) { // Avoid division by zero or tiny polys
@@ -344,7 +383,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     newPoints[index] = { x: nx, y: ny };
                 });
 
-                const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
+                const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+                const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
 
             } else if (draggedEdge !== null && polygonSnapshot) {
@@ -389,7 +429,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     newPoints[idx2] = { x: nx2, y: ny2 };
                 }
 
-                const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
+                const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+                const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
 
             } else if (isDragging) {
@@ -543,6 +584,25 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         };
     };
 
+    const handleVertexContextMenu = (e: React.MouseEvent, index: number) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Allow removing a point if we have more than 3
+        if (activePoints.length > 3) {
+            const newPoints = activePoints.filter((_, i) => i !== index);
+            
+            // Preserve area by scaling if needed, or just update
+            // For deletion, we usually accept shape change, but let's try to keep it simple first
+            // Recalculate area
+            const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+            const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
+            
+            updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
+            setSelectedVertices(new Set());
+        }
+    };
+
     const handleEdgeDown = (e: React.MouseEvent, index: number) => {
         e.stopPropagation();
         onDragStart?.();
@@ -553,21 +613,43 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         // Double Click Check: Insert Vertex
         if (e.detail === 2) {
             if (!bubbleRef.current) return;
-            const rect = bubbleRef.current.getBoundingClientRect();
-            let localX = (e.clientX - rect.left) / zoomScale;
-            let localY = (e.clientY - rect.top) / zoomScale;
+            
+            // Step A: Insert the new point at the exact midpoint of the curve/edge segment.
+            const p1 = activePoints[index];
+            const p2 = activePoints[(index + 1) % activePoints.length];
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
 
-            if (snapEnabled) {
-                localX = snap(localX);
-                localY = snap(localY);
-            }
+            // Capture original area before modification to prevent rounding jumps
+            const originalAreaPx = room.shape === 'bubble' ? calculateCurvedArea(activePoints) : calculatePolygonArea(activePoints);
 
             const newPoints = [...activePoints];
             // Insert at index + 1 (after the start node of the edge)
-            newPoints.splice(index + 1, 0, { x: localX, y: localY });
+            newPoints.splice(index + 1, 0, { x: midX, y: midY });
 
-            const newArea = Number((calculatePolygonArea(newPoints) / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
-            updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
+            if (room.shape === 'bubble') {
+                // Step B: Before the frame renders, calculate the new curved area.
+                const currentArea = calculateCurvedArea(newPoints);
+                
+                // Instantaneous Scaling: If the new point changes the area, apply global scaling factor
+                if (currentArea > 100) { // Avoid division by zero or tiny polys
+                    const centroid = calculateCentroid(newPoints);
+                    const scale = Math.sqrt(originalAreaPx / currentArea);
+
+                    const scaledPoints = newPoints.map(p => ({
+                        x: centroid.x + (p.x - centroid.x) * scale,
+                        y: centroid.y + (p.y - centroid.y) * scale
+                    }));
+
+                    updateRoom(room.id, { polygon: scaledPoints });
+                } else {
+                    updateRoom(room.id, { polygon: newPoints });
+                }
+            } else {
+                const areaPx = calculatePolygonArea(newPoints);
+                const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
+                updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
+            }
 
             // Select the new vertex
             setSelectedVertices(new Set([index + 1]));
@@ -611,52 +693,6 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             startX: e.clientX, startY: e.clientY,
             roomX: 0, roomY: 0, roomW: 0, roomH: 0
         };
-    };
-
-    const convertToPolygon = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        
-        let capturedStyle: any = undefined;
-        
-        if (bubbleRef.current) {
-            // Find the visual rectangle div to capture its computed styles
-            const rectDiv = bubbleRef.current.querySelector('div.relative > div.absolute.top-0.left-0:not(.pointer-events-none)');
-            if (rectDiv) {
-                const style = window.getComputedStyle(rectDiv);
-                capturedStyle = {
-                    fill: style.backgroundColor,
-                    stroke: style.borderColor,
-                    strokeWidth: parseFloat(style.borderWidth) * zoomScale,
-                    opacity: parseFloat(style.opacity)
-                };
-            }
-        }
-
-        updateRoom(room.id, { polygon: activePoints, style: capturedStyle });
-        setShowTools(false);
-    };
-
-    const convertToBubble = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        
-        // If converting from rect, make a circle-ish polygon first
-        let newPoints = activePoints;
-        if (!room.polygon) {
-            const cx = room.width / 2;
-            const cy = room.height / 2;
-            const r = Math.min(room.width, room.height) / 2;
-            const numPoints = 8;
-            newPoints = [];
-            for (let i = 0; i < numPoints; i++) {
-                const theta = (i / numPoints) * Math.PI * 2;
-                newPoints.push({
-                    x: cx + r * Math.cos(theta),
-                    y: cy + r * Math.sin(theta)
-                });
-            }
-        }
-        updateRoom(room.id, { polygon: newPoints, shape: 'bubble' });
-        setShowTools(false);
     };
 
     const isInteracting = isDragging || isRotating || resizeHandle !== null || draggedVertex !== null || draggedEdge !== null;
@@ -725,6 +761,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 }}
                                 onMouseEnter={() => setHoveredVertex(i)}
                                 onMouseLeave={() => setHoveredVertex(null)}
+                                onContextMenu={(e) => handleVertexContextMenu(e, i)}
                                 onMouseDown={(e) => handleVertexDown(e, i)}
                             />
                         ))}
@@ -824,45 +861,18 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 >
                     <div className="relative flex flex-col items-center w-full">
                         
-                        {/* Edit Button - Centered above text */}
-                        <div className={`absolute bottom-full mb-1 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0'} pointer-events-auto`}>
-                             <button onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} className="p-1.5 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-full shadow-sm hover:text-orange-600 dark:text-gray-300 flex items-center justify-center hover:scale-110 transition-all">
-                                {showTools ? <X size={12} /> : <Pencil size={12} />}
-                            </button>
-                             {showTools && (
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-white dark:bg-dark-surface shadow-2xl rounded-xl border border-slate-200 dark:border-dark-border flex flex-col p-1 z-50 min-w-[140px] slide-in-bottom">
-                                    {(room.polygon || room.shape === 'bubble') ? (
-                                        <button onClick={(e) => {
-                                            e.stopPropagation();
-                                            const side = Math.sqrt(room.area * 400);
-                                            updateRoom(room.id, { polygon: undefined, shape: 'rect', width: side, height: side });
-                                            setShowTools(false);
-                                        }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
-                                            <Square size={14} className="text-orange-600" /> Convert to Bullion
-                                        </button>
-                                    ) : (
-                                        <>
-                                            <button onClick={convertToPolygon} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
-                                                <LandPlot size={14} className="text-orange-600" /> Convert to Polygon
-                                            </button>
-                                            <button onClick={convertToBubble} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
-                                                <div className="w-3.5 h-3.5 rounded-full border-2 border-orange-600"></div> Convert to Bubble
-                                            </button>
-                                        </>
-                                    )}
-
-                                    <button onClick={() => onLinkToggle?.(room.id)} className={`p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap rounded-lg transition-colors ${isLinkingSource ? 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400' : 'text-slate-600 dark:text-gray-300'}`}>
+                        {/* Link Button - Only show when selected */}
+                        {isSelected && (
+                            <div className="absolute bottom-full mb-1 pointer-events-auto">
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); onLinkToggle?.(room.id); }} 
+                                    className={`p-1.5 rounded-full shadow-sm border transition-all hover:scale-110 ${isLinkingSource ? 'bg-yellow-100 border-yellow-300 text-yellow-600' : 'bg-white dark:bg-dark-surface border-slate-200 dark:border-dark-border text-slate-400 hover:text-orange-600'}`}
+                                    title="Link Logic"
+                                >
                                         <LinkIcon size={14} className={isLinkingSource ? 'text-yellow-500' : 'text-orange-600'} />
-                                        {isLinkingSource ? 'Cancel Linking' : 'Link Logic'}
-                                    </button>
-                                    <div className="h-px bg-slate-100 dark:bg-white/10 my-1 mx-1" />
-                                    <div className="flex justify-between px-1">
-                                        <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx < floors.length - 1) updateRoom(room.id, { floor: floors[idx + 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-600 rounded-lg" title="Level Up"><ArrowUpFromLine size={14} /></button>
-                                        <button onClick={(e) => { e.stopPropagation(); const idx = floors.findIndex(f => f.id === room.floor); if (idx > 0) updateRoom(room.id, { floor: floors[idx - 1].id }); }} className="p-2 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-400 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-600 rounded-lg" title="Level Down"><ArrowDownToLine size={14} /></button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                                </button>
+                            </div>
+                        )}
 
                         <div 
                             lang="en"

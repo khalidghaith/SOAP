@@ -2,6 +2,36 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Room, Point, AppSettings, ZoneColor } from '../types';
 import { getConvexHull, createRoundedPath } from '../utils/geometry';
 
+// Generate points along the curve to ensure the hull wraps it tightly
+const getBubbleCurvePoints = (points: Point[], segmentsPerCurve: number = 5): Point[] => {
+    if (points.length < 3) return points;
+    const result: Point[] = [];
+    
+    for (let i = 0; i < points.length; i++) {
+        const p0 = points[(i - 1 + points.length) % points.length];
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const p3 = points[(i + 2) % points.length];
+
+        // Catmull-Rom to Bezier control points
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+        // Sample Bezier cubic curve
+        for (let j = 0; j < segmentsPerCurve; j++) {
+            const t = j / segmentsPerCurve;
+            const it = 1 - t;
+            // Cubic Bezier formula
+            const x = it*it*it*p1.x + 3*it*it*t*cp1x + 3*it*t*t*cp2x + t*t*t*p2.x;
+            const y = it*it*it*p1.y + 3*it*it*t*cp1y + 3*it*t*t*cp2y + t*t*t*p2.y;
+            result.push({ x, y });
+        }
+    }
+    return result;
+};
+
 interface ZoneOverlayProps {
     rooms: Room[];
     currentFloor: number;
@@ -31,9 +61,15 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
             const cos = Math.cos(rad);
             const sin = Math.sin(rad);
 
+            let pointsToProcess = r.polygon;
+
             if (r.polygon && r.polygon.length > 0) {
+                // If it's a bubble, sample the curve to ensure the hull hugs it
+                if (r.shape === 'bubble') {
+                    pointsToProcess = getBubbleCurvePoints(r.polygon);
+                }
                 // Use polygon points
-                r.polygon.forEach(p => {
+                pointsToProcess!.forEach(p => {
                     // Rotate point around (0,0) local origin
                     const rx = p.x * cos - p.y * sin;
                     const ry = p.x * sin + p.y * cos;
