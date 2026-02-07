@@ -47,11 +47,14 @@ const RenderCorner = ({ cursor, pos, zoomScale, onMouseDown }: { cursor: string,
     </div>
 );
 
+const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='filter: drop-shadow(1px 1px 0px white);'><path d='M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3'/></svg>") 12 12, auto`;
+
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
     getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart
 }) => {
     const [isDragging, setIsDragging] = useState(false);
+    const [isRotating, setIsRotating] = useState(false);
     const [resizeHandle, setResizeHandle] = useState<string | null>(null);
     const [showTools, setShowTools] = useState(false);
 
@@ -81,7 +84,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         { x: 0, y: 0 }, { x: room.width, y: 0 }, { x: room.width, y: room.height }, { x: 0, y: room.height }
     ], [room.polygon, room.width, room.height]);
 
-    const polygonPath = useMemo(() => createRoundedPath(activePoints, appSettings.cornerRadius), [activePoints, appSettings.cornerRadius]);
+    const polygonPath = useMemo(() => createRoundedPath(activePoints, room.style?.cornerRadius ?? appSettings.cornerRadius), [activePoints, appSettings.cornerRadius, room.style?.cornerRadius]);
 
     const snap = (val: number) => {
         if (!snapEnabled) return val;
@@ -110,6 +113,13 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [selectedVertices, activePoints, room.id, updateRoom]);
 
+    const handleRotateStart = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onDragStart?.();
+        setIsRotating(true);
+        // We don't need to store start state for rotation if we calculate absolute angle from center
+    };
+
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
             const dxScreen = e.clientX - startDragState.current.startX;
@@ -120,34 +130,65 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             if (resizeHandle) {
                 const s = startDragState.current;
                 const minSize = 20;
-                let nW = s.roomW;
-                let nH = s.roomH;
+                const areaPx = s.roomW * s.roomH;
 
-                if (resizeHandle === 'se') {
-                    const areaPx = s.roomW * s.roomH;
-                    let targetW = Math.max(minSize, s.roomW + dxWorld);
-                    let targetH = Math.max(minSize, s.roomH + dyWorld);
+                // 1. Calculate target dimensions based on mouse delta and handle direction
+                let targetW = s.roomW;
+                let targetH = s.roomH;
 
-                    if (snapEnabled && appSettings.snapWhileScaling) {
-                        // Try to snap the bottom-right corner
-                        // We construct a dummy room representing the new bottom-right corner to use getSnappedPosition
-                        // This is a bit hacky but reuses the logic.
-                        // We want to snap the point (roomX + targetW, roomY + targetH)
-                        if (getSnappedPosition) {
-                            const currentRight = s.roomX + targetW;
-                            const currentBottom = s.roomY + targetH;
-                            const snapped = getSnappedPosition({ ...room, x: currentRight, y: currentBottom, width: 0, height: 0 }, room.id);
-                            targetW = Math.max(minSize, snapped.x - s.roomX);
-                            targetH = Math.max(minSize, snapped.y - s.roomY);
-                        }
-                    }
-
-                    const ratio = targetW / targetH;
-                    nW = Math.sqrt(areaPx * ratio);
-                    nH = areaPx / nW;
-                    updateRoom(room.id, { width: nW, height: nH });
+                if (resizeHandle.includes('e')) {
+                    targetW = Math.max(minSize, s.roomW + dxWorld);
+                } else {
+                    targetW = Math.max(minSize, s.roomW - dxWorld);
                 }
 
+                if (resizeHandle.includes('s')) {
+                    targetH = Math.max(minSize, s.roomH + dyWorld);
+                } else {
+                    targetH = Math.max(minSize, s.roomH - dyWorld);
+                }
+
+                // 2. Snapping
+                if (snapEnabled && appSettings.snapWhileScaling && getSnappedPosition) {
+                    const rawX = resizeHandle.includes('e') ? s.roomX + s.roomW + dxWorld : s.roomX + dxWorld;
+                    const rawY = resizeHandle.includes('s') ? s.roomY + s.roomH + dyWorld : s.roomY + dyWorld;
+
+                    const snapped = getSnappedPosition({ ...room, x: rawX, y: rawY, width: 0, height: 0 }, room.id);
+
+                    if (resizeHandle.includes('e')) targetW = Math.max(minSize, snapped.x - s.roomX);
+                    else targetW = Math.max(minSize, (s.roomX + s.roomW) - snapped.x);
+
+                    if (resizeHandle.includes('s')) targetH = Math.max(minSize, snapped.y - s.roomY);
+                    else targetH = Math.max(minSize, (s.roomY + s.roomH) - snapped.y);
+                }
+
+                // 3. Aspect Ratio Preservation
+                const ratio = targetW / targetH;
+                const nW = Math.sqrt(areaPx * ratio);
+                const nH = areaPx / nW;
+
+                // 4. Adjust Position (if resizing from left or top)
+                let nX = s.roomX;
+                let nY = s.roomY;
+                if (resizeHandle.includes('w')) nX = s.roomX + (s.roomW - nW);
+                if (resizeHandle.includes('n')) nY = s.roomY + (s.roomH - nH);
+
+                updateRoom(room.id, { width: nW, height: nH, x: nX, y: nY });
+
+            } else if (isRotating) {
+                if (bubbleRef.current) {
+                    const rect = bubbleRef.current.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+
+                    // Calculate angle from center to mouse
+                    const angleRad = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+                    let angleDeg = angleRad * (180 / Math.PI) + 90; // +90 to make top 0 degrees
+
+                    if (e.shiftKey) angleDeg = Math.round(angleDeg / 15) * 15;
+
+                    updateRoom(room.id, { rotation: angleDeg });
+                }
             } else if (draggedVertex !== null && polygonSnapshot) {
                 // Moving Vertex (or multiple)
                 const newPoints = [...polygonSnapshot];
@@ -250,6 +291,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 onDragEnd(room, e);
             }
             setIsDragging(false);
+            setIsRotating(false);
             setResizeHandle(null);
             setDraggedVertex(null);
             setDraggedEdge(null);
@@ -258,7 +300,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             if (getSnappedPosition) getSnappedPosition(room, '');
         };
 
-        if (isDragging || resizeHandle || draggedVertex !== null || draggedEdge !== null) {
+        if (isDragging || isRotating || resizeHandle || draggedVertex !== null || draggedEdge !== null) {
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
         }
@@ -266,7 +308,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isDragging, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd]);
+    }, [isDragging, isRotating, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd]);
 
     const handleResizeStart = (e: React.MouseEvent, handle: string) => {
         e.stopPropagation();
@@ -431,14 +473,37 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         };
     };
 
-    const isInteracting = isDragging || resizeHandle !== null || draggedVertex !== null || draggedEdge !== null;
+    const convertToPolygon = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        
+        let capturedStyle: any = undefined;
+        
+        if (bubbleRef.current) {
+            // Find the visual rectangle div to capture its computed styles
+            const rectDiv = bubbleRef.current.querySelector('div.relative > div.absolute.top-0.left-0:not(.pointer-events-none)');
+            if (rectDiv) {
+                const style = window.getComputedStyle(rectDiv);
+                capturedStyle = {
+                    fill: style.backgroundColor,
+                    stroke: style.borderColor,
+                    strokeWidth: parseFloat(style.borderWidth) * zoomScale,
+                    opacity: parseFloat(style.opacity)
+                };
+            }
+        }
+
+        updateRoom(room.id, { polygon: activePoints, style: capturedStyle });
+        setShowTools(false);
+    };
+
+    const isInteracting = isDragging || isRotating || resizeHandle !== null || draggedVertex !== null || draggedEdge !== null;
 
     return (
         <div
             ref={bubbleRef}
             className={`absolute ${isInteracting ? '' : 'bubble-transition'} pointer-events-auto ${isSelected ? 'z-20' : 'z-10'} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
             style={{
-                transform: `translate3d(${room.x}px, ${room.y}px, 0)`,
+                transform: `translate3d(${room.x}px, ${room.y}px, 0) rotate(${room.rotation || 0}deg)`,
                 width: room.polygon ? 0 : room.width,
                 height: room.polygon ? 0 : room.height,
                 cursor: isDragging ? 'grabbing' : 'grab'
@@ -446,16 +511,18 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             onMouseDown={handleMouseDown}
         >
             {/* Visual Surface */}
-            <div className="relative group">
+            <div className="relative group w-full h-full">
                 {room.polygon ? (
                     <div className="overflow-visible absolute top-0 left-0">
                         <svg className="overflow-visible">
                             <path
                                 d={polygonPath}
-                                className={`${visualStyle.bg.replace('bg-', 'fill-')} ${visualStyle.border.replace('border-', 'stroke-')}`}
-                                strokeWidth={appSettings.strokeWidth / zoomScale}
+                                className={room.style ? '' : `${visualStyle.bg.replace('bg-', 'fill-')} ${visualStyle.border.replace('border-', 'stroke-')}`}
+                                strokeWidth={(room.style?.strokeWidth ?? appSettings.strokeWidth) / zoomScale}
                                 strokeDasharray={diagramStyle.sketchy ? `${10 / zoomScale},${10 / zoomScale}` : "none"}
-                                fillOpacity={diagramStyle.opacity}
+                                fillOpacity={room.style?.opacity ?? diagramStyle.opacity}
+                                fill={room.style?.fill}
+                                stroke={room.style?.stroke}
                                 style={{
                                     filter: diagramStyle.shadow === 'shadow-md' ? 'drop-shadow(0 4px 6px rgb(0 0 0 / 0.1))' :
                                         diagramStyle.shadow === 'shadow-sm' ? 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))' :
@@ -509,14 +576,49 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     />
                 )}
 
-                {/* Handles - RESIZE ONLY SE */}
+                {/* Handles - RESIZE ALL CORNERS (NW, NE, SW, SE) */}
                 {!room.polygon && isSelected && !isDragging && (
-                    <RenderCorner 
-                        cursor="se-resize" 
-                        pos={{ top: '100%', left: '100%' }} 
-                        zoomScale={zoomScale}
-                        onMouseDown={(e) => handleResizeStart(e, 'se')}
-                    />
+                    <>
+                        <RenderCorner
+                            cursor="nw-resize"
+                            pos={{ top: '0%', left: '0%' }}
+                            zoomScale={zoomScale}
+                            onMouseDown={(e) => handleResizeStart(e, 'nw')}
+                        />
+                        <RenderCorner
+                            cursor="ne-resize"
+                            pos={{ top: '0%', left: '100%' }}
+                            zoomScale={zoomScale}
+                            onMouseDown={(e) => handleResizeStart(e, 'ne')}
+                        />
+                        <RenderCorner
+                            cursor="sw-resize"
+                            pos={{ top: '100%', left: '0%' }}
+                            zoomScale={zoomScale}
+                            onMouseDown={(e) => handleResizeStart(e, 'sw')}
+                        />
+                        <RenderCorner
+                            cursor="se-resize"
+                            pos={{ top: '100%', left: '100%' }}
+                            zoomScale={zoomScale}
+                            onMouseDown={(e) => handleResizeStart(e, 'se')}
+                        />
+                    </>
+                )}
+
+                {/* Rotation Handle */}
+                {!room.polygon && isSelected && !isDragging && (
+                    <div
+                        className="absolute left-1/2 top-0 -translate-x-1/2"
+                        style={{ transform: `translate(0, 0) scale(${1 / zoomScale})` }}
+                    >
+                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-px bg-orange-600 h-[30px]" />
+                        <div
+                            className="absolute -top-[30px] left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-orange-600 rounded-full hover:bg-orange-600 transition-all shadow-lg active:scale-150"
+                            style={{ cursor: ROTATE_CURSOR }}
+                            onMouseDown={handleRotateStart}
+                        />
+                    </div>
                 )}
 
                 {/* Dimensions Display during Resize */}
@@ -535,9 +637,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         <div 
                             className="absolute top-1/2 left-0 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md pointer-events-none whitespace-nowrap backdrop-blur-sm z-[100]" 
                             style={{ 
-                                transform: `translate(-100%, -50%) scale(${1 / zoomScale})`,
-                                transformOrigin: 'right center',
-                                marginLeft: `${-4 / zoomScale}px`
+                                transform: `translate(-50%, -50%) rotate(-90deg) scale(${1 / zoomScale})`,
+                                transformOrigin: 'center',
                             }}
                         >
                             {(room.height / pixelsPerMeter).toFixed(2)}m
@@ -548,7 +649,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 {/* Content */}
                 <div
                     className="absolute top-0 left-0 flex flex-col items-center justify-center pointer-events-none"
-                    style={{ width: room.width, height: room.height }}
+                    style={{ 
+                        width: room.width, 
+                        height: room.height,
+                        transform: `rotate(${- (room.rotation || 0)}deg)` 
+                    }}
                 >
                     <div className="relative flex flex-col items-center">
                         
@@ -569,11 +674,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                             <Box size={14} className="text-orange-600" /> Convert to Bubble
                                         </button>
                                     ) : (
-                                        <button onClick={(e) => {
-                                            e.stopPropagation();
-                                            updateRoom(room.id, { polygon: activePoints });
-                                            setShowTools(false);
-                                        }} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
+                                        <button onClick={convertToPolygon} className="p-2.5 hover:bg-slate-50 dark:hover:bg-white/5 text-[10px] font-bold flex items-center gap-3 whitespace-nowrap text-slate-600 dark:text-gray-300 rounded-lg transition-colors">
                                             <LandPlot size={14} className="text-orange-600" /> Convert to Polygon
                                         </button>
                                     )}

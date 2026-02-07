@@ -3,6 +3,14 @@ export interface Point {
   y: number;
 }
 
+export interface RoomStyle {
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  opacity: number;
+  cornerRadius?: number;
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -17,9 +25,11 @@ export interface Room {
   y: number;
   width: number;
   height: number;
+  rotation?: number;
 
   // Custom Shape
   polygon?: Point[];
+  style?: RoomStyle;
 }
 
 export interface ZoneColor {

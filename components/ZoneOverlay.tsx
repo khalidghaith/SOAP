@@ -26,28 +26,45 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
         // Group points by zone
         rooms.filter(r => r.isPlaced && r.floor === currentFloor).forEach(r => {
             if (!zones[r.zone]) zones[r.zone] = [];
+            const angle = r.rotation || 0;
+            const rad = (angle * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
 
             if (r.polygon && r.polygon.length > 0) {
                 // Use polygon points
                 r.polygon.forEach(p => {
-                    // Add padding to each vertex? Or just the vertex?
-                    // If we want outlining, expanding the hull is better.
-                    // But here we are collecting points to BUILD the hull.
-                    // A simple way is to add 4 points for each vertex expanded by padding? 
-                    // Or just add the vertex and rely on the hull being tight?
-                    // The previous logic added 4 corners expanded by padding.
-                    // Let's add expanded points for each vertex to ensure the hull covers the padding area.
-                    zones[r.zone].push({ x: r.x + p.x - padding, y: r.y + p.y - padding });
-                    zones[r.zone].push({ x: r.x + p.x + padding, y: r.y + p.y - padding });
-                    zones[r.zone].push({ x: r.x + p.x + padding, y: r.y + p.y + padding });
-                    zones[r.zone].push({ x: r.x + p.x - padding, y: r.y + p.y + padding });
+                    // Rotate point around (0,0) local origin
+                    const rx = p.x * cos - p.y * sin;
+                    const ry = p.x * sin + p.y * cos;
+                    const wx = r.x + rx;
+                    const wy = r.y + ry;
+
+                    zones[r.zone].push({ x: wx - padding, y: wy - padding });
+                    zones[r.zone].push({ x: wx + padding, y: wy - padding });
+                    zones[r.zone].push({ x: wx + padding, y: wy + padding });
+                    zones[r.zone].push({ x: wx - padding, y: wy + padding });
                 });
             } else {
                 // Standard Box
-                zones[r.zone].push({ x: r.x - padding, y: r.y - padding });
-                zones[r.zone].push({ x: r.x + r.width + padding, y: r.y - padding });
-                zones[r.zone].push({ x: r.x + r.width + padding, y: r.y + r.height + padding });
-                zones[r.zone].push({ x: r.x - padding, y: r.y + r.height + padding });
+                const cx = r.x + r.width / 2;
+                const cy = r.y + r.height / 2;
+
+                const corners = [
+                    { x: r.x - padding, y: r.y - padding },
+                    { x: r.x + r.width + padding, y: r.y - padding },
+                    { x: r.x + r.width + padding, y: r.y + r.height + padding },
+                    { x: r.x - padding, y: r.y + r.height + padding }
+                ];
+
+                corners.forEach(c => {
+                    const dx = c.x - cx;
+                    const dy = c.y - cy;
+                    zones[r.zone].push({
+                        x: cx + dx * cos - dy * sin,
+                        y: cy + dx * sin + dy * cos
+                    });
+                });
             }
         });
 
