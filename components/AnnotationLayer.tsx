@@ -32,6 +32,8 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
     const isDraggingAnnotation = useRef(false);
     const dragStartPos = useRef<Point | null>(null);
+    const mouseDownTimestamp = useRef<number>(0);
+    const isCreatingNode = useRef(false);
 
     // Text Editing State
     const [editingTextId, setEditingTextId] = useState<string | null>(null);
@@ -63,6 +65,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         isDrawing.current = false;
         setActiveNodeIdx(null);
         setDragHandleType(null);
+        isCreatingNode.current = false;
         // Don't clear selection on tool reset, only on explicit deselect
     };
 
@@ -108,6 +111,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
 
         e.stopPropagation();
         e.preventDefault();
+        mouseDownTimestamp.current = Date.now();
         
         const point = toWorld(e.clientX, e.clientY);
 
@@ -166,6 +170,21 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                 setPoints([point]);
                 setTempPoint(point);
             } else {
+                // Check if closing (5px tolerance)
+                const startPoint = points[0];
+                const dist = Math.hypot(point.x - startPoint.x, point.y - startPoint.y);
+                if (dist < 5 / scale) {
+                    onAddAnnotation({
+                        id: `ann-${Date.now()}`,
+                        type: 'polyline',
+                        points: points,
+                        floor: currentFloor,
+                        style: properties,
+                        ...({ closed: true } as any)
+                    });
+                    resetTool();
+                    return;
+                }
                 setPoints(prev => [...prev, point]);
                 setTempPoint(point);
             }
@@ -197,6 +216,24 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
 
         // --- Bezier Pen Tool ---
         if (activeType === 'bezier') {
+            // Check for closing path (5px tolerance)
+            if (points.length >= 6) {
+                const startAnchor = points[0];
+                const dist = Math.hypot(point.x - startAnchor.x, point.y - startAnchor.y);
+                if (dist < 5 / scale) {
+                    onAddAnnotation({
+                        id: `ann-${Date.now()}`,
+                        type: 'bezier',
+                        points: points,
+                        floor: currentFloor,
+                        style: properties,
+                        ...({ closed: true } as any)
+                    });
+                    resetTool();
+                    return;
+                }
+            }
+
             // Hit test for existing nodes (Anchor, In, Out)
             // We check anchors first, then handles
             const hitRadius = 8 / scale;
@@ -214,24 +251,10 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
             }
 
             if (clickedNodeIdx !== -1 && clickedHandle) {
-                // Check for closing path: if clicking first anchor and we have enough points (at least 2 nodes / 6 points)
-                if (clickedNodeIdx === 0 && clickedHandle === 'anchor' && points.length >= 6) {
-                    const firstNode = points.slice(0, 3);
-                    const finalPoints = [...points, ...firstNode];
-                    onAddAnnotation({
-                        id: `ann-${Date.now()}`,
-                        type: 'bezier',
-                        points: finalPoints,
-                        floor: currentFloor,
-                        style: properties
-                    });
-                    resetTool();
-                    return;
-                }
-
                 // Select existing node/handle
                 setActiveNodeIdx(clickedNodeIdx);
                 setDragHandleType(clickedHandle);
+                isCreatingNode.current = false;
             } else {
                 // Add new node
                 const newNode = PenTool.createNode(point);
@@ -239,6 +262,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                 setPoints(newPoints);
                 setActiveNodeIdx(newPoints.length - 3); // Index of the new anchor
                 setDragHandleType('out'); // Default to dragging out-handle on creation
+                isCreatingNode.current = true;
             }
             return;
         }
@@ -307,6 +331,11 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         } else if (activeType === 'bezier') {
             if (isDrawing.current) {
                 if (activeNodeIdx !== null && dragHandleType) {
+                    // If creating a new node, require 1s hold before dragging handles
+                    if (isCreatingNode.current && Date.now() - mouseDownTimestamp.current < 300) {
+                        return;
+                    }
+
                     let newPoints = [...points];
                     
                     if (dragHandleType === 'anchor') {

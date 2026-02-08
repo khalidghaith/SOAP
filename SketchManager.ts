@@ -7,6 +7,7 @@ export class SketchManager {
     static generatePath(annotation: Annotation): string {
         const { type, points, style, handles } = annotation;
         if (points.length === 0) return '';
+        const closed = (annotation as any).closed;
 
         switch (type) {
             case 'line':
@@ -18,7 +19,9 @@ export class SketchManager {
                 if (style.fillet && style.fillet > 0) {
                     return this.generateFilletedPolyline(points, style.fillet);
                 }
-                return `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
+                let polyPath = `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
+                if (closed) polyPath += ' Z';
+                return polyPath;
 
             case 'arc':
                 if (points.length < 3) return '';
@@ -26,7 +29,7 @@ export class SketchManager {
                 return this.generateArc(points);
 
             case 'bezier':
-                return this.getBezierPath(points);
+                return this.getBezierPath(points, closed);
 
             default:
                 return '';
@@ -87,7 +90,7 @@ export class SketchManager {
         return `M ${p1.x} ${p1.y} Q ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`;
     }
 
-    private static getBezierPath(points: Point[]): string {
+    private static getBezierPath(points: Point[], closed: boolean = false): string {
         if (points.length < 3) return '';
         // Points layout: [Anchor0, In0, Out0, Anchor1, In1, Out1, ...]
         // We need at least one node (3 points) to start, but to draw a line we need 2 nodes (6 points).
@@ -97,6 +100,13 @@ export class SketchManager {
             const nextIn = points[i + 4];     // Handle In of next node
             const nextAnchor = points[i + 3]; // Anchor of next node
             d += ` C ${currentOut.x} ${currentOut.y}, ${nextIn.x} ${nextIn.y}, ${nextAnchor.x} ${nextAnchor.y}`;
+        }
+        if (closed && points.length >= 3) {
+            const lastOut = points[points.length - 1];
+            const firstIn = points[1];
+            const firstAnchor = points[0];
+            
+            d += ` C ${lastOut.x} ${lastOut.y}, ${firstIn.x} ${firstIn.y}, ${firstAnchor.x} ${firstAnchor.y} Z`;
         }
         return d;
     }
