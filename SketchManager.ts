@@ -17,7 +17,7 @@ export class SketchManager {
             case 'polyline':
                 if (points.length < 2) return '';
                 if (style.fillet && style.fillet > 0) {
-                    return this.generateFilletedPolyline(points, style.fillet);
+                    return this.generateFilletedPolyline(points, style.fillet, closed);
                 }
                 let polyPath = `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
                 if (closed) polyPath += ' Z';
@@ -39,43 +39,95 @@ export class SketchManager {
     /**
      * Implements fillet logic for polylines.
      */
-    private static generateFilletedPolyline(points: Point[], radius: number): string {
+    private static generateFilletedPolyline(points: Point[], radius: number, closed: boolean = false): string {
         if (points.length < 2) return '';
-        let d = `M ${points[0].x} ${points[0].y}`;
 
-        for (let i = 1; i < points.length - 1; i++) {
-            const p1 = points[i - 1];
-            const p2 = points[i];
-            const p3 = points[i + 1];
+        // Check if the polyline is geometrically closed (start point == end point)
+        const isGeometricallyClosed = points.length > 2 && 
+            Math.abs(points[0].x - points[points.length - 1].x) < 0.1 && 
+            Math.abs(points[0].y - points[points.length - 1].y) < 0.1;
 
-            // Calculate vectors
-            const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
-            const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
-
-            const len1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
-            const len2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
-
-            // Calculate offset for fillet
-            const angle = Math.acos((v1.x * v2.x + v1.y * v2.y) / (len1 * len2));
-            const offset = radius / Math.tan(angle / 2);
-
-            const actualOffset = Math.min(offset, len1 / 2, len2 / 2);
-
-            const startPoint = {
-                x: p2.x + (v1.x / len1) * actualOffset,
-                y: p2.y + (v1.y / len1) * actualOffset
-            };
-
-            const endPoint = {
-                x: p2.x + (v2.x / len2) * actualOffset,
-                y: p2.y + (v2.y / len2) * actualOffset
-            };
-
-            d += ` L ${startPoint.x} ${startPoint.y} Q ${p2.x} ${p2.y}, ${endPoint.x} ${endPoint.y}`;
+        const isClosed = closed || isGeometricallyClosed;
+        
+        let effectivePoints = [...points];
+        // If it's closed and the last point duplicates the first, remove it for the loop
+        if (isClosed && isGeometricallyClosed) {
+            effectivePoints.pop();
         }
 
-        d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`;
-        return d;
+        if (isClosed) {
+            if (effectivePoints.length < 3) {
+                return `M ${effectivePoints[0].x} ${effectivePoints[0].y} ` + 
+                       effectivePoints.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ') + ' Z';
+            }
+
+            let d = '';
+            const len = effectivePoints.length;
+            for (let i = 0; i < len; i++) {
+                const p1 = effectivePoints[(i - 1 + len) % len];
+                const p2 = effectivePoints[i];
+                const p3 = effectivePoints[(i + 1) % len];
+
+                const { startPoint, endPoint } = this.calculateFillet(p1, p2, p3, radius);
+
+                if (i === 0) {
+                    d += `M ${startPoint.x} ${startPoint.y}`;
+                } else {
+                    d += ` L ${startPoint.x} ${startPoint.y}`;
+                }
+                d += ` Q ${p2.x} ${p2.y}, ${endPoint.x} ${endPoint.y}`;
+            }
+            d += ' Z';
+            return d;
+        } else {
+            // Open polyline logic
+            let d = `M ${points[0].x} ${points[0].y}`;
+
+            for (let i = 1; i < points.length - 1; i++) {
+                const p1 = points[i - 1];
+                const p2 = points[i];
+                const p3 = points[i + 1];
+
+                const { startPoint, endPoint } = this.calculateFillet(p1, p2, p3, radius);
+
+                d += ` L ${startPoint.x} ${startPoint.y} Q ${p2.x} ${p2.y}, ${endPoint.x} ${endPoint.y}`;
+            }
+
+            d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`;
+            return d;
+        }
+    }
+
+    private static calculateFillet(p1: Point, p2: Point, p3: Point, radius: number) {
+        // Calculate vectors
+        const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
+        const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+
+        const len1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+        const len2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+
+        // Calculate offset for fillet
+        const dot = v1.x * v2.x + v1.y * v2.y;
+        const angle = Math.acos(Math.max(-1, Math.min(1, dot / (len1 * len2))));
+        
+        let offset = 0;
+        if (Math.abs(Math.tan(angle / 2)) > 0.001) {
+             offset = radius / Math.tan(angle / 2);
+        }
+
+        const actualOffset = Math.min(offset, len1 / 2, len2 / 2);
+
+        const startPoint = {
+            x: p2.x + (v1.x / len1) * actualOffset,
+            y: p2.y + (v1.y / len1) * actualOffset
+        };
+
+        const endPoint = {
+            x: p2.x + (v2.x / len2) * actualOffset,
+            y: p2.y + (v2.y / len2) * actualOffset
+        };
+        
+        return { startPoint, endPoint };
     }
 
     /**
