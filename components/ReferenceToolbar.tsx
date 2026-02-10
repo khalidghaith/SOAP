@@ -1,5 +1,5 @@
 import React from 'react';
-import { Lock, Unlock, Trash2, Scaling, X, Upload, Image as ImageIcon } from 'lucide-react';
+import { Lock, Unlock, Trash2, Scaling, X, Import, Image as ImageIcon } from 'lucide-react';
 import { ReferenceImage } from '../types';
 
 interface ReferenceToolbarProps {
@@ -41,7 +41,7 @@ export const ReferenceToolbar: React.FC<ReferenceToolbarProps> = ({
                     </div>
                     
                     <label className="w-full py-2 bg-slate-100 dark:bg-white/5 hover:bg-orange-50 dark:hover:bg-orange-900/20 border border-dashed border-slate-300 dark:border-dark-border hover:border-orange-300 dark:hover:border-orange-700 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-gray-400 hover:text-orange-600 cursor-pointer flex items-center justify-center gap-2 transition-all">
-                        <Upload size={14} /> Import Image
+                        <Import size={14} /> Import Image
                         <input type="file" accept="image/*" className="hidden" onChange={onImportImage} />
                     </label>
                 </div>

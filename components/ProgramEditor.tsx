@@ -262,7 +262,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-2">
-                                                    <span className="text-xs font-black text-slate-500 dark:text-gray-400">{group.totalArea}</span>
+                                                    <span className="text-xs font-black text-slate-500 dark:text-gray-400">{Number(group.totalArea.toFixed(2))}</span>
                                                 </td>
                                                 <td className="px-4 py-2">
                                                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{group.rooms.length} Spaces</span>
@@ -292,8 +292,8 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                                             <input
                                                                 type="number"
                                                                 className="w-16 bg-transparent border-b border-transparent focus:border-orange-500/50 text-xs font-bold text-slate-600 dark:text-gray-300 focus:outline-none text-right"
-                                                                value={room.area}
-                                                                onChange={(e) => updateRoom(room.id, { area: Number(e.target.value) })}
+                                                                value={Number(room.area.toFixed(2))}
+                                                                onChange={(e) => updateRoom(room.id, { area: parseFloat(e.target.value) })}
                                                                 onFocus={onInteractionStart}
                                                             />
                                                         </div>
@@ -325,7 +325,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                         </div>
                         <div className="bg-slate-50 dark:bg-white/5 border-t border-slate-200 dark:border-dark-border p-4 flex justify-between items-center text-xs font-bold text-slate-500 dark:text-gray-400">
                             <span className="font-mono">{rooms.length} Spaces</span>
-                            <span>Total Area: {totalArea} m²</span>
+                            <span>Total Area: {Number(totalArea.toFixed(2))} m²</span>
                         </div>
                     </div>
                 </div>
@@ -343,7 +343,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                     <div className="grid grid-cols-2 gap-3">
                         <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
                             <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Gross (x1.3)</span>
-                            <span className="text-base font-black text-slate-700 dark:text-gray-200">{((totalArea as number) * 1.3).toFixed(0)} m²</span>
+                            <span className="text-base font-black text-slate-700 dark:text-gray-200">{Number(((totalArea as number) * 1.3).toFixed(2))} m²</span>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
                             <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Count</span>
@@ -355,7 +355,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                     <div className="flex flex-col items-center justify-center py-4">
                         <div className="w-32 h-32 rounded-full border-[8px] border-slate-50 dark:border-white/5 flex flex-col items-center justify-center shadow-inner bg-white dark:bg-dark-surface relative">
                             <div className="absolute inset-0 rounded-full border border-slate-200 dark:border-white/10" />
-                            <span className="text-2xl font-black text-slate-800 dark:text-gray-100 tracking-tight">{(totalArea as number).toFixed(0)}</span>
+                            <span className="text-2xl font-black text-slate-800 dark:text-gray-100 tracking-tight">{Number(totalArea.toFixed(2))}</span>
                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Net m²</span>
                         </div>
                     </div>
@@ -379,7 +379,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                                 <div key={zone}>
                                     <div className="flex justify-between text-sm font-bold text-slate-700 dark:text-gray-300 mb-1.5">
                                         <span>{zone}</span>
-                                        <span>{(area as number).toFixed(0)} m²</span>
+                                        <span>{Number((area as number).toFixed(2))} m²</span>
                                     </div>
                                     <div className="h-1.5 w-full bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
                                         <div

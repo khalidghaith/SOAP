@@ -1900,7 +1900,7 @@ export default function App() {
                                                                     <input
                                                                         type="number"
                                                                         className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200 bg-transparent border-b border-transparent focus:border-orange-500 outline-none w-full"
-                                                                        value={selectedRoom!.area}
+                                                                    value={Number(selectedRoom!.area.toFixed(2))}
                                                                         onChange={(e) => {
                                                                             const val = parseFloat(e.target.value);
                                                                             if (!isNaN(val)) updateRoom(selectedRoom!.id, { area: val });
@@ -1974,8 +1974,8 @@ export default function App() {
                                                             <div className="flex justify-between items-center mb-2">
                                                                 <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Area</span>
                                                             </div>
-                                                            <div className="text-2xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                                                {multiSelectionStats?.totalArea.toFixed(1)} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
+                                                    <div className="text-2xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
+                                                        {Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
                                                             </div>
                                                         </div>
                                                         <div className="p-4 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl">
@@ -2018,7 +2018,7 @@ export default function App() {
                                                         <span className="text-[10px] font-bold text-orange-600 bg-orange-500/10 px-2 py-1 rounded-md">{selectedZoneRooms.length} Spaces</span>
                                                     </div>
                                                     <div className="text-3xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                                        {zoneArea} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
+                                                        {Number(zoneArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
                                                     </div>
                                                 </div>
 

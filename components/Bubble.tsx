@@ -1136,7 +1136,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                     <div key={i}>{line}</div>
                                 ))}
                             </div>
-                            <span className="text-[0.8em] opacity-70 font-sans whitespace-nowrap">{room.area}m²</span>
+                            <span className="text-[0.8em] opacity-70 font-sans whitespace-nowrap">{Number(room.area.toFixed(2))}m²</span>
                         </div>
                     </div>
                 </div>
