@@ -175,6 +175,19 @@ export default function App() {
     const [currentStyle, setCurrentStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
     const [selectedZone, setSelectedZone] = useState<string | null>(null);
+    const [volumesViewState, setVolumesViewState] = useState<{
+        cameraPosition: [number, number, number];
+        target: [number, number, number];
+        zoom: number;
+        viewType: 'perspective' | 'isometric';
+        hasInitialZoomed: boolean;
+    }>({
+        cameraPosition: [300, 300, 300],
+        target: [0, 0, 0],
+        zoom: 1.5,
+        viewType: 'perspective',
+        hasInitialZoomed: false
+    });
 
     // Tools State
     const [isMagnetMode, setIsMagnetMode] = useState(false);
@@ -1471,6 +1484,8 @@ export default function App() {
                                     selectedRoomIds={selectedRoomIds}
                                     darkMode={darkMode}
                                     gridSize={gridSize}
+                                    viewState={volumesViewState}
+                                    onViewStateChange={(updates) => setVolumesViewState(prev => ({ ...prev, ...updates }))}
                                     onRoomSelect={(id, multi) => {
                                         if (id === null) {
                                             setSelectedRoomIds(new Set());

@@ -19,6 +19,14 @@ interface VolumesViewProps {
     onRoomSelect: (id: string | null, multi: boolean) => void;
     darkMode: boolean;
     gridSize: number;
+    viewState: {
+        cameraPosition: [number, number, number];
+        target: [number, number, number];
+        zoom: number;
+        viewType: 'perspective' | 'isometric';
+        hasInitialZoomed: boolean;
+    };
+    onViewStateChange: (updates: Partial<VolumesViewProps['viewState']>) => void;
 }
 
 const FLOOR_GAP = 4; // spacing between floors in 3D units (2 meters)
@@ -265,7 +273,7 @@ function VerticalLink({ conn, rooms, floors, darkMode }: { conn: VerticalConnect
 }
 
 // Camera control helper
-function CameraController({ zoomTrigger, placedRooms, floors }: { zoomTrigger: number, placedRooms: Room[], floors: Floor[] }) {
+function CameraController({ zoomTrigger, placedRooms, floors, onFitComplete }: { zoomTrigger: number, placedRooms: Room[], floors: Floor[], onFitComplete?: () => void }) {
     const { camera, controls } = useThree();
 
     useEffect(() => {
@@ -313,11 +321,33 @@ function CameraController({ zoomTrigger, placedRooms, floors }: { zoomTrigger: n
         const distance = maxDim * 2;
         const newPos = center.clone().add(new THREE.Vector3(distance, distance, distance));
 
-        camera.position.lerp(newPos, 1);
+        camera.position.copy(newPos);
+        camera.lookAt(center);
         if (controls) {
-            (controls as any).target.lerp(center, 1);
+            (controls as any).target.copy(center);
+            (controls as any).update();
         }
-    }, [zoomTrigger, placedRooms, camera, controls]);
+
+        if (onFitComplete) onFitComplete();
+    }, [zoomTrigger, placedRooms, floors, camera, controls, onFitComplete]);
+
+    return null;
+}
+
+function ViewStateTracker({ onUpdate }: { onUpdate: (pos: THREE.Vector3, target: THREE.Vector3, zoom: number) => void }) {
+    const { camera, controls } = useThree();
+
+    useEffect(() => {
+        const ctrl = controls as any;
+        if (!ctrl) return;
+
+        const onChange = () => {
+            onUpdate(camera.position, ctrl.target, camera.zoom);
+        };
+
+        ctrl.addEventListener('change', onChange);
+        return () => ctrl.removeEventListener('change', onChange);
+    }, [camera, controls, onUpdate]);
 
     return null;
 }
@@ -325,11 +355,18 @@ function CameraController({ zoomTrigger, placedRooms, floors }: { zoomTrigger: n
 export function VolumesView({
     rooms, floors, verticalConnections, zoneColors, pixelsPerMeter,
     connectionSourceId, onLinkToggle, appSettings, diagramStyle,
-    selectedRoomIds, onRoomSelect, darkMode, gridSize
+    selectedRoomIds, onRoomSelect, darkMode, gridSize,
+    viewState, onViewStateChange
 }: VolumesViewProps) {
-    const [viewType, setViewType] = useState<'perspective' | 'isometric'>('perspective');
     const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0);
     const placedRooms = useMemo(() => rooms.filter(r => r.isPlaced), [rooms]);
+
+    // Track camera state in ref to avoid re-renders, save on unmount
+    const cameraStateRef = useRef({
+        pos: new THREE.Vector3(...viewState.cameraPosition),
+        target: new THREE.Vector3(...viewState.target),
+        zoom: viewState.zoom
+    });
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -344,24 +381,63 @@ export function VolumesView({
 
     const handleZoomToFit = () => setZoomToFitTrigger(prev => prev + 1);
 
+    // Initial Zoom to Fit
+    useEffect(() => {
+        if (!viewState.hasInitialZoomed && placedRooms.length > 0) {
+            const timer = setTimeout(() => {
+                setZoomToFitTrigger(t => t + 1);
+            }, 100);
+            return () => clearTimeout(timer);
+        }
+    }, [viewState.hasInitialZoomed, placedRooms.length]);
+
+    const handleFitComplete = () => {
+        onViewStateChange({ hasInitialZoomed: true });
+    };
+
+    const handleCameraUpdate = (pos: THREE.Vector3, target: THREE.Vector3, zoom: number) => {
+        cameraStateRef.current.pos.copy(pos);
+        cameraStateRef.current.target.copy(target);
+        cameraStateRef.current.zoom = zoom;
+    };
+
+    // Save state on unmount
+    useEffect(() => {
+        return () => {
+            onViewStateChange({
+                cameraPosition: [cameraStateRef.current.pos.x, cameraStateRef.current.pos.y, cameraStateRef.current.pos.z],
+                target: [cameraStateRef.current.target.x, cameraStateRef.current.target.y, cameraStateRef.current.target.z],
+                zoom: cameraStateRef.current.zoom
+            });
+        };
+    }, [onViewStateChange]);
+
+    const handleViewTypeChange = (type: 'perspective' | 'isometric') => {
+        onViewStateChange({
+            viewType: type,
+            cameraPosition: [cameraStateRef.current.pos.x, cameraStateRef.current.pos.y, cameraStateRef.current.pos.z],
+            target: [cameraStateRef.current.target.x, cameraStateRef.current.target.y, cameraStateRef.current.target.z],
+            zoom: cameraStateRef.current.zoom
+        });
+    };
+
     return (
         <div className="h-full w-full bg-[#f8fafc] dark:bg-[#020617] relative" style={{ cursor: 'default' }}>
             <Canvas
                 shadows
                 gl={{ antialias: true }}
-                orthographic={viewType === 'isometric'}
+                orthographic={viewState.viewType === 'isometric'}
                 style={{ cursor: 'default' }}
                 onPointerMissed={() => onRoomSelect(null, false)}
             >
-                {viewType === 'perspective' ? (
-                    <PerspectiveCamera makeDefault position={[300, 300, 300]} fov={45} />
+                {viewState.viewType === 'perspective' ? (
+                    <PerspectiveCamera makeDefault position={viewState.cameraPosition} fov={45} />
                 ) : (
-                    <OrthographicCamera makeDefault position={[300, 300, 300]} zoom={1.5} near={0.1} far={2000} />
+                    <OrthographicCamera makeDefault position={viewState.cameraPosition} zoom={viewState.zoom} near={0.1} far={2000} />
                 )}
-                <OrbitControls makeDefault zoomToCursor />
-
-                <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={placedRooms} floors={floors} />
-
+                <OrbitControls makeDefault zoomToCursor target={viewState.target} />
+                <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={placedRooms} floors={floors} onFitComplete={handleFitComplete} />
+                <ViewStateTracker onUpdate={handleCameraUpdate} />
                 <ambientLight intensity={0.7} />
                 <pointLight position={[200, 500, 200]} intensity={1.5} castShadow />
                 <directionalLight position={[-200, 400, -200]} intensity={0.8} />
@@ -419,14 +495,14 @@ export function VolumesView({
                     </div>
                     <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-2xl">
                         <button
-                            onClick={() => setViewType('perspective')}
-                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewType === 'perspective' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
+                            onClick={() => handleViewTypeChange('perspective')}
+                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewState.viewType === 'perspective' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
                         >
                             Perspective
                         </button>
                         <button
-                            onClick={() => setViewType('isometric')}
-                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewType === 'isometric' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
+                            onClick={() => handleViewTypeChange('isometric')}
+                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewState.viewType === 'isometric' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
                         >
                             Isometric
                         </button>
