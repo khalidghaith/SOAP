@@ -9,6 +9,7 @@ export interface RoomStyle {
   strokeWidth: number;
   opacity: number;
   cornerRadius?: number;
+  strokeDasharray?: string;
 }
 
 export interface Room {
@@ -31,6 +32,9 @@ export interface Room {
   polygon?: Point[];
   shape?: 'rect' | 'polygon' | 'bubble';
   style?: RoomStyle;
+  isTextUnlocked?: boolean;
+  textPos?: Point;
+  depth?: number;
 }
 
 export interface ZoneColor {
@@ -124,14 +128,28 @@ export const DIAGRAM_STYLES: DiagramStyle[] = [
   }
 ];
 
-export const FLOORS = [
-  { id: -1, label: 'Basement' },
-  { id: 0, label: 'Ground Floor' },
-  { id: 1, label: 'Level 1' },
-  { id: 2, label: 'Level 2' },
-  { id: 3, label: 'Level 3' },
-  { id: 4, label: 'Roof' },
+export const FLOORS: Floor[] = [
+  { id: -1, label: 'Basement', height: 4 },
+  { id: 0, label: 'Ground Floor', height: 4 },
+  { id: 1, label: 'Level 1', height: 4 },
+  { id: 2, label: 'Level 2', height: 4 },
+  { id: 3, label: 'Level 3', height: 4 },
+  { id: 4, label: 'Roof', height: 4 },
 ];
+
+export interface Floor {
+  id: number;
+  label: string;
+  height: number;
+}
+
+export interface VerticalConnection {
+  id: string;
+  fromId: string;
+  toId: string;
+  fromFloor: number;
+  toFloor: number;
+}
 
 export interface AppSettings {
   zoneTransparency: number;
@@ -165,6 +183,8 @@ export interface Annotation {
     fontFamily?: string;
     fontSize?: number;
     fontWeight?: string;
+    fontStyle?: string;
+    textDecoration?: string;
     textAlign?: 'left' | 'center' | 'right';
     text?: string;
   };

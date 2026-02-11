@@ -20,7 +20,7 @@ import {
     Minus,
     MoreHorizontal
 } from 'lucide-react';
-import { AnnotationType, ArrowCapType } from '../types';
+import { Annotation, AnnotationType, ArrowCapType } from '../types';
 
 interface SketchToolbarProps {
     isActive: boolean;
@@ -30,10 +30,10 @@ interface SketchToolbarProps {
     properties: {
         stroke: string;
         strokeWidth: number;
-        strokeDash: string;
-        startCap: ArrowCapType;
-        endCap: ArrowCapType;
-        fillet: number;
+        strokeDash?: string;
+        startCap?: ArrowCapType;
+        endCap?: ArrowCapType;
+        fillet?: number;
         fontSize?: number;
         fontFamily?: string;
         fontWeight?: string;

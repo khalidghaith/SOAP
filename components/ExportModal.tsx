@@ -5,7 +5,7 @@ import { ExportFormat } from '../utils/exportSystem';
 interface ExportModalProps {
     onExport: (format: ExportFormat | 'csv') => void;
     onClose: () => void;
-    viewMode: 'EDITOR' | 'CANVAS';
+    viewMode: 'EDITOR' | 'CANVAS' | 'VOLUMES';
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, viewMode }) => {

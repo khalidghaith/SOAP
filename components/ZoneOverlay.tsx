@@ -6,7 +6,7 @@ import { getConvexHull, createRoundedPath } from '../utils/geometry';
 const getBubbleCurvePoints = (points: Point[], segmentsPerCurve: number = 5): Point[] => {
     if (points.length < 3) return points;
     const result: Point[] = [];
-    
+
     for (let i = 0; i < points.length; i++) {
         const p0 = points[(i - 1 + points.length) % points.length];
         const p1 = points[i];
@@ -24,8 +24,8 @@ const getBubbleCurvePoints = (points: Point[], segmentsPerCurve: number = 5): Po
             const t = j / segmentsPerCurve;
             const it = 1 - t;
             // Cubic Bezier formula
-            const x = it*it*it*p1.x + 3*it*it*t*cp1x + 3*it*t*t*cp2x + t*t*t*p2.x;
-            const y = it*it*it*p1.y + 3*it*it*t*cp1y + 3*it*t*t*cp2y + t*t*t*p2.y;
+            const x = it * it * it * p1.x + 3 * it * it * t * cp1x + 3 * it * t * t * cp2x + t * t * t * p2.x;
+            const y = it * it * it * p1.y + 3 * it * it * t * cp1y + 3 * it * t * t * cp2y + t * t * t * p2.y;
             result.push({ x, y });
         }
     }
@@ -39,7 +39,7 @@ interface ZoneOverlayProps {
     onZoneDrag: (zone: string, dx: number, dy: number) => void;
     onSelectZone?: (zone: string) => void;
     onDragStart?: () => void;
-    onDragEnd?: () => void;
+    onDragEnd?: (e: MouseEvent) => void;
     appSettings: AppSettings;
     zoneColors: Record<string, ZoneColor>;
 }

@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor } from './types';
+import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { ZoneOverlay } from './components/ZoneOverlay'; // Newly added
 import { ExportModal } from './components/ExportModal';
 import { SettingsModal } from './components/SettingsModal';
+import { VolumesView } from './components/VolumesView';
 import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport, getHexColorForZone, getHexBorderForZone } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
@@ -13,7 +14,7 @@ import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
     LandPlot, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Trash2, Lock, Unlock, BrushCleaning,
-    Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling
+    Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar } from './components/SketchToolbar';
@@ -78,7 +79,7 @@ const calculatePolygonArea = (points: Point[]): number => {
     return Math.abs(area) / 2;
 };
 
-type ViewMode = 'EDITOR' | 'CANVAS';
+type ViewMode = 'EDITOR' | 'CANVAS' | 'VOLUMES';
 
 export default function App() {
     // Load autosave data
@@ -235,6 +236,25 @@ export default function App() {
 
         return () => clearTimeout(timer);
     }, [projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages]);
+
+    // --- 3D / Volumes View Computations ---
+    const verticalConnections = useMemo(() => {
+        const vconns: VerticalConnection[] = [];
+        connections.forEach(conn => {
+            const from = rooms.find(r => r.id === conn.fromId);
+            const to = rooms.find(r => r.id === conn.toId);
+            if (from && to && from.floor !== to.floor) {
+                vconns.push({
+                    id: conn.id,
+                    fromId: conn.fromId,
+                    toId: conn.toId,
+                    fromFloor: from.floor,
+                    toFloor: to.floor
+                });
+            }
+        });
+        return vconns;
+    }, [connections, rooms]);
 
     // --- History System ---
     const [history, setHistory] = useState<{
@@ -1168,18 +1188,15 @@ export default function App() {
             if (!selectedRoomIds.has(r.id)) return r;
             if ((r.shape || 'rect') === shape) return r;
 
-            const roomStyle = r.style || {};
-            // Only carry over styles that are actually defined (custom overrides).
-            // If they are undefined, we let the new shape inherit from the Zone/AppSettings defaults naturally.
+            const roomStyle = r.style;
             const newStyle: any = { ...roomStyle };
 
-            // Preserve specific overrides if they exist, otherwise leave undefined to use defaults
-            if (roomStyle.fill) newStyle.fill = roomStyle.fill;
-            if (roomStyle.stroke) newStyle.stroke = roomStyle.stroke;
-            if (roomStyle.strokeWidth) newStyle.strokeWidth = roomStyle.strokeWidth;
-            if (roomStyle.opacity) newStyle.opacity = roomStyle.opacity;
-            if (roomStyle.cornerRadius) newStyle.cornerRadius = roomStyle.cornerRadius;
-            if (roomStyle.strokeDasharray) newStyle.strokeDasharray = roomStyle.strokeDasharray;
+            if (roomStyle?.fill) newStyle.fill = roomStyle.fill;
+            if (roomStyle?.stroke) newStyle.stroke = roomStyle.stroke;
+            if (roomStyle?.strokeWidth) newStyle.strokeWidth = roomStyle.strokeWidth;
+            if (roomStyle?.opacity) newStyle.opacity = roomStyle.opacity;
+            if (roomStyle?.cornerRadius) newStyle.cornerRadius = roomStyle.cornerRadius;
+            if (roomStyle?.strokeDasharray) newStyle.strokeDasharray = roomStyle.strokeDasharray;
 
             // If the original room had no style object, newStyle might be empty, which is perfect.
             const newRoom = { ...r, shape, style: Object.keys(newStyle).length > 0 ? newStyle : undefined };
@@ -1298,6 +1315,12 @@ export default function App() {
                         >
                             <LandPlot size={14} /> Canvas
                         </button>
+                        <button
+                            onClick={() => setViewMode('VOLUMES')}
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${viewMode === 'VOLUMES' ? 'bg-orange-500 text-white shadow-md' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-200/50 dark:hover:bg-white/10'}`}
+                        >
+                            <Box size={14} /> Volumes
+                        </button>
                     </div>
                 </div>
 
@@ -1410,14 +1433,14 @@ export default function App() {
                         <main
                             ref={mainRef}
                             className={`flex-1 relative overflow-hidden bg-[#f0f2f5] dark:bg-dark-bg transition-colors duration-500 ${isZoneDragging ? 'no-transition' : ''}`}
-                            onMouseDown={isSketchMode ? undefined : handlePanStart}
-                            onMouseMove={isSketchMode ? undefined : handleMouseMove}
-                            onMouseUp={isSketchMode ? undefined : handleMouseUp}
-                            onDragOver={handleDragOver}
-                            onDrop={handleDrop}
+                            onMouseDown={isSketchMode || viewMode === 'VOLUMES' ? undefined : handlePanStart}
+                            onMouseMove={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleMouseMove}
+                            onMouseUp={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleMouseUp}
+                            onDragOver={viewMode === 'VOLUMES' ? undefined : handleDragOver}
+                            onDrop={viewMode === 'VOLUMES' ? undefined : handleDrop}
                             style={{
-                                cursor: isSketchMode ? 'crosshair' : (isPanning.current ? 'grabbing' : 'grab'),
-                                ...(showGrid ? {
+                                cursor: viewMode === 'VOLUMES' ? 'default' : (isSketchMode ? 'crosshair' : (isPanning.current ? 'grabbing' : 'grab')),
+                                ...(viewMode !== 'VOLUMES' && showGrid ? {
                                     backgroundImage: `
                                         linear-gradient(to right, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px),
                                         linear-gradient(to bottom, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px)
@@ -1429,356 +1452,383 @@ export default function App() {
                         >        {/* Reset selection if clicking background (unless panning) */}
                             {/* The onMouseDown handler above already handles this */}
 
-                            {/* Background Reference Images */}
-                            <div
-                                className="absolute inset-0 origin-top-left"
-                                style={{
-                                    transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                                    pointerEvents: isReferenceMode ? 'all' : 'none'
-                                }}
-                            >
-                                <svg className="absolute inset-0 overflow-visible" style={{ pointerEvents: 'none' }}>
-                                    <ReferenceLayer
-                                        images={referenceImages}
-                                        currentFloor={currentFloor}
-                                        scale={scale}
-                                        offset={offset}
-                                        selectedImageId={selectedReferenceImageId}
-                                        onSelectImage={setSelectedReferenceImageId}
-                                        onUpdateImage={handleUpdateReferenceImage}
-                                        isScalingMode={!!referenceScaleState}
-                                        scalingState={referenceScaleState}
-                                        onScalingPointClick={handleScalingPointClick}
-                                        toWorld={toWorld}
-                                        isReferenceMode={isReferenceMode}
-                                    />
-                                </svg>
-                            </div>
-
-                            {/* Zone Overlay Layer - Behind everything */}
-                            <div
-                                className={`absolute inset-0 origin-top-left pointer-events-none ${isReferenceMode ? '[&_*]:pointer-events-none' : ''}`}
-                                style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
-                            >
-                                <ZoneOverlay
+                            {viewMode === 'VOLUMES' ? (
+                                <VolumesView
                                     rooms={rooms}
-                                    currentFloor={currentFloor}
-                                    scale={scale}
-                                    onZoneDrag={handleZoneDrag}
-                                    onSelectZone={handleZoneClick}
-                                    onDragStart={() => { setIsZoneDragging(true); addToHistory(); }}
-                                    onDragEnd={handleZoneDragEnd}
-                                    appSettings={appSettings}
+                                    floors={floors}
+                                    verticalConnections={verticalConnections}
                                     zoneColors={zoneColors}
+                                    pixelsPerMeter={PIXELS_PER_METER}
+                                    connectionSourceId={connectionSourceId}
+                                    onLinkToggle={toggleLink}
+                                    appSettings={appSettings}
+                                    diagramStyle={currentStyle}
+                                    selectedRoomIds={selectedRoomIds}
+                                    darkMode={darkMode}
+                                    gridSize={gridSize}
+                                    onRoomSelect={(id, multi) => {
+                                        setSelectedRoomIds(prev => {
+                                            const next = new Set(multi ? prev : []);
+                                            if (next.has(id)) next.delete(id);
+                                            else next.add(id);
+                                            return next;
+                                        });
+                                    }}
                                 />
-                            </div>
+                            ) : (
+                                <>
+                                    {/* Background Reference Images */}
+                                    <div
+                                        className="absolute inset-0 origin-top-left"
+                                        style={{
+                                            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+                                            pointerEvents: isReferenceMode ? 'all' : 'none'
+                                        }}
+                                    >
+                                        <svg className="absolute inset-0 overflow-visible" style={{ pointerEvents: 'none' }}>
+                                            <ReferenceLayer
+                                                images={referenceImages}
+                                                currentFloor={currentFloor}
+                                                scale={scale}
+                                                offset={offset}
+                                                selectedImageId={selectedReferenceImageId}
+                                                onSelectImage={setSelectedReferenceImageId}
+                                                onUpdateImage={handleUpdateReferenceImage}
+                                                isScalingMode={!!referenceScaleState}
+                                                scalingState={referenceScaleState}
+                                                onScalingPointClick={handleScalingPointClick}
+                                                toWorld={toWorld}
+                                                isReferenceMode={isReferenceMode}
+                                            />
+                                        </svg>
+                                    </div>
 
-                            {/* Yellow Filter for Sketch Mode */}
-                            {isSketchMode && (
-                                <div className="absolute inset-0 bg-yellow-400/5 dark:bg-yellow-500/10 pointer-events-none z-30" />
-                            )}
-
-                            {/* Connection Lines Layer - Explicitly behind bubbles */}
-                            <div
-                                className="absolute inset-0 origin-top-left pointer-events-none"
-                                style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
-                            >
-                                <svg className="absolute inset-0 overflow-visible pointer-events-none">
-                                    <defs>
-                                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                                            <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
-                                        </marker>
-                                    </defs>
-                                    {connections.map(conn => {
-                                        const fromRoom = rooms.find(r => r.id === conn.fromId);
-                                        const toRoom = rooms.find(r => r.id === conn.toId);
-                                        if (!fromRoom || !toRoom || !fromRoom.isPlaced || !toRoom.isPlaced || fromRoom.floor !== currentFloor || toRoom.floor !== currentFloor) return null;
-
-                                        const x1 = fromRoom.x + fromRoom.width / 2;
-                                        const y1 = fromRoom.y + fromRoom.height / 2;
-                                        const x2 = toRoom.x + toRoom.width / 2;
-                                        const y2 = toRoom.y + toRoom.height / 2;
-
-                                        return (
-                                            <g key={conn.id}>
-                                                <line
-                                                    x1={x1} y1={y1} x2={x2} y2={y2}
-                                                    strokeWidth={2 / scale}
-                                                    strokeDasharray={currentStyle.sketchy ? "5,5" : "none"}
-                                                    className="stroke-slate-300 dark:stroke-slate-700"
-                                                />
-                                                <circle cx={x1} cy={y1} r={4 / scale} className="fill-slate-400 dark:fill-slate-600" />
-                                                <circle cx={x2} cy={y2} r={4 / scale} className="fill-slate-400 dark:fill-slate-600" />
-                                            </g>
-                                        );
-                                    })}
-
-                                    {/* Snapping Guides */}
-                                    {snapGuides && (
-                                        <>
-                                            {snapGuides.x !== undefined && (
-                                                <line
-                                                    x1={snapGuides.x} y1="-10000" x2={snapGuides.x} y2="10000"
-                                                    stroke="#3b82f6" strokeWidth={1 / scale} strokeDasharray="5,5"
-                                                    className="opacity-50"
-                                                />
-                                            )}
-                                            {snapGuides.y !== undefined && (
-                                                <line
-                                                    x1="-10000" y1={snapGuides.y} x2="10000" y2={snapGuides.y}
-                                                    stroke="#3b82f6" strokeWidth={1 / scale} strokeDasharray="5,5"
-                                                    className="opacity-50"
-                                                />
-                                            )}
-                                        </>
-                                    )}
-                                </svg>
-                            </div>
-
-                            {/* Bubbles Layer */}
-                            <div
-                                className="absolute inset-0 origin-top-left pointer-events-none"
-                                style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
-                            >
-                                {(() => {
-                                    const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
-                                    return visibleRooms.map(room => (
-                                        <Bubble
-                                            key={room.id}
-                                            room={room}
-                                            zoomScale={scale}
-                                            updateRoom={updateRoom}
-                                            onMove={(x, y) => handleMoveRoom(room.id, x, y)}
-                                            isSelected={selectedRoomIds.has(room.id)}
-                                            isLinkingSource={connectionSourceId === room.id}
-                                            onLinkToggle={toggleLink}
-                                            getSnappedPosition={getSnappedPosition}
-                                            onSelect={(id, multi) => {
-                                                if (connectionSourceId) {
-                                                    toggleLink(id);
-                                                    return;
-                                                }
-                                                // Auto-lock text of other rooms when selecting a new one
-                                                if (!multi) {
-                                                    setRooms(prev => prev.map(r => (r.id !== id && r.isTextUnlocked) ? { ...r, isTextUnlocked: false } : r));
-                                                }
-                                                setSelectedRoomIds(prev => {
-                                                    const next = new Set(multi ? prev : []);
-                                                    if (next.has(id)) next.delete(id);
-                                                    else next.add(id);
-                                                    return next;
-                                                });
-                                                if (!multi) setSelectedZone(null); // Clear zone selection on room click unless multi?
-                                            }}
-                                            diagramStyle={currentStyle}
-                                            snapEnabled={snapEnabled}
-                                            snapPixelUnit={appSettings.snapToGrid ? gridSize * PIXELS_PER_METER : 1}
-                                            pixelsPerMeter={PIXELS_PER_METER}
-                                            floors={floors}
+                                    {/* Zone Overlay Layer - Behind everything */}
+                                    <div
+                                        className={`absolute inset-0 origin-top-left pointer-events-none ${isReferenceMode ? '[&_*]:pointer-events-none' : ''}`}
+                                        style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                                    >
+                                        <ZoneOverlay
+                                            rooms={rooms}
+                                            currentFloor={currentFloor}
+                                            scale={scale}
+                                            onZoneDrag={handleZoneDrag}
+                                            onSelectZone={handleZoneClick}
+                                            onDragStart={() => { setIsZoneDragging(true); addToHistory(); }}
+                                            onDragEnd={handleZoneDragEnd}
                                             appSettings={appSettings}
                                             zoneColors={zoneColors}
-                                            onDragEnd={handleBubbleDragEnd}
-                                            onDragStart={() => { setIsBubbleDragging(true); addToHistory(); }}
-                                            isAnyDragging={isBubbleDragging}
-                                            otherRooms={selectedRoomIds.has(room.id) ? visibleRooms.filter(r => r.id !== room.id) : undefined}
-                                            isSketchMode={isSketchMode || isReferenceMode}
                                         />
-                                    ));
-                                })()}
-                            </div>
-
-                            {/* Annotation Layer - Above all spaces and zones */}
-                            <div
-                                className={`absolute inset-0 ${isSketchMode ? '' : 'pointer-events-none'}`}
-                                style={{ zIndex: 100 }}
-                            >
-                                <AnnotationLayer
-                                    annotations={annotations}
-                                    isSketchMode={isSketchMode}
-                                    activeType={activeSketchType}
-                                    properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
-                                    currentFloor={currentFloor}
-                                    scale={scale}
-                                    offset={offset}
-                                    selectedAnnotationId={selectedAnnotationId}
-                                    onSelectAnnotation={setSelectedAnnotationId}
-                                    onAddAnnotation={(ann) => {
-                                        addToHistory();
-                                        setAnnotations(prev => [...prev, ann]);
-                                    }}
-                                    onUpdateAnnotation={updateAnnotation}
-                                    onDeleteAnnotation={deleteAnnotation}
-                                    onInteractionStart={addToHistory}
-                                />
-                            </div>
-
-                            {/* Tools Bar (Top Left) */}
-                            <div className="absolute top-6 left-6 flex flex-col gap-2 z-[200]">
-                                <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-sm p-1.5 rounded-full border border-slate-100 dark:border-dark-border shadow-lg flex items-center gap-1">
-                                    <div className="flex items-center bg-slate-100/50 dark:bg-white/5 rounded-full px-2 py-1 border border-slate-200/50 dark:border-dark-border gap-2 mr-1">
-                                        <span className="text-xs font-bold font-sans w-8 text-center">{gridSize}m</span>
-                                        <div className="flex flex-col -space-y-1">
-                                            <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-orange-600"><ChevronUp size={12} /></button>
-                                            <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-orange-600"><ChevronDown size={12} /></button>
-                                        </div>
-                                        <button
-                                            onClick={() => setShowGrid(!showGrid)}
-                                            className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm'}`}
-                                            title="Toggle Grid"
-                                        >
-                                            <Grid size={12} />
-                                        </button>
                                     </div>
 
-                                    <button
-                                        onClick={handleAutoArrange}
-                                        className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600"
-                                        title="Auto Arrange Layout"
-                                    >
-                                        <LayoutTemplate size={16} />
-                                    </button>
+                                    {/* Yellow Filter for Sketch Mode */}
+                                    {isSketchMode && (
+                                        <div className="absolute inset-0 bg-yellow-400/5 dark:bg-yellow-500/10 pointer-events-none z-30" />
+                                    )}
 
-                                    <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50'}`} title="Toggle Snapping"><Magnet size={16} /></button>
-
-                                    <button
-                                        onClick={() => setIsMagnetMode(!isMagnetMode)}
-                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
-                                        title="Physics / Magnetic Zones"
-                                    >
-                                        <Atom size={16} className={isMagnetMode ? "animate-spin" : ""} />
-                                    </button>
-
-                                    <button
-                                        onClick={() => {
-                                            const newValue = !isReferenceMode;
-                                            setIsReferenceMode(newValue);
-                                            if (newValue) setIsSketchMode(false);
-                                        }}
-                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isReferenceMode ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
-                                        title="Edit Reference Images"
-                                    >
-                                        <ImageIcon size={16} />
-                                    </button>
-
-                                    <SketchToolbar
-                                        isActive={isSketchMode}
-                                        onToggle={() => {
-                                            const newValue = !isSketchMode;
-                                            setIsSketchMode(newValue);
-                                            if (newValue) setIsReferenceMode(false);
-                                        }}
-                                        activeType={activeSketchType}
-                                        onTypeChange={setActiveSketchType}
-                                        properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
-                                        onPropertyChange={handleAnnotationPropertyChange}
-                                        selectedAnnotation={selectedAnnotation}
-                                        onZIndex={handleZIndex}
-                                        onDelete={() => selectedAnnotationId && deleteAnnotation(selectedAnnotationId)}
-                                    />
-
-                                    <button
-                                        onClick={handleClearCanvas}
-                                        className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500"
-                                        title="Clear Canvas"
-                                    >
-                                        <BrushCleaning size={16} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Reference Panel - Moved to Top Left (Below Toolbar) */}
-                            <div className="absolute top-20 left-6 z-[190]">
-                                <ReferenceToolbar
-                                    isReferenceMode={isReferenceMode}
-                                    selectedImage={referenceImages.find(i => i.id === selectedReferenceImageId) || null}
-                                    onUpdateImage={handleUpdateReferenceImage}
-                                    onDeleteImage={handleDeleteReferenceImage}
-                                    onImportImage={handleImportReference}
-                                    onStartScaling={(id) => setReferenceScaleState({ imageId: id, points: [], step: 'point1' })}
-                                    isScalingMode={!!referenceScaleState}
-                                    onCancelScaling={() => setReferenceScaleState(null)}
-                                />
-                            </div>
-
-                            <div className="absolute top-6 right-6 flex flex-col items-end gap-2 z-[200]">
-                                <div className="h-12 bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md px-4 rounded-full border border-slate-200 dark:border-dark-border shadow-xl flex items-center gap-4 animate-in slide-in-from-right-4 transition-all duration-300">
-                                    <div className="flex items-center gap-2 text-slate-400">
-                                        <div className="h-1 w-12 bg-slate-300/50 dark:bg-white/10 rounded-full relative">
-                                            <div className="absolute -top-3 left-0 text-[8px] font-bold">0m</div>
-                                            <div className="absolute -top-3 right-0 text-[8px] font-bold">{(16 / scale / PIXELS_PER_METER * 4).toFixed(1)}m</div>
-                                        </div>
-                                    </div>
-                                    <div className="h-4 w-px bg-slate-200 dark:bg-dark-border" />
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs font-sans font-black text-slate-700 dark:text-gray-300">{(scale * 100).toFixed(0)}%</span>
-                                        <button onClick={handleZoomToFit} className="w-6 h-6 rounded-full bg-orange-100 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 flex items-center justify-center hover:bg-orange-500 hover:text-white transition-all shadow-sm" title="Zoom to Fit">
-                                            <Maximize size={12} />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Scale Bar on Canvas - Dynamic */}
-                            <div className="absolute bottom-12 right-6 flex flex-col items-end gap-1 pointer-events-none">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-bold text-slate-400 text-shadow-sm">10 meters</span>
-                                    <div className="h-2 border-x border-b border-slate-400/80 bg-white/20 backdrop-blur-sm"
-                                        style={{ width: 10 * PIXELS_PER_METER * scale }} />
-                                </div>
-                            </div>
-
-                            {/* Floor Tabs Bar */}
-                            <div className="absolute bottom-0 left-0 right-0 h-8 bg-slate-200/50 dark:bg-black/40 flex items-start px-4 gap-1 z-40 backdrop-blur-sm border-t border-slate-200/50 dark:border-dark-border">
-                                {floors.map(f => (
+                                    {/* Connection Lines Layer - Explicitly behind bubbles */}
                                     <div
-                                        key={f.id}
-                                        onClick={() => setCurrentFloor(f.id)}
-                                        onDoubleClick={() => setEditingFloorId(f.id)}
-                                        className={`group
+                                        className="absolute inset-0 origin-top-left pointer-events-none"
+                                        style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                                    >
+                                        <svg className="absolute inset-0 overflow-visible pointer-events-none">
+                                            <defs>
+                                                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                                    <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
+                                                </marker>
+                                            </defs>
+                                            {connections.map(conn => {
+                                                const fromRoom = rooms.find(r => r.id === conn.fromId);
+                                                const toRoom = rooms.find(r => r.id === conn.toId);
+                                                if (!fromRoom || !toRoom || !fromRoom.isPlaced || !toRoom.isPlaced || fromRoom.floor !== currentFloor || toRoom.floor !== currentFloor) return null;
+
+                                                const x1 = fromRoom.x + fromRoom.width / 2;
+                                                const y1 = fromRoom.y + fromRoom.height / 2;
+                                                const x2 = toRoom.x + toRoom.width / 2;
+                                                const y2 = toRoom.y + toRoom.height / 2;
+
+                                                return (
+                                                    <g key={conn.id}>
+                                                        <line
+                                                            x1={x1} y1={y1} x2={x2} y2={y2}
+                                                            strokeWidth={2 / scale}
+                                                            strokeDasharray={currentStyle.sketchy ? "5,5" : "none"}
+                                                            className="stroke-slate-300 dark:stroke-slate-700"
+                                                        />
+                                                        <circle cx={x1} cy={y1} r={4 / scale} className="fill-slate-400 dark:fill-slate-600" />
+                                                        <circle cx={x2} cy={y2} r={4 / scale} className="fill-slate-400 dark:fill-slate-600" />
+                                                    </g>
+                                                );
+                                            })}
+
+                                            {/* Snapping Guides */}
+                                            {snapGuides && (
+                                                <>
+                                                    {snapGuides.x !== undefined && (
+                                                        <line
+                                                            x1={snapGuides.x} y1="-10000" x2={snapGuides.x} y2="10000"
+                                                            stroke="#3b82f6" strokeWidth={1 / scale} strokeDasharray="5,5"
+                                                            className="opacity-50"
+                                                        />
+                                                    )}
+                                                    {snapGuides.y !== undefined && (
+                                                        <line
+                                                            x1="-10000" y1={snapGuides.y} x2="10000" y2={snapGuides.y}
+                                                            stroke="#3b82f6" strokeWidth={1 / scale} strokeDasharray="5,5"
+                                                            className="opacity-50"
+                                                        />
+                                                    )}
+                                                </>
+                                            )}
+                                        </svg>
+                                    </div>
+
+                                    {/* Bubbles Layer */}
+                                    <div
+                                        className="absolute inset-0 origin-top-left pointer-events-none"
+                                        style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                                    >
+                                        {(() => {
+                                            const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+                                            return visibleRooms.map(room => (
+                                                <Bubble
+                                                    key={room.id}
+                                                    room={room}
+                                                    zoomScale={scale}
+                                                    updateRoom={updateRoom}
+                                                    onMove={(x, y) => handleMoveRoom(room.id, x, y)}
+                                                    isSelected={selectedRoomIds.has(room.id)}
+                                                    isLinkingSource={connectionSourceId === room.id}
+                                                    onLinkToggle={toggleLink}
+                                                    getSnappedPosition={getSnappedPosition}
+                                                    onSelect={(id, multi) => {
+                                                        if (connectionSourceId) {
+                                                            toggleLink(id);
+                                                            return;
+                                                        }
+                                                        // Auto-lock text of other rooms when selecting a new one
+                                                        if (!multi) {
+                                                            setRooms(prev => prev.map(r => (r.id !== id && r.isTextUnlocked) ? { ...r, isTextUnlocked: false } : r));
+                                                        }
+                                                        setSelectedRoomIds(prev => {
+                                                            const next = new Set(multi ? prev : []);
+                                                            if (next.has(id)) next.delete(id);
+                                                            else next.add(id);
+                                                            return next;
+                                                        });
+                                                        if (!multi) setSelectedZone(null); // Clear zone selection on room click unless multi?
+                                                    }}
+                                                    diagramStyle={currentStyle}
+                                                    snapEnabled={snapEnabled}
+                                                    snapPixelUnit={appSettings.snapToGrid ? gridSize * PIXELS_PER_METER : 1}
+                                                    pixelsPerMeter={PIXELS_PER_METER}
+                                                    floors={floors}
+                                                    appSettings={appSettings}
+                                                    zoneColors={zoneColors}
+                                                    onDragEnd={handleBubbleDragEnd}
+                                                    onDragStart={() => { setIsBubbleDragging(true); addToHistory(); }}
+                                                    isAnyDragging={isBubbleDragging}
+                                                    otherRooms={selectedRoomIds.has(room.id) ? visibleRooms.filter(r => r.id !== room.id) : undefined}
+                                                    isSketchMode={isSketchMode || isReferenceMode}
+                                                />
+                                            ));
+                                        })()}
+                                    </div>
+
+                                    {/* Annotation Layer - Above all spaces and zones */}
+                                    <div
+                                        className={`absolute inset-0 ${isSketchMode ? '' : 'pointer-events-none'}`}
+                                        style={{ zIndex: 100 }}
+                                    >
+                                        <AnnotationLayer
+                                            annotations={annotations}
+                                            isSketchMode={isSketchMode}
+                                            activeType={activeSketchType}
+                                            properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
+                                            currentFloor={currentFloor}
+                                            scale={scale}
+                                            offset={offset}
+                                            selectedAnnotationId={selectedAnnotationId}
+                                            onSelectAnnotation={setSelectedAnnotationId}
+                                            onAddAnnotation={(ann) => {
+                                                addToHistory();
+                                                setAnnotations(prev => [...prev, ann]);
+                                            }}
+                                            onUpdateAnnotation={updateAnnotation}
+                                            onDeleteAnnotation={deleteAnnotation}
+                                            onInteractionStart={addToHistory}
+                                        />
+                                    </div>
+
+                                    {/* Tools Bar (Top Left) */}
+                                    <div className="absolute top-6 left-6 flex flex-col gap-2 z-[200]">
+                                        <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-sm p-1.5 rounded-full border border-slate-100 dark:border-dark-border shadow-lg flex items-center gap-1">
+                                            <div className="flex items-center bg-slate-100/50 dark:bg-white/5 rounded-full px-2 py-1 border border-slate-200/50 dark:border-dark-border gap-2 mr-1">
+                                                <span className="text-xs font-bold font-sans w-8 text-center">{gridSize}m</span>
+                                                <div className="flex flex-col -space-y-1">
+                                                    <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-orange-600"><ChevronUp size={12} /></button>
+                                                    <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-orange-600"><ChevronDown size={12} /></button>
+                                                </div>
+                                                <button
+                                                    onClick={() => setShowGrid(!showGrid)}
+                                                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm'}`}
+                                                    title="Toggle Grid"
+                                                >
+                                                    <Grid size={12} />
+                                                </button>
+                                            </div>
+
+                                            <button
+                                                onClick={handleAutoArrange}
+                                                className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600"
+                                                title="Auto Arrange Layout"
+                                            >
+                                                <LayoutTemplate size={16} />
+                                            </button>
+
+                                            <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50'}`} title="Toggle Snapping"><Magnet size={16} /></button>
+
+                                            <button
+                                                onClick={() => setIsMagnetMode(!isMagnetMode)}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
+                                                title="Physics / Magnetic Zones"
+                                            >
+                                                <Atom size={16} className={isMagnetMode ? "animate-spin" : ""} />
+                                            </button>
+
+                                            <button
+                                                onClick={() => {
+                                                    const newValue = !isReferenceMode;
+                                                    setIsReferenceMode(newValue);
+                                                    if (newValue) setIsSketchMode(false);
+                                                }}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isReferenceMode ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
+                                                title="Edit Reference Images"
+                                            >
+                                                <ImageIcon size={16} />
+                                            </button>
+
+                                            <SketchToolbar
+                                                isActive={isSketchMode}
+                                                onToggle={() => {
+                                                    const newValue = !isSketchMode;
+                                                    setIsSketchMode(newValue);
+                                                    if (newValue) setIsReferenceMode(false);
+                                                }}
+                                                activeType={activeSketchType}
+                                                onTypeChange={setActiveSketchType}
+                                                properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
+                                                onPropertyChange={handleAnnotationPropertyChange}
+                                                selectedAnnotation={selectedAnnotation}
+                                                onZIndex={handleZIndex}
+                                                onDelete={() => selectedAnnotationId && deleteAnnotation(selectedAnnotationId)}
+                                            />
+
+                                            <button
+                                                onClick={handleClearCanvas}
+                                                className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500"
+                                                title="Clear Canvas"
+                                            >
+                                                <BrushCleaning size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Reference Panel - Moved to Top Left (Below Toolbar) */}
+                                    <div className="absolute top-20 left-6 z-[190]">
+                                        <ReferenceToolbar
+                                            isReferenceMode={isReferenceMode}
+                                            selectedImage={referenceImages.find(i => i.id === selectedReferenceImageId) || null}
+                                            onUpdateImage={handleUpdateReferenceImage}
+                                            onDeleteImage={handleDeleteReferenceImage}
+                                            onImportImage={handleImportReference}
+                                            onStartScaling={(id) => setReferenceScaleState({ imageId: id, points: [], step: 'point1' })}
+                                            isScalingMode={!!referenceScaleState}
+                                            onCancelScaling={() => setReferenceScaleState(null)}
+                                        />
+                                    </div>
+
+                                    <div className="absolute top-6 right-6 flex flex-col items-end gap-2 z-[200]">
+                                        <div className="h-12 bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md px-4 rounded-full border border-slate-200 dark:border-dark-border shadow-xl flex items-center gap-4 animate-in slide-in-from-right-4 transition-all duration-300">
+                                            <div className="flex items-center gap-2 text-slate-400">
+                                                <div className="h-1 w-12 bg-slate-300/50 dark:bg-white/10 rounded-full relative">
+                                                    <div className="absolute -top-3 left-0 text-[8px] font-bold">0m</div>
+                                                    <div className="absolute -top-3 right-0 text-[8px] font-bold">{(16 / scale / PIXELS_PER_METER * 4).toFixed(1)}m</div>
+                                                </div>
+                                            </div>
+                                            <div className="h-4 w-px bg-slate-200 dark:bg-dark-border" />
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-sans font-black text-slate-700 dark:text-gray-300">{(scale * 100).toFixed(0)}%</span>
+                                                <button onClick={handleZoomToFit} className="w-6 h-6 rounded-full bg-orange-100 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 flex items-center justify-center hover:bg-orange-500 hover:text-white transition-all shadow-sm" title="Zoom to Fit">
+                                                    <Maximize size={12} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Scale Bar on Canvas - Dynamic */}
+                                    <div className="absolute bottom-12 right-6 flex flex-col items-end gap-1 pointer-events-none">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-bold text-slate-400 text-shadow-sm">10 meters</span>
+                                            <div className="h-2 border-x border-b border-slate-400/80 bg-white/20 backdrop-blur-sm"
+                                                style={{ width: 10 * PIXELS_PER_METER * scale }} />
+                                        </div>
+                                    </div>
+
+                                    {/* Floor Tabs Bar */}
+                                    <div className="absolute bottom-0 left-0 right-0 h-8 bg-slate-200/50 dark:bg-black/40 flex items-start px-4 gap-1 z-40 backdrop-blur-sm border-t border-slate-200/50 dark:border-dark-border">
+                                        {floors.map(f => (
+                                            <div
+                                                key={f.id}
+                                                onClick={() => setCurrentFloor(f.id)}
+                                                onDoubleClick={() => setEditingFloorId(f.id)}
+                                                className={`group
                                             relative px-4 py-1.5 text-[9px] font-black uppercase tracking-widest cursor-pointer rounded-b-lg flex items-center gap-2 select-none border-b border-x border-transparent
                                             ${currentFloor === f.id
-                                                ? 'bg-[#f0f2f5] dark:bg-dark-bg text-orange-600 border-slate-200/50 dark:border-dark-border !border-t-transparent h-full -translate-y-px'
-                                                : 'bg-slate-300/50 dark:bg-white/5 text-slate-500 dark:text-gray-500 hover:bg-slate-100/50 dark:hover:bg-white/10 h-[85%] mt-0'
-                                            }
+                                                        ? 'bg-[#f0f2f5] dark:bg-dark-bg text-orange-600 border-slate-200/50 dark:border-dark-border !border-t-transparent h-full -translate-y-px'
+                                                        : 'bg-slate-300/50 dark:bg-white/5 text-slate-500 dark:text-gray-500 hover:bg-slate-100/50 dark:hover:bg-white/10 h-[85%] mt-0'
+                                                    }
                                         `}
-                                    >
-                                        {editingFloorId === f.id ? (
-                                            <input
-                                                autoFocus
-                                                className="bg-transparent border-none outline-none w-20 text-center font-black uppercase tracking-widest p-0 text-[10px] text-orange-600"
-                                                value={f.label}
-                                                onChange={(e) => handleRenameFloor(f.id, e.target.value)}
-                                                onBlur={() => setEditingFloorId(null)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') setEditingFloorId(null);
-                                                    e.stopPropagation();
-                                                }}
-                                                onClick={(e) => e.stopPropagation()}
-                                            />
-                                        ) : (
-                                            <>
-                                                {f.label}
-                                                {currentFloor === f.id && (
-                                                    <button
-                                                        onClick={(e) => floors.length > 1 && handleDeleteFloor(e, f.id)}
-                                                        className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 ml-1"
-                                                        title="Delete Floor"
-                                                    >
-                                                        <X size={8} />
-                                                    </button>
+                                            >
+                                                {editingFloorId === f.id ? (
+                                                    <input
+                                                        autoFocus
+                                                        className="bg-transparent border-none outline-none w-20 text-center font-black uppercase tracking-widest p-0 text-[10px] text-orange-600"
+                                                        value={f.label}
+                                                        onChange={(e) => handleRenameFloor(f.id, e.target.value)}
+                                                        onBlur={() => setEditingFloorId(null)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') setEditingFloorId(null);
+                                                            e.stopPropagation();
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
+                                                ) : (
+                                                    <>
+                                                        {f.label}
+                                                        {currentFloor === f.id && (
+                                                            <button
+                                                                onClick={(e) => floors.length > 1 && handleDeleteFloor(e, f.id)}
+                                                                className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 ml-1"
+                                                                title="Delete Floor"
+                                                            >
+                                                                <X size={8} />
+                                                            </button>
+                                                        )}
+                                                    </>
                                                 )}
-                                            </>
-                                        )}
+                                            </div>
+                                        ))}
+                                        <button
+                                            onClick={handleAddFloor}
+                                            className="h-[85%] w-8 flex items-center justify-center rounded-b-lg bg-slate-300/50 dark:bg-white/5 hover:bg-orange-600 hover:text-white text-slate-500"
+                                            title="Add Floor"
+                                        >
+                                            <Plus size={12} />
+                                        </button>
                                     </div>
-                                ))}
-                                <button
-                                    onClick={handleAddFloor}
-                                    className="h-[85%] w-8 flex items-center justify-center rounded-b-lg bg-slate-300/50 dark:bg-white/5 hover:bg-orange-600 hover:text-white text-slate-500"
-                                    title="Add Floor"
-                                >
-                                    <Plus size={12} />
-                                </button>
-                            </div>
+                                </>
+                            )}
                         </main>
 
                         <aside className={`${isRightSidebarOpen ? 'w-80' : 'w-10'} bg-white dark:bg-dark-surface border-l border-slate-200 dark:border-dark-border flex flex-col z-20 shadow-2xl transition-all duration-300`}>
@@ -1899,7 +1949,7 @@ export default function App() {
                                                                     <input
                                                                         type="number"
                                                                         className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200 bg-transparent border-b border-transparent focus:border-orange-500 outline-none w-full"
-                                                                    value={Number(selectedRoom!.area.toFixed(2))}
+                                                                        value={Number(selectedRoom!.area.toFixed(2))}
                                                                         onChange={(e) => {
                                                                             const val = parseFloat(e.target.value);
                                                                             if (!isNaN(val)) updateRoom(selectedRoom!.id, { area: val });
@@ -1973,8 +2023,8 @@ export default function App() {
                                                             <div className="flex justify-between items-center mb-2">
                                                                 <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Area</span>
                                                             </div>
-                                                    <div className="text-2xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                                        {Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
+                                                            <div className="text-2xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
+                                                                {Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
                                                             </div>
                                                         </div>
                                                         <div className="p-4 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl">

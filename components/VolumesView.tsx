@@ -1,0 +1,442 @@
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { OrbitControls, Grid, PerspectiveCamera, OrthographicCamera, GizmoHelper, GizmoViewport, Text, Edges, Html, Line } from '@react-three/drei';
+import * as THREE from 'three';
+import { Room, Floor, ZoneColor, VerticalConnection, ZONE_COLORS, AppSettings, DiagramStyle } from '../types';
+import { Maximize } from 'lucide-react';
+
+interface VolumesViewProps {
+    rooms: Room[];
+    floors: Floor[];
+    verticalConnections: VerticalConnection[];
+    zoneColors: Record<string, ZoneColor>;
+    pixelsPerMeter: number;
+    connectionSourceId: string | null;
+    onLinkToggle: (roomId: string) => void;
+    appSettings: AppSettings;
+    diagramStyle: DiagramStyle;
+    selectedRoomIds: Set<string>;
+    onRoomSelect: (id: string, multi: boolean) => void;
+    darkMode: boolean;
+    gridSize: number;
+}
+
+const FLOOR_GAP = 10; // spacing between floors in 3D units
+
+function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onSelect, appSettings, diagramStyle, darkMode }: {
+    room: Room;
+    floors: Floor[];
+    zoneColors: Record<string, ZoneColor>;
+    isSelected: boolean;
+    isLinkingSource: boolean;
+    onSelect: () => void;
+    appSettings: AppSettings;
+    diagramStyle: DiagramStyle;
+    darkMode: boolean;
+}) {
+    const color = useMemo(() => {
+        if (room.zone === 'Public') return '#fb923c';
+        if (room.zone === 'Private') return '#60a5fa';
+        if (room.zone === 'Service') return '#94a3b8';
+        if (room.zone === 'Circulation') return '#facc15';
+        if (room.zone === 'Outdoor') return '#4ade80';
+        if (room.zone === 'Admin') return '#c084fc';
+        return '#e2e8f0';
+    }, [room.zone]);
+
+    const floor = floors.find(f => f.id === room.floor);
+    const heightInMeters = room.depth || floor?.height || 3;
+    const heightIn3D = heightInMeters * 10;
+
+    // Calculate cumulative floor Y position
+    const yFloor = useMemo(() => {
+        let y = 0;
+        // Sort floors by ID to calculate cumulative height correctly from bottom up
+        const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
+        for (const f of sortedFloors) {
+            if (f.id < room.floor) {
+                y += (f.height * 10) + FLOOR_GAP;
+            }
+        }
+        return y;
+    }, [floors, room.floor]);
+
+    // Create Shape for Extrusion
+    const shape = useMemo(() => {
+        const s = new THREE.Shape();
+        if (room.shape === 'rect' || !room.shape) {
+            const w = room.width / 10;
+            const d = room.height / 10;
+            s.moveTo(-w / 2, -d / 2);
+            s.lineTo(w / 2, -d / 2);
+            s.lineTo(w / 2, d / 2);
+            s.lineTo(-w / 2, d / 2);
+            s.closePath();
+        } else if (room.shape === 'polygon' || room.shape === 'bubble') {
+            const pts = room.polygon || [];
+            if (pts.length > 2) {
+                // Calculate centroid to center the shape
+                let cx = 0, cy = 0;
+                pts.forEach(p => { cx += p.x; cy += p.y; });
+                cx /= pts.length;
+                cy /= pts.length;
+
+                if (room.shape === 'polygon') {
+                    s.moveTo((pts[0].x - cx) / 10, (pts[0].y - cy) / 10);
+                    for (let i = 1; i < pts.length; i++) {
+                        s.lineTo((pts[i].x - cx) / 10, (pts[i].y - cy) / 10);
+                    }
+                } else if (room.shape === 'bubble') {
+                    // Smooth bubble path logic
+                    for (let i = 0; i < pts.length; i++) {
+                        const p1 = pts[i];
+                        const p2 = pts[(i + 1) % pts.length];
+                        const p3 = pts[(i + 2) % pts.length];
+                        const p0 = pts[(i - 1 + pts.length) % pts.length];
+
+                        const cp1x = p1.x + (p2.x - p0.x) / 6;
+                        const cp1y = p1.y + (p2.y - p0.y) / 6;
+                        const cp2x = p2.x - (p3.x - p1.x) / 6;
+                        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+                        if (i === 0) s.moveTo((p1.x - cx) / 10, (p1.y - cy) / 10);
+
+                        s.bezierCurveTo(
+                            (cp1x - cx) / 10, (cp1y - cy) / 10,
+                            (cp2x - cx) / 10, (cp2y - cy) / 10,
+                            (p2.x - cx) / 10, (p2.y - cy) / 10
+                        );
+                    }
+                }
+                s.closePath();
+            }
+        }
+        return s;
+    }, [room.shape, room.polygon, room.width, room.height]);
+
+    // Position calculation
+    let posX = room.x / 10;
+    let posZ = room.y / 10;
+
+    if (room.shape === 'rect' || !room.shape) {
+        posX += (room.width / 10) / 2;
+        posZ += (room.height / 10) / 2;
+    } else {
+        const pts = room.polygon || [];
+        if (pts.length > 0) {
+            let cx = 0, cy = 0;
+            pts.forEach(p => { cx += p.x; cy += p.y; });
+            posX += (cx / pts.length) / 10;
+            posZ += (cy / pts.length) / 10;
+        }
+    }
+
+    return (
+        <group
+            position={[posX, yFloor, posZ]}
+            onClick={(e) => { e.stopPropagation(); onSelect(); }}
+        >
+            <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                <extrudeGeometry args={[shape, { depth: heightIn3D, bevelEnabled: false }]} />
+                <meshStandardMaterial
+                    color={isLinkingSource ? '#f59e0b' : color}
+                    transparent
+                    opacity={isSelected ? 0.9 : 0.6}
+                    roughness={0.2}
+                    metalness={0.1}
+                />
+                <Edges color={isSelected || isLinkingSource ? "#f59e0b" : "white"} threshold={15} />
+            </mesh>
+
+            {/* Projected Label - Billboard Style */}
+            <Html
+                position={[0, heightIn3D + 2, 0]}
+                center
+                pointerEvents="none"
+            >
+                <div
+                    className={`flex flex-col items-center justify-center text-center select-none ${diagramStyle.fontFamily}`}
+                    style={{
+                        color: isSelected ? '#f97316' : darkMode ? '#fff' : '#000',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        minWidth: '80px',
+                        filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.4))',
+                        background: darkMode ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)',
+                        backdropFilter: 'blur(8px)',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        border: isSelected ? '1.5px solid #f97316' : darkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.05)',
+                        transform: 'translateY(-100%)'
+                    }}
+                >
+                    <div className="leading-tight whitespace-nowrap">{room.name}</div>
+                    <div className="text-[9px] opacity-80 font-mono tracking-tighter mt-0.5">{Math.round(room.area)}m²</div>
+                </div>
+            </Html>
+        </group>
+    );
+}
+
+function FloorPlane({ floor, floors, darkMode, gridSize }: { floor: Floor, floors: Floor[], darkMode: boolean, gridSize: number }) {
+    const y = useMemo(() => {
+        let totalY = 0;
+        const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
+        for (const f of sortedFloors) {
+            if (f.id < floor.id) {
+                totalY += (f.height * 10) + FLOOR_GAP;
+            }
+        }
+        return totalY;
+    }, [floors, floor.id]);
+
+    // Only render grid for ground floor
+    if (floor.id !== 0) return null;
+
+    // 1m = 2 units (since height 10 = 5m). 
+    // If gridSize is 2m, sectionSize should be 4 units.
+    const sectionSizeValue = gridSize * 2;
+
+    return (
+        <group position={[0, y, 0]}>
+            <Grid
+                args={[500, 500]}
+                sectionSize={sectionSizeValue}
+                sectionColor={darkMode ? "#1e293b" : "#cbd5e1"}
+                cellSize={0}
+                infiniteGrid={true}
+                fadeDistance={1000}
+                sectionThickness={1.5}
+            />
+        </group>
+    );
+}
+
+function VerticalLink({ conn, rooms, floors, darkMode }: { conn: VerticalConnection; rooms: Room[]; floors: Floor[]; darkMode: boolean }) {
+    const fromRoom = rooms.find(r => r.id === conn.fromId);
+    const toRoom = rooms.find(r => r.id === conn.toId);
+
+    if (!fromRoom || !toRoom) return null;
+
+    const getCenter = (room: Room) => {
+        const floor = floors.find(f => f.id === room.floor);
+        const h = (room.depth || floor?.height || 3) * 10;
+
+        let yBase = 0;
+        const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
+        for (const f of sortedFloors) {
+            if (f.id < room.floor) {
+                yBase += (f.height * 10) + FLOOR_GAP;
+            }
+        }
+
+        if (room.shape === 'rect' || !room.shape) {
+            return [
+                (room.x + room.width / 2) / 10,
+                yBase + (h / 2),
+                (room.y + room.height / 2) / 10
+            ] as [number, number, number];
+        } else {
+            const pts = room.polygon || [];
+            let cx = 0, cy = 0;
+            pts.forEach(p => { cx += p.x; cy += p.y; });
+            return [
+                (room.x + cx / pts.length) / 10,
+                yBase + (h / 2),
+                (room.y + cy / pts.length) / 10
+            ] as [number, number, number];
+        }
+    };
+
+    const p1 = getCenter(fromRoom);
+    const p2 = getCenter(toRoom);
+
+    return (
+        <Line
+            points={[p1, p2]}
+            color={darkMode ? "#fb923c" : "#f97316"}
+            lineWidth={3}
+            transparent
+            opacity={0.6}
+            dashed={false}
+        />
+    );
+}
+
+// Camera control helper
+function CameraController({ zoomTrigger, placedRooms, floors }: { zoomTrigger: number, placedRooms: Room[], floors: Floor[] }) {
+    const { camera, controls } = useThree();
+
+    useEffect(() => {
+        if (zoomTrigger === 0) return;
+
+        const box = new THREE.Box3();
+        if (placedRooms.length === 0) {
+            box.setFromCenterAndSize(new THREE.Vector3(0, 0, 0), new THREE.Vector3(200, 200, 200));
+        } else {
+            placedRooms.forEach(room => {
+                const floor = floors.find(f => f.id === room.floor);
+                const rH = (room.depth || floor?.height || 3) * 10;
+
+                let yBase = 0;
+                const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
+                for (const f of sortedFloors) {
+                    if (f.id < room.floor) {
+                        yBase += (f.height * 10) + FLOOR_GAP;
+                    }
+                }
+
+                if (room.shape === 'rect' || !room.shape) {
+                    const x = room.x / 10;
+                    const z = room.y / 10;
+                    const w = room.width / 10;
+                    const d = room.height / 10;
+                    box.expandByPoint(new THREE.Vector3(x, yBase, z));
+                    box.expandByPoint(new THREE.Vector3(x + w, yBase + rH, z + d));
+                } else {
+                    const pts = room.polygon || [];
+                    pts.forEach(p => {
+                        box.expandByPoint(new THREE.Vector3((room.x + p.x) / 10, yBase, (room.y + p.y) / 10));
+                        box.expandByPoint(new THREE.Vector3((room.x + p.x) / 10, yBase + rH, (room.y + p.y) / 10));
+                    });
+                }
+            });
+        }
+
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+
+        const distance = maxDim * 2;
+        const newPos = center.clone().add(new THREE.Vector3(distance, distance, distance));
+
+        camera.position.lerp(newPos, 1);
+        if (controls) {
+            (controls as any).target.lerp(center, 1);
+        }
+    }, [zoomTrigger, placedRooms, camera, controls]);
+
+    return null;
+}
+
+export function VolumesView({
+    rooms, floors, verticalConnections, zoneColors, pixelsPerMeter,
+    connectionSourceId, onLinkToggle, appSettings, diagramStyle,
+    selectedRoomIds, onRoomSelect, darkMode, gridSize
+}: VolumesViewProps) {
+    const [viewType, setViewType] = useState<'perspective' | 'isometric'>('perspective');
+    const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0);
+    const placedRooms = useMemo(() => rooms.filter(r => r.isPlaced), [rooms]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                e.preventDefault();
+                setZoomToFitTrigger(prev => prev + 1);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    const handleZoomToFit = () => setZoomToFitTrigger(prev => prev + 1);
+
+    return (
+        <div className="h-full w-full bg-[#f8fafc] dark:bg-[#020617] relative" style={{ cursor: 'default' }}>
+            <Canvas shadows gl={{ antialias: true }} orthographic={viewType === 'isometric'} style={{ cursor: 'default' }}>
+                {viewType === 'perspective' ? (
+                    <PerspectiveCamera makeDefault position={[300, 300, 300]} fov={45} />
+                ) : (
+                    <OrthographicCamera makeDefault position={[300, 300, 300]} zoom={1.5} near={0.1} far={2000} />
+                )}
+                <OrbitControls makeDefault zoomToCursor />
+
+                <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={placedRooms} floors={floors} />
+
+                <ambientLight intensity={0.7} />
+                <pointLight position={[200, 500, 200]} intensity={1.5} castShadow />
+                <directionalLight position={[-200, 400, -200]} intensity={0.8} />
+
+                {floors.map((floor) => (
+                    <FloorPlane key={floor.id} floor={floor} floors={floors} darkMode={darkMode} gridSize={gridSize} />
+                ))}
+
+                {placedRooms.map(room => (
+                    <RoomVolume
+                        key={room.id}
+                        room={room}
+                        floors={floors}
+                        zoneColors={zoneColors}
+                        isSelected={selectedRoomIds.has(room.id)}
+                        isLinkingSource={connectionSourceId === room.id}
+                        appSettings={appSettings}
+                        diagramStyle={diagramStyle}
+                        darkMode={darkMode}
+                        onSelect={() => {
+                            if (connectionSourceId) {
+                                onLinkToggle(room.id);
+                            } else {
+                                onRoomSelect(room.id, false);
+                            }
+                        }}
+                    />
+                ))}
+
+                {verticalConnections.map(conn => (
+                    <VerticalLink key={conn.id} conn={conn} rooms={rooms} floors={floors} darkMode={darkMode} />
+                ))}
+
+                <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+                    <GizmoViewport axisColors={['#f87171', '#4ade80', '#60a5fa']} labelColor="black" />
+                </GizmoHelper>
+            </Canvas>
+
+            {/* Standard Zoom Position (Top Right) */}
+            <div className="absolute top-6 right-6 flex flex-col items-end gap-2 z-[200]">
+                <div className="h-12 bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md px-4 rounded-full border border-slate-200 dark:border-dark-border shadow-xl flex items-center gap-4 animate-in slide-in-from-right-4 transition-all duration-300 pointer-events-auto">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-sans font-black text-slate-700 dark:text-gray-300">FIT</span>
+                        <button onClick={handleZoomToFit} className="w-6 h-6 rounded-full bg-orange-100 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 flex items-center justify-center hover:bg-orange-500 hover:text-white transition-all shadow-sm" title="Zoom to Fit (Ctrl+F)">
+                            <Maximize size={12} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="absolute top-6 left-6 pointer-events-none flex flex-col gap-4">
+                <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md p-4 rounded-3xl border border-slate-200 dark:border-dark-border shadow-2xl animate-in fade-in slide-in-from-left-4 pointer-events-auto">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">View Orientation</h3>
+                    </div>
+                    <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-2xl">
+                        <button
+                            onClick={() => setViewType('perspective')}
+                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewType === 'perspective' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
+                        >
+                            Perspective
+                        </button>
+                        <button
+                            onClick={() => setViewType('isometric')}
+                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewType === 'isometric' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
+                        >
+                            Isometric
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {connectionSourceId && (
+                <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+                    <div className="bg-orange-500 text-white px-8 py-4 rounded-full shadow-[0_10px_40px_rgba(249,115,22,0.4)] animate-bounce flex items-center gap-3">
+                        <span className="text-xs font-black uppercase tracking-widest">Select another space to link vertically</span>
+                        <button onClick={() => onLinkToggle(connectionSourceId)} className="bg-white/20 hover:bg-white/30 p-1.5 rounded-full">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
