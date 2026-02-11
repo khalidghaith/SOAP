@@ -930,10 +930,12 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
     const textPos = room.textPos || centroid;
 
+    const isPolygon = room.polygon || room.shape === 'bubble';
+
     return (
         <div
             ref={bubbleRef}
-            className={`absolute ${isSketchMode ? 'pointer-events-none' : 'pointer-events-auto'} ${isSelected ? 'z-20' : 'z-10'} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
+            className={`absolute ${isSketchMode ? 'pointer-events-none' : (isPolygon ? 'pointer-events-none' : 'pointer-events-auto')} ${isSelected ? 'z-20' : 'z-10'} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
             style={{
                 transform: `translate3d(${room.x}px, ${room.y}px, 0) rotate(${room.rotation || 0}deg)`,
                 width: (room.polygon || room.shape === 'bubble') ? 0 : room.width,
@@ -945,11 +947,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             {/* Visual Surface */}
             <div className="relative group w-full h-full">
                 {(room.polygon || room.shape === 'bubble') ? (
-                    <div className="overflow-visible absolute top-0 left-0">
-                        <svg className="overflow-visible">
+                    <div className="overflow-visible absolute top-0 left-0 pointer-events-none">
+                        <svg className="overflow-visible pointer-events-none">
                             <path
                                 d={polygonPath}
-                                className={`${!room.style?.fill ? visualStyle.bg.replace(/bg-/g, 'fill-') : ''} ${!room.style?.stroke ? visualStyle.border.replace(/border-/g, 'stroke-') : ''}`}
+                                className={`${!room.style?.fill ? visualStyle.bg.replace(/bg-/g, 'fill-') : ''} ${!room.style?.stroke ? visualStyle.border.replace(/border-/g, 'stroke-') : ''} pointer-events-auto`}
                                 strokeWidth={(room.style?.strokeWidth ?? appSettings.strokeWidth) / zoomScale}
                                 strokeDasharray={room.style?.strokeDasharray ?? (diagramStyle.sketchy ? `${10 / zoomScale},${10 / zoomScale}` : "none")}
                                 fillOpacity={room.style?.opacity ?? diagramStyle.opacity}
@@ -971,7 +973,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                         x1={p.x} y1={p.y} x2={next.x} y2={next.y}
                                         stroke="transparent"
                                         strokeWidth={10 / zoomScale}
-                                        className="cursor-move hover:stroke-orange-600/20"
+                                        className="cursor-move hover:stroke-orange-600/20 pointer-events-auto"
                                         onMouseEnter={() => setHoveredEdge(i)}
                                         onMouseLeave={() => setHoveredEdge(null)}
                                         onMouseDown={(e) => handleEdgeDown(e, i)}
@@ -983,7 +985,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         {isSelected && activePoints.map((p, i) => (
                             <div
                                 key={`v-${i}`}
-                                className={`absolute border rounded-full z-[80] hover:scale-150 cursor-crosshair ${selectedVertices.has(i) ? 'bg-orange-600 border-white scale-125' : 'bg-white border-orange-600'}`}
+                                className={`absolute border rounded-full z-[80] hover:scale-150 cursor-crosshair pointer-events-auto ${selectedVertices.has(i) ? 'bg-orange-600 border-white scale-125' : 'bg-white border-orange-600'}`}
                                 style={{
                                     left: p.x, top: p.y,
                                     width: 10 / zoomScale, height: 10 / zoomScale,
@@ -1107,7 +1109,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                 {/* Content */}
                 <div
-                    className={`absolute flex flex-col items-center justify-center ${room.isTextUnlocked ? 'pointer-events-auto cursor-move' : 'pointer-events-none'}`}
+                    className={`absolute flex flex-col items-center justify-center ${room.isTextUnlocked ? 'pointer-events-auto cursor-move' : 'pointer-events-auto'}`}
                     style={{
                         left: textPos.x - bounds.width / 2,
                         top: textPos.y - bounds.height / 2,

@@ -14,7 +14,7 @@ import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
     LandPlot, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Trash2, Lock, Unlock, BrushCleaning,
-    Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box
+    Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar } from './components/SketchToolbar';
@@ -714,6 +714,11 @@ export default function App() {
 
     const handleRenameFloor = (id: number, newName: string) => {
         setFloors(prev => prev.map(f => f.id === id ? { ...f, label: newName } : f));
+    };
+
+    const handleUpdateFloor = (id: number, updates: Partial<Floor>) => {
+        addToHistory();
+        setFloors(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
     };
 
     // --- Drag & Drop Handlers ---
@@ -2087,11 +2092,61 @@ export default function App() {
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="text-center py-24 opacity-30 px-10">
-                                                <div className="w-16 h-16 bg-slate-100 dark:bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                                                    <Settings2 size={32} className="text-slate-400 dark:text-gray-500" />
+                                            <div className="space-y-8 animate-in fade-in duration-500">
+                                                {/* Floor Settings - Shown when nothing is selected */}
+                                                <div className="space-y-6">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <div className="p-2 bg-orange-100 dark:bg-orange-900/20 rounded-lg">
+                                                            <Layers size={14} className="text-orange-600" />
+                                                        </div>
+                                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300">Floor Settings</h3>
+                                                    </div>
+
+                                                    <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border space-y-4">
+                                                        <div>
+                                                            <label className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-1.5 block">Current Floor Label</label>
+                                                            <input
+                                                                className="w-full text-lg font-black text-slate-800 dark:text-gray-100 bg-transparent border-b border-dashed border-slate-300 dark:border-dark-border focus:border-orange-500 outline-none pb-1"
+                                                                value={floors.find(f => f.id === currentFloor)?.label || ""}
+                                                                onChange={(e) => handleUpdateFloor(currentFloor, { label: e.target.value })}
+                                                            />
+                                                        </div>
+
+                                                        <div>
+                                                            <div className="flex justify-between items-center mb-1.5">
+                                                                <label className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Floor Height</label>
+                                                                <span className="text-[10px] font-bold text-orange-600 bg-orange-50 dark:bg-orange-900/20 px-1.5 rounded">meters</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-3">
+                                                                <input
+                                                                    type="number"
+                                                                    step="0.1"
+                                                                    className="flex-1 text-2xl font-mono font-bold text-slate-700 dark:text-gray-200 bg-transparent outline-none"
+                                                                    value={floors.find(f => f.id === currentFloor)?.height || 3}
+                                                                    onChange={(e) => handleUpdateFloor(currentFloor, { height: parseFloat(e.target.value) || 0 })}
+                                                                />
+                                                                <div className="flex flex-col gap-1">
+                                                                    <button
+                                                                        onClick={() => handleUpdateFloor(currentFloor, { height: (floors.find(f => f.id === currentFloor)?.height || 3) + 0.1 })}
+                                                                        className="p-1 hover:bg-white dark:hover:bg-white/10 rounded shadow-sm border border-slate-200 dark:border-dark-border text-slate-400 hover:text-orange-600"
+                                                                    >
+                                                                        <ChevronUp size={14} />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleUpdateFloor(currentFloor, { height: Math.max(0, (floors.find(f => f.id === currentFloor)?.height || 3) - 0.1) })}
+                                                                        className="p-1 hover:bg-white dark:hover:bg-white/10 rounded shadow-sm border border-slate-200 dark:border-dark-border text-slate-400 hover:text-orange-600"
+                                                                    >
+                                                                        <ChevronDown size={14} />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <p className="text-[9px] text-slate-400 dark:text-gray-600 leading-relaxed px-2 italic">
+                                                        Changing the height affects 3D extrusions and spatial stacking for all spaces on this floor.
+                                                    </p>
                                                 </div>
-                                                <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed text-slate-500 dark:text-gray-500">No Selection<br />Select an object to modify its geometry and metadata.</p>
                                             </div>
                                         )}
                                     </div>

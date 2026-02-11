@@ -198,7 +198,7 @@ function FloorPlane({ floor, floors, darkMode, gridSize }: { floor: Floor, floor
     const sectionSizeValue = gridSize * 2;
 
     return (
-        <group position={[0, y, 0]}>
+        <group position={[0, y - 0.05, 0]}>
             <Grid
                 args={[500, 500]}
                 sectionSize={sectionSizeValue}
