@@ -16,12 +16,13 @@ interface VolumesViewProps {
     appSettings: AppSettings;
     diagramStyle: DiagramStyle;
     selectedRoomIds: Set<string>;
-    onRoomSelect: (id: string, multi: boolean) => void;
+    onRoomSelect: (id: string | null, multi: boolean) => void;
     darkMode: boolean;
     gridSize: number;
 }
 
-const FLOOR_GAP = 10; // spacing between floors in 3D units
+const FLOOR_GAP = 4; // spacing between floors in 3D units (2 meters)
+const HEIGHT_SCALE = 2; // 1m = 2 units (consistent with horizontal scale of 20px/m / 10)
 
 function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onSelect, appSettings, diagramStyle, darkMode }: {
     room: Room;
@@ -46,7 +47,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
 
     const floor = floors.find(f => f.id === room.floor);
     const heightInMeters = room.depth || floor?.height || 3;
-    const heightIn3D = heightInMeters * 10;
+    const heightIn3D = heightInMeters * HEIGHT_SCALE;
 
     // Calculate cumulative floor Y position
     const yFloor = useMemo(() => {
@@ -55,7 +56,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
         for (const f of sortedFloors) {
             if (f.id < room.floor) {
-                y += (f.height * 10) + FLOOR_GAP;
+                y += (f.height * HEIGHT_SCALE) + FLOOR_GAP;
             }
         }
         return y;
@@ -184,7 +185,7 @@ function FloorPlane({ floor, floors, darkMode, gridSize }: { floor: Floor, floor
         const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
         for (const f of sortedFloors) {
             if (f.id < floor.id) {
-                totalY += (f.height * 10) + FLOOR_GAP;
+                totalY += (f.height * HEIGHT_SCALE) + FLOOR_GAP;
             }
         }
         return totalY;
@@ -220,13 +221,13 @@ function VerticalLink({ conn, rooms, floors, darkMode }: { conn: VerticalConnect
 
     const getCenter = (room: Room) => {
         const floor = floors.find(f => f.id === room.floor);
-        const h = (room.depth || floor?.height || 3) * 10;
+        const h = (room.depth || floor?.height || 3) * HEIGHT_SCALE;
 
         let yBase = 0;
         const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
         for (const f of sortedFloors) {
             if (f.id < room.floor) {
-                yBase += (f.height * 10) + FLOOR_GAP;
+                yBase += (f.height * HEIGHT_SCALE) + FLOOR_GAP;
             }
         }
 
@@ -276,13 +277,13 @@ function CameraController({ zoomTrigger, placedRooms, floors }: { zoomTrigger: n
         } else {
             placedRooms.forEach(room => {
                 const floor = floors.find(f => f.id === room.floor);
-                const rH = (room.depth || floor?.height || 3) * 10;
+                const rH = (room.depth || floor?.height || 3) * HEIGHT_SCALE;
 
                 let yBase = 0;
                 const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
                 for (const f of sortedFloors) {
                     if (f.id < room.floor) {
-                        yBase += (f.height * 10) + FLOOR_GAP;
+                        yBase += (f.height * HEIGHT_SCALE) + FLOOR_GAP;
                     }
                 }
 
@@ -345,7 +346,13 @@ export function VolumesView({
 
     return (
         <div className="h-full w-full bg-[#f8fafc] dark:bg-[#020617] relative" style={{ cursor: 'default' }}>
-            <Canvas shadows gl={{ antialias: true }} orthographic={viewType === 'isometric'} style={{ cursor: 'default' }}>
+            <Canvas
+                shadows
+                gl={{ antialias: true }}
+                orthographic={viewType === 'isometric'}
+                style={{ cursor: 'default' }}
+                onPointerMissed={() => onRoomSelect(null, false)}
+            >
                 {viewType === 'perspective' ? (
                     <PerspectiveCamera makeDefault position={[300, 300, 300]} fov={45} />
                 ) : (

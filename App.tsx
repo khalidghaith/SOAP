@@ -174,6 +174,7 @@ export default function App() {
     const [is3DMode, setIs3DMode] = useState(false);
     const [currentStyle, setCurrentStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
+    const [selectedZone, setSelectedZone] = useState<string | null>(null);
 
     // Tools State
     const [isMagnetMode, setIsMagnetMode] = useState(false);
@@ -500,6 +501,7 @@ export default function App() {
             // Let's clear selection if we started a pan on background and it wasn't valid selection target
             if (e.target === e.currentTarget) {
                 setSelectedRoomIds(new Set());
+                setSelectedZone(null);
                 if (connectionSourceId) setConnectionSourceId(null);
                 // Auto-lock all text when clicking empty space
                 setRooms(prev => prev.map(r => r.isTextUnlocked ? { ...r, isTextUnlocked: false } : r));
@@ -1094,8 +1096,6 @@ export default function App() {
     };
 
     // --- Zone Handlers ---
-    const [selectedZone, setSelectedZone] = useState<string | null>(null);
-
     const handleZoneDrag = useCallback((zone: string, dx: number, dy: number) => {
         setRooms(prev => prev.map(r => {
             if (r.zone === zone && r.floor === currentFloor && r.isPlaced) {
@@ -1472,6 +1472,10 @@ export default function App() {
                                     darkMode={darkMode}
                                     gridSize={gridSize}
                                     onRoomSelect={(id, multi) => {
+                                        if (id === null) {
+                                            setSelectedRoomIds(new Set());
+                                            return;
+                                        }
                                         setSelectedRoomIds(prev => {
                                             const next = new Set(multi ? prev : []);
                                             if (next.has(id)) next.delete(id);
