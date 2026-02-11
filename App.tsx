@@ -7,6 +7,7 @@ import { ZoneOverlay } from './components/ZoneOverlay'; // Newly added
 import { ExportModal } from './components/ExportModal';
 import { SettingsModal } from './components/SettingsModal';
 import { VolumesView } from './components/VolumesView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport, getHexColorForZone, getHexBorderForZone } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
@@ -189,6 +190,24 @@ export default function App() {
         hasInitialZoomed: false
     });
 
+    // Extracted Handlers for Volumes View (to avoid conditional hook calls)
+    const handleViewStateChange = useCallback((updates: any) => {
+        setVolumesViewState(prev => ({ ...prev, ...updates }));
+    }, []);
+
+    const handleVolumeRoomSelect = useCallback((id: string | null, multi: boolean) => {
+        if (id === null) {
+            setSelectedRoomIds(new Set());
+            return;
+        }
+        setSelectedRoomIds(prev => {
+            const next = new Set(multi ? prev : []);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }, []);
+
     // Tools State
     const [isMagnetMode, setIsMagnetMode] = useState(false);
     const [showGrid, setShowGrid] = useState(true);
@@ -202,6 +221,8 @@ export default function App() {
     const [isInventoryOpen, setIsInventoryOpen] = useState(true);
     const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
     const [snapGuides, setSnapGuides] = useState<{ x?: number, y?: number } | null>(null);
+    const [overlayFloorId, setOverlayFloorId] = useState<number | null>(null);
+    const [isOverlaySelectorOpen, setIsOverlaySelectorOpen] = useState(false);
     const [isZoneDragging, setIsZoneDragging] = useState(false);
     const [isBubbleDragging, setIsBubbleDragging] = useState(false);
     const [isInventoryHovered, setIsInventoryHovered] = useState(false);
@@ -210,6 +231,19 @@ export default function App() {
 
     const roomsRef = useRef(rooms);
     roomsRef.current = rooms;
+
+    const overlaySelectorRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!isOverlaySelectorOpen) return;
+        const handleClickOutside = (event: MouseEvent) => {
+            if (overlaySelectorRef.current && !overlaySelectorRef.current.contains(event.target as Node)) {
+                setIsOverlaySelectorOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOverlaySelectorOpen]);
 
 
     // Dark Mode Local State
@@ -1471,34 +1505,31 @@ export default function App() {
                             {/* The onMouseDown handler above already handles this */}
 
                             {viewMode === 'VOLUMES' ? (
-                                <VolumesView
-                                    rooms={rooms}
-                                    floors={floors}
-                                    verticalConnections={verticalConnections}
-                                    zoneColors={zoneColors}
-                                    pixelsPerMeter={PIXELS_PER_METER}
-                                    connectionSourceId={connectionSourceId}
-                                    onLinkToggle={toggleLink}
-                                    appSettings={appSettings}
-                                    diagramStyle={currentStyle}
-                                    selectedRoomIds={selectedRoomIds}
-                                    darkMode={darkMode}
-                                    gridSize={gridSize}
-                                    viewState={volumesViewState}
-                                    onViewStateChange={(updates) => setVolumesViewState(prev => ({ ...prev, ...updates }))}
-                                    onRoomSelect={(id, multi) => {
-                                        if (id === null) {
-                                            setSelectedRoomIds(new Set());
-                                            return;
-                                        }
-                                        setSelectedRoomIds(prev => {
-                                            const next = new Set(multi ? prev : []);
-                                            if (next.has(id)) next.delete(id);
-                                            else next.add(id);
-                                            return next;
-                                        });
-                                    }}
-                                />
+                                <ErrorBoundary fallback={
+                                    <div className="flex items-center justify-center h-full text-red-500 bg-red-50 p-8 rounded-lg flex-col gap-4">
+                                        <p className="font-bold text-lg">Failed to load Volumes View</p>
+                                        <p className="text-sm text-red-700">Please check the console for more details.</p>
+                                        <button onClick={() => window.location.reload()} className="px-4 py-2 bg-red-600 text-white rounded shadow hover:bg-red-700 transition">Reload App</button>
+                                    </div>
+                                }>
+                                    <VolumesView
+                                        rooms={rooms}
+                                        floors={floors}
+                                        verticalConnections={verticalConnections}
+                                        zoneColors={zoneColors}
+                                        pixelsPerMeter={PIXELS_PER_METER}
+                                        connectionSourceId={connectionSourceId}
+                                        onLinkToggle={toggleLink}
+                                        appSettings={appSettings}
+                                        diagramStyle={currentStyle}
+                                        selectedRoomIds={selectedRoomIds}
+                                        darkMode={darkMode}
+                                        gridSize={gridSize}
+                                        viewState={volumesViewState}
+                                        onViewStateChange={handleViewStateChange}
+                                        onRoomSelect={handleVolumeRoomSelect}
+                                    />
+                                </ErrorBoundary>
                             ) : (
                                 <>
                                     {/* Background Reference Images */}
@@ -1607,6 +1638,40 @@ export default function App() {
                                         </svg>
                                     </div>
 
+                                    {/* Floor Overlay Layer */}
+                                    {overlayFloorId !== null && (() => {
+                                        const overlayFloor = floors.find(f => f.id === overlayFloorId);
+                                        if (overlayFloor) {
+                                            const overlayRooms = rooms.filter(r => r.isPlaced && r.floor === overlayFloor.id);
+                                            return (
+                                                <div
+                                                    className="absolute inset-0 origin-top-left pointer-events-none"
+                                                    style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                                                >
+                                                    {overlayRooms.map(room => (
+                                                        <Bubble
+                                                            key={`overlay-${room.id}`}
+                                                            room={room}
+                                                            zoomScale={scale}
+                                                            updateRoom={() => { }}
+                                                            onSelect={() => { }}
+                                                            isSelected={false}
+                                                            diagramStyle={currentStyle}
+                                                            snapEnabled={false}
+                                                            snapPixelUnit={1}
+                                                            pixelsPerMeter={PIXELS_PER_METER}
+                                                            floors={floors}
+                                                            appSettings={appSettings}
+                                                            zoneColors={zoneColors}
+                                                            isOverlay={true}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+
                                     {/* Bubbles Layer */}
                                     <div
                                         className="absolute inset-0 origin-top-left pointer-events-none"
@@ -1709,6 +1774,39 @@ export default function App() {
                                             >
                                                 <LayoutTemplate size={16} />
                                             </button>
+                                            <div className="relative" ref={overlaySelectorRef}>
+                                                <button
+                                                    onClick={() => setIsOverlaySelectorOpen(prev => !prev)}
+                                                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${overlayFloorId !== null ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                                                    title="Select Overlay Floor"
+                                                >
+                                                    <Layers size={16} />
+                                                </button>
+                                                {isOverlaySelectorOpen && (
+                                                    <div className="absolute top-full mt-2 w-48 bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md p-2 rounded-2xl border border-slate-200 dark:border-dark-border shadow-xl flex flex-col gap-1 origin-top z-50">
+                                                        <div className="px-2 py-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">Overlay Floor</div>
+                                                        {floors.filter(f => f.id !== currentFloor).map(floor => (
+                                                            <button
+                                                                key={floor.id}
+                                                                onClick={() => {
+                                                                    setOverlayFloorId(prev => prev === floor.id ? null : floor.id);
+                                                                    setIsOverlaySelectorOpen(false);
+                                                                }}
+                                                                className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${overlayFloorId === floor.id ? 'bg-orange-100 dark:bg-orange-900/20 text-orange-600' : 'text-slate-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-white/5'}`}
+                                                            >
+                                                                {floor.label}
+                                                            </button>
+                                                        ))}
+                                                        {floors.length > 1 && <div className="h-px bg-slate-200 dark:bg-dark-border my-1" />}
+                                                        <button
+                                                            onClick={() => { setOverlayFloorId(null); setIsOverlaySelectorOpen(false); }}
+                                                            className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${overlayFloorId === null ? 'bg-slate-200 dark:bg-white/10 text-slate-800 dark:text-white' : 'text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-white/5'}`}
+                                                        >
+                                                            None
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
 
                                             <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50'}`} title="Toggle Snapping"><Magnet size={16} /></button>
 

@@ -27,6 +27,7 @@ interface BubbleProps {
     onDragEnd?: (room: Room, e: MouseEvent) => void;
     otherRooms?: Room[];
     isSketchMode?: boolean;
+    isOverlay?: boolean;
 }
 
 // area utility
@@ -129,7 +130,7 @@ const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.or
 
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode
+    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isRotating, setIsRotating] = useState(false);
@@ -935,14 +936,14 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     return (
         <div
             ref={bubbleRef}
-            className={`absolute ${isSketchMode ? 'pointer-events-none' : (isPolygon ? 'pointer-events-none' : 'pointer-events-auto')} ${isSelected ? 'z-20' : 'z-10'} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
+            className={`absolute ${isSketchMode || isOverlay ? 'pointer-events-none' : (isPolygon ? 'pointer-events-none' : 'pointer-events-auto')} ${isSelected ? 'z-20' : (isOverlay ? 'z-0 opacity-20 grayscale' : 'z-10')} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
             style={{
                 transform: `translate3d(${room.x}px, ${room.y}px, 0) rotate(${room.rotation || 0}deg)`,
                 width: (room.polygon || room.shape === 'bubble') ? 0 : room.width,
                 height: (room.polygon || room.shape === 'bubble') ? 0 : room.height,
                 cursor: isSketchMode ? 'default' : (isDragging ? 'grabbing' : 'grab')
             }}
-            onMouseDown={isSketchMode ? undefined : handleMouseDown}
+            onMouseDown={isSketchMode || isOverlay ? undefined : handleMouseDown}
         >
             {/* Visual Surface */}
             <div className="relative group w-full h-full">

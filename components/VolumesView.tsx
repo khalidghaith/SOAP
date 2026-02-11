@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, PerspectiveCamera, OrthographicCamera, GizmoHelper, GizmoViewport, Text, Edges, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
@@ -74,8 +74,8 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
     const shape = useMemo(() => {
         const s = new THREE.Shape();
         if (room.shape === 'rect' || !room.shape) {
-            const w = room.width / 10;
-            const d = room.height / 10;
+            const w = Math.max(0.01, (room.width || 0) / 10); // Ensure non-zero width
+            const d = Math.max(0.01, (room.height || 0) / 10); // Ensure non-zero height
             s.moveTo(-w / 2, -d / 2);
             s.lineTo(w / 2, -d / 2);
             s.lineTo(w / 2, d / 2);
@@ -83,6 +83,9 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             s.closePath();
         } else if (room.shape === 'polygon' || room.shape === 'bubble') {
             const pts = room.polygon || [];
+            // Validate points to prevent NaN crashes
+            if (pts.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+
             if (pts.length > 2) {
                 // Calculate centroid to center the shape
                 let cx = 0, cy = 0;
@@ -91,9 +94,9 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
                 cy /= pts.length;
 
                 if (room.shape === 'polygon') {
-                    s.moveTo((pts[0].x - cx) / 10, (pts[0].y - cy) / 10);
+                    s.moveTo((pts[0].x - cx) / 10, -(pts[0].y - cy) / 10);
                     for (let i = 1; i < pts.length; i++) {
-                        s.lineTo((pts[i].x - cx) / 10, (pts[i].y - cy) / 10);
+                        s.lineTo((pts[i].x - cx) / 10, -(pts[i].y - cy) / 10);
                     }
                 } else if (room.shape === 'bubble') {
                     // Smooth bubble path logic
@@ -108,12 +111,12 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
                         const cp2x = p2.x - (p3.x - p1.x) / 6;
                         const cp2y = p2.y - (p3.y - p1.y) / 6;
 
-                        if (i === 0) s.moveTo((p1.x - cx) / 10, (p1.y - cy) / 10);
+                        if (i === 0) s.moveTo((p1.x - cx) / 10, -(p1.y - cy) / 10);
 
                         s.bezierCurveTo(
-                            (cp1x - cx) / 10, (cp1y - cy) / 10,
-                            (cp2x - cx) / 10, (cp2y - cy) / 10,
-                            (p2.x - cx) / 10, (p2.y - cy) / 10
+                            (cp1x - cx) / 10, -(cp1y - cy) / 10,
+                            (cp2x - cx) / 10, -(cp2y - cy) / 10,
+                            (p2.x - cx) / 10, -(p2.y - cy) / 10
                         );
                     }
                 }
@@ -123,29 +126,36 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         return s;
     }, [room.shape, room.polygon, room.width, room.height]);
 
+    if (!shape) return null;
+
     // Position calculation
-    let posX = room.x / 10;
-    let posZ = room.y / 10;
+    let posX = (room.x || 0) / 10;
+    let posY = -((room.y || 0) / 10); // Invert Y for 3D view to match Canvas (Y down)
 
     if (room.shape === 'rect' || !room.shape) {
         posX += (room.width / 10) / 2;
-        posZ += (room.height / 10) / 2;
+        posY -= (room.height / 10) / 2; // Subtract height/2 because Y is inverted
     } else {
         const pts = room.polygon || [];
         if (pts.length > 0) {
             let cx = 0, cy = 0;
             pts.forEach(p => { cx += p.x; cy += p.y; });
             posX += (cx / pts.length) / 10;
-            posZ += (cy / pts.length) / 10;
+            posY -= (cy / pts.length) / 10; // Subtract centroid Y
         }
+    }
+
+    // Safety check: Do not render invalid polygons/bubbles to prevent ExtrudeGeometry crashes
+    if ((room.shape === 'polygon' || room.shape === 'bubble') && (!room.polygon || room.polygon.length < 3)) {
+        return null;
     }
 
     return (
         <group
-            position={[posX, yFloor, posZ]}
+            position={[posX, posY, yFloor]}
             onClick={(e) => { e.stopPropagation(); onSelect(); }}
         >
-            <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <mesh>
                 <extrudeGeometry args={[shape, { depth: heightIn3D, bevelEnabled: false }]} />
                 <meshStandardMaterial
                     color={isLinkingSource ? '#f59e0b' : color}
@@ -159,7 +169,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
 
             {/* Projected Label - Billboard Style */}
             <Html
-                position={[0, heightIn3D + 2, 0]}
+                position={[0, 0, heightIn3D + 2]}
                 center
                 pointerEvents="none"
             >
@@ -207,14 +217,14 @@ function FloorPlane({ floor, floors, darkMode, gridSize }: { floor: Floor, floor
     const sectionSizeValue = gridSize * 2;
 
     return (
-        <group position={[0, y - 0.05, 0]}>
+        <group position={[0, 0, y - 0.05]} rotation={[Math.PI / 2, 0, 0]}>
             <Grid
-                args={[500, 500]}
+                args={[100, 100]}
                 sectionSize={sectionSizeValue}
                 sectionColor={darkMode ? "#1e293b" : "#cbd5e1"}
                 cellSize={0}
-                infiniteGrid={true}
-                fadeDistance={1000}
+                infiniteGrid={false}
+                fadeDistance={100}
                 sectionThickness={1.5}
             />
         </group>
@@ -242,23 +252,27 @@ function VerticalLink({ conn, rooms, floors, darkMode }: { conn: VerticalConnect
         if (room.shape === 'rect' || !room.shape) {
             return [
                 (room.x + room.width / 2) / 10,
-                yBase + (h / 2),
-                (room.y + room.height / 2) / 10
+                -((room.y + room.height / 2) / 10), // Invert Y
+                yBase + (h / 2)
             ] as [number, number, number];
         } else {
             const pts = room.polygon || [];
+            if (pts.length === 0) return [(room.x + room.width / 2) / 10, -((room.y + room.height / 2) / 10), yBase + (h / 2)] as [number, number, number];
             let cx = 0, cy = 0;
             pts.forEach(p => { cx += p.x; cy += p.y; });
             return [
                 (room.x + cx / pts.length) / 10,
-                yBase + (h / 2),
-                (room.y + cy / pts.length) / 10
+                -((room.y + cy / pts.length) / 10), // Invert Y
+                yBase + (h / 2)
             ] as [number, number, number];
         }
     };
 
     const p1 = getCenter(fromRoom);
     const p2 = getCenter(toRoom);
+
+    // Safety check for NaN coordinates
+    if (!p1 || !p2 || p1.some(v => !Number.isFinite(v)) || p2.some(v => !Number.isFinite(v))) return null;
 
     return (
         <Line
@@ -273,8 +287,8 @@ function VerticalLink({ conn, rooms, floors, darkMode }: { conn: VerticalConnect
 }
 
 // Camera control helper
-function CameraController({ zoomTrigger, placedRooms, floors, onFitComplete }: { zoomTrigger: number, placedRooms: Room[], floors: Floor[], onFitComplete?: () => void }) {
-    const { camera, controls } = useThree();
+function CameraController({ zoomTrigger, placedRooms, floors, onFitComplete }: { zoomTrigger: number, placedRooms: Room[], floors: Floor[], onFitComplete?: (pos: THREE.Vector3, target: THREE.Vector3, zoom: number) => void }) {
+    const { camera, controls, size } = useThree();
 
     useEffect(() => {
         if (zoomTrigger === 0) return;
@@ -296,58 +310,123 @@ function CameraController({ zoomTrigger, placedRooms, floors, onFitComplete }: {
                 }
 
                 if (room.shape === 'rect' || !room.shape) {
-                    const x = room.x / 10;
-                    const z = room.y / 10;
-                    const w = room.width / 10;
-                    const d = room.height / 10;
-                    box.expandByPoint(new THREE.Vector3(x, yBase, z));
-                    box.expandByPoint(new THREE.Vector3(x + w, yBase + rH, z + d));
+                    const x = (room.x || 0) / 10;
+                    const y = -((room.y || 0) / 10); // Invert Y
+                    const w = (room.width || 1) / 10;
+                    const d = (room.height || 1) / 10;
+                    // Y is inverted, so "top" in canvas (low Y) is high Y in 3D.
+                    // Top-Left (x, y) -> (x, -y).
+                    // Bottom-Right (x+w, y+h) -> (x+w, -(y+h)).
+                    // Box needs min/max.
+                    box.expandByPoint(new THREE.Vector3(x, y, yBase));
+                    box.expandByPoint(new THREE.Vector3(x + w, y - d, yBase + rH));
                 } else {
                     const pts = room.polygon || [];
                     pts.forEach(p => {
-                        box.expandByPoint(new THREE.Vector3((room.x + p.x) / 10, yBase, (room.y + p.y) / 10));
-                        box.expandByPoint(new THREE.Vector3((room.x + p.x) / 10, yBase + rH, (room.y + p.y) / 10));
+                        if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
+                            // Invert Y for all points
+                            box.expandByPoint(new THREE.Vector3(((room.x || 0) + p.x) / 10, -(((room.y || 0) + p.y) / 10), yBase));
+                            box.expandByPoint(new THREE.Vector3(((room.x || 0) + p.x) / 10, -(((room.y || 0) + p.y) / 10), yBase + rH));
+                        }
                     });
                 }
             });
         }
 
+        // Safety check: If box is empty (e.g. only invalid polygons), set a default size to prevent NaN/Infinity
+        if (box.isEmpty()) {
+            box.setFromCenterAndSize(new THREE.Vector3(0, 0, 0), new THREE.Vector3(100, 100, 100));
+        }
+
         const center = new THREE.Vector3();
         box.getCenter(center);
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        const maxDim = Math.max(size.x, size.y, size.z);
+        const boxSize = new THREE.Vector3();
+        box.getSize(boxSize);
+        const maxDim = Math.max(boxSize.x, boxSize.y, boxSize.z, 1); // Ensure min size > 0
 
         const distance = maxDim * 2;
-        const newPos = center.clone().add(new THREE.Vector3(distance, distance, distance));
+        // Use a standard isometric-like angle (1, 1, 1) normalized
+        const offset = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(distance);
+        const newPos = center.clone().add(offset);
 
         camera.position.copy(newPos);
         camera.lookAt(center);
+
+        // Reset zoom for orthographic camera to ensure it fits
+        if (camera.type === 'OrthographicCamera') {
+            // Calculate zoom to fit the object within the canvas dimensions
+            // padding factor (1.5 = 150% of object size)
+            const padding = 1.5;
+            const minCanvasDim = Math.min(size.width || 1, size.height || 1);
+            const safeMaxDim = Math.max(maxDim, 1);
+
+            let newZoom = minCanvasDim / (safeMaxDim * padding);
+            if (!Number.isFinite(newZoom) || newZoom <= 0) newZoom = 1;
+            (camera as THREE.OrthographicCamera).zoom = newZoom;
+            camera.updateProjectionMatrix();
+        }
+
         if (controls) {
             (controls as any).target.copy(center);
             (controls as any).update();
         }
 
-        if (onFitComplete) onFitComplete();
-    }, [zoomTrigger, placedRooms, floors, camera, controls, onFitComplete]);
+        if (onFitComplete && Number.isFinite(center.x) && Number.isFinite(center.y) && Number.isFinite(center.z)) {
+            onFitComplete(camera.position, center, camera.zoom);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [zoomTrigger]);
 
     return null;
 }
 
 function ViewStateTracker({ onUpdate }: { onUpdate: (pos: THREE.Vector3, target: THREE.Vector3, zoom: number) => void }) {
     const { camera, controls } = useThree();
+    const onUpdateRef = useRef(onUpdate);
+    onUpdateRef.current = onUpdate;
 
     useEffect(() => {
         const ctrl = controls as any;
         if (!ctrl) return;
 
-        const onChange = () => {
-            onUpdate(camera.position, ctrl.target, camera.zoom);
+        // Use 'end' event instead of 'change' to avoid re-rendering parent on every frame of drag
+        const onEnd = () => {
+            onUpdateRef.current(camera.position, ctrl.target, camera.zoom);
         };
 
-        ctrl.addEventListener('change', onChange);
-        return () => ctrl.removeEventListener('change', onChange);
-    }, [camera, controls, onUpdate]);
+        ctrl.addEventListener('end', onEnd);
+        return () => ctrl.removeEventListener('end', onEnd);
+    }, [camera, controls]);
+
+    return null;
+}
+
+function CameraHandler({ viewState }: { viewState: VolumesViewProps['viewState'] }) {
+    const { camera, controls } = useThree();
+
+    useEffect(() => {
+        camera.up.set(0, 0, 1);
+        camera.position.set(...viewState.cameraPosition);
+
+        const target = new THREE.Vector3(...viewState.target);
+        if (!Number.isFinite(target.x) || !Number.isFinite(target.y) || !Number.isFinite(target.z)) {
+            target.set(0, 0, 0);
+        }
+        camera.lookAt(target);
+
+        if (camera.type === 'OrthographicCamera') {
+            // Sanitize zoom value from state
+            let safeZoom = viewState.zoom;
+            if (!Number.isFinite(safeZoom) || safeZoom <= 0) safeZoom = 1;
+            (camera as THREE.OrthographicCamera).zoom = safeZoom;
+            camera.updateProjectionMatrix();
+        }
+
+        if (controls) {
+            (controls as any).target.copy(target);
+            (controls as any).update();
+        }
+    }, [viewState.viewType, camera, controls]);
 
     return null;
 }
@@ -391,14 +470,31 @@ export function VolumesView({
         }
     }, [viewState.hasInitialZoomed, placedRooms.length]);
 
-    const handleFitComplete = () => {
-        onViewStateChange({ hasInitialZoomed: true });
-    };
+    const handleFitComplete = useCallback((pos: THREE.Vector3, target: THREE.Vector3, zoom: number) => {
+        // Update internal ref to prevent jump on next render
+        cameraStateRef.current.pos.copy(pos);
+        cameraStateRef.current.target.copy(target);
+        cameraStateRef.current.zoom = zoom;
+
+        onViewStateChange({
+            hasInitialZoomed: true,
+            cameraPosition: [pos.x, pos.y, pos.z],
+            target: [target.x, target.y, target.z],
+            zoom: zoom
+        });
+    }, [onViewStateChange]);
 
     const handleCameraUpdate = (pos: THREE.Vector3, target: THREE.Vector3, zoom: number) => {
         cameraStateRef.current.pos.copy(pos);
         cameraStateRef.current.target.copy(target);
         cameraStateRef.current.zoom = zoom;
+
+        // Sync to parent state only when interaction ends (handled by ViewStateTracker 'end' event)
+        onViewStateChange({
+            cameraPosition: [pos.x, pos.y, pos.z],
+            target: [target.x, target.y, target.z],
+            zoom: zoom
+        });
     };
 
     // Save state on unmount
@@ -417,7 +513,7 @@ export function VolumesView({
             viewType: type,
             cameraPosition: [cameraStateRef.current.pos.x, cameraStateRef.current.pos.y, cameraStateRef.current.pos.z],
             target: [cameraStateRef.current.target.x, cameraStateRef.current.target.y, cameraStateRef.current.target.z],
-            zoom: cameraStateRef.current.zoom
+            zoom: 1 // Reset zoom when switching views to prevent FOV issues
         });
     };
 
@@ -431,16 +527,17 @@ export function VolumesView({
                 onPointerMissed={() => onRoomSelect(null, false)}
             >
                 {viewState.viewType === 'perspective' ? (
-                    <PerspectiveCamera makeDefault position={viewState.cameraPosition} fov={45} />
+                    <PerspectiveCamera makeDefault fov={45} up={[0, 0, 1]} />
                 ) : (
-                    <OrthographicCamera makeDefault position={viewState.cameraPosition} zoom={viewState.zoom} near={0.1} far={2000} />
+                    <OrthographicCamera makeDefault near={0.1} far={2000} up={[0, 0, 1]} />
                 )}
-                <OrbitControls makeDefault zoomToCursor target={viewState.target} />
+                <OrbitControls key={viewState.viewType} makeDefault zoomToCursor enableDamping={false} />
+                <CameraHandler viewState={viewState} />
                 <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={placedRooms} floors={floors} onFitComplete={handleFitComplete} />
                 <ViewStateTracker onUpdate={handleCameraUpdate} />
                 <ambientLight intensity={0.7} />
-                <pointLight position={[200, 500, 200]} intensity={1.5} castShadow />
-                <directionalLight position={[-200, 400, -200]} intensity={0.8} />
+                <pointLight position={[200, 200, 500]} intensity={1.5} castShadow />
+                <directionalLight position={[-200, -200, 400]} intensity={0.8} />
 
                 {floors.map((floor) => (
                     <FloorPlane key={floor.id} floor={floor} floors={floors} darkMode={darkMode} gridSize={gridSize} />
