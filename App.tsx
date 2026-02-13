@@ -15,7 +15,8 @@ import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
     LandPlot, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Trash2, Lock, Unlock, BrushCleaning,
-    Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save
+    Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
+    Eye, EyeOff
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar } from './components/SketchToolbar';
@@ -275,6 +276,7 @@ export default function App() {
     const [editingFloorId, setEditingFloorId] = useState<number | null>(null);
     const [hasInitialZoomed, setHasInitialZoomed] = useState(false);
     const [floorGap, setFloorGap] = useState(4);
+    const [hiddenFloorIds, setHiddenFloorIds] = useState<Set<number>>(new Set());
 
     const roomsRef = useRef(rooms);
     roomsRef.current = rooms;
@@ -464,7 +466,8 @@ export default function App() {
         let activeGuideY: number | undefined;
 
         const currentRooms = roomsRef.current || [];
-        const otherRooms = currentRooms.filter(r => r.isPlaced && r.id !== excludeId && r.floor === currentFloor);
+        const overlayId = floorOverlays[currentFloor] ?? null;
+        const otherRooms = currentRooms.filter(r => r.isPlaced && r.id !== excludeId && (r.floor === currentFloor || (overlayId !== null && r.floor === overlayId)));
 
         if (appSettings.snapToObjects) {
             for (const other of otherRooms) {
@@ -514,7 +517,7 @@ export default function App() {
             return newGuides;
         });
         return { x: snappedX, y: snappedY };
-    }, [currentFloor, snapEnabled, appSettings]);
+    }, [currentFloor, snapEnabled, appSettings, floorOverlays]);
 
     // Canvas Refs
     const mainRef = useRef<HTMLElement>(null);
@@ -1310,6 +1313,18 @@ export default function App() {
         });
     }, []);
 
+    const toggleFloorVisibility = useCallback((floorId: number) => {
+        setHiddenFloorIds(prev => {
+            const next = new Set(prev);
+            if (next.has(floorId)) {
+                next.delete(floorId);
+            } else {
+                next.add(floorId);
+            }
+            return next;
+        });
+    }, []);
+
     // --- Zone Handlers ---
     const handleZoneDrag = useCallback((zone: string, dx: number, dy: number) => {
         setRooms(prev => prev.map(r => {
@@ -1823,6 +1838,7 @@ export default function App() {
                                        cameraVersion={cameraVersion}
                                        active={viewMode === 'VOLUMES'}
                                        floorGap={floorGap}
+                                       hiddenFloorIds={hiddenFloorIds}
                                    />
                                </ErrorBoundary>
                             </div>
@@ -1980,6 +1996,10 @@ export default function App() {
                                     >
                                         {(() => {
                                             const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+                                            const overlayRooms = activeOverlayFloorId !== null
+                                                ? rooms.filter(r => r.isPlaced && r.floor === activeOverlayFloorId)
+                                                : [];
+
                                             return visibleRooms.map(room => (
                                                 <Bubble
                                                     key={room.id}
@@ -2018,7 +2038,7 @@ export default function App() {
                                                     onDragEnd={handleBubbleDragEnd}
                                                     onDragStart={() => { setIsBubbleDragging(true); addToHistory(); }}
                                                     isAnyDragging={isBubbleDragging}
-                                                    otherRooms={selectedRoomIds.has(room.id) ? visibleRooms.filter(r => r.id !== room.id) : undefined}
+                                                    otherRooms={selectedRoomIds.has(room.id) ? [...visibleRooms.filter(r => r.id !== room.id), ...overlayRooms] : undefined}
                                                     isSketchMode={isSketchMode || isReferenceMode}
                                                 />
                                             ));
@@ -2552,11 +2572,21 @@ export default function App() {
                                                             {floors.map(floor => {
                                                                 const floorRooms = rooms.filter(r => r.floor === floor.id && r.isPlaced);
                                                                 const floorArea = floorRooms.reduce((acc, r) => acc + r.area, 0);
+                                                                const isHidden = hiddenFloorIds.has(floor.id);
                                                                 
                                                                 return (
                                                                     <div key={floor.id} className="p-4 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl space-y-3">
                                                                         <div className="flex items-center justify-between">
-                                                                            <span className="text-xs font-bold text-slate-700 dark:text-gray-200">{floor.label}</span>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <button
+                                                                                    onClick={() => toggleFloorVisibility(floor.id)}
+                                                                                    className={`p-1 rounded-md transition-colors ${isHidden ? 'text-slate-400 hover:text-slate-600' : 'text-orange-600 hover:text-orange-700 bg-orange-50 dark:bg-orange-900/20'}`}
+                                                                                    title={isHidden ? "Show Floor" : "Hide Floor"}
+                                                                                >
+                                                                                    {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                                                                                </button>
+                                                                                <span className={`text-xs font-bold ${isHidden ? 'text-slate-400' : 'text-slate-700 dark:text-gray-200'}`}>{floor.label}</span>
+                                                                            </div>
                                                                             <span className="text-[10px] font-mono text-slate-400">{floorRooms.length} Spaces</span>
                                                                         </div>
                                                                         

@@ -30,6 +30,7 @@ interface VolumesViewProps {
     cameraVersion: number;
     active: boolean;
     floorGap: number;
+    hiddenFloorIds: Set<number>;
 }
 
 const HEIGHT_SCALE = 2; // 1m = 2 units (consistent with horizontal scale of 20px/m / 10)
@@ -508,11 +509,11 @@ function CameraHandler({ viewState, onViewStateChange, isInteracting, cameraVers
 export function VolumesView({
     rooms, floors, verticalConnections, zoneColors, pixelsPerMeter,
     connectionSourceId, onLinkToggle, appSettings, diagramStyle,
-    selectedRoomIds, onRoomSelect, darkMode, gridSize, active, floorGap,
+    selectedRoomIds, onRoomSelect, darkMode, gridSize, active, floorGap, hiddenFloorIds,
     viewState, onViewStateChange, cameraVersion
 }: VolumesViewProps) {
     const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0);
-    const placedRooms = useMemo(() => rooms.filter(r => r.isPlaced), [rooms]);
+    const visiblePlacedRooms = useMemo(() => rooms.filter(r => r.isPlaced && !hiddenFloorIds.has(r.floor)), [rooms, hiddenFloorIds]);
     const isInteracting = useRef(false);
 
     // Track camera state in ref to avoid re-renders, save on unmount
@@ -537,13 +538,13 @@ export function VolumesView({
 
     // Initial Zoom to Fit
     useEffect(() => {
-        if (!viewState.hasInitialZoomed && placedRooms.length > 0) {
+        if (!viewState.hasInitialZoomed && visiblePlacedRooms.length > 0) {
             const timer = setTimeout(() => {
                 setZoomToFitTrigger(t => t + 1);
             }, 100);
             return () => clearTimeout(timer);
         }
-    }, [viewState.hasInitialZoomed, placedRooms.length]);
+    }, [viewState.hasInitialZoomed, visiblePlacedRooms.length]);
 
     const handleFitComplete = useCallback((pos: THREE.Vector3, target: THREE.Vector3, zoom: number) => {
         // Update internal ref to prevent jump on next render
@@ -608,17 +609,17 @@ export function VolumesView({
                 )}
                 <OrbitControls key={viewState.viewType} makeDefault zoomToCursor enableDamping={false} />
                 <CameraHandler viewState={viewState} onViewStateChange={onViewStateChange} isInteracting={isInteracting} cameraVersion={cameraVersion} />
-                <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={placedRooms} floors={floors} onFitComplete={handleFitComplete} floorGap={floorGap} />
+                <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={visiblePlacedRooms} floors={floors} onFitComplete={handleFitComplete} floorGap={floorGap} />
                 <ViewStateTracker onUpdate={handleCameraUpdate} isInteracting={isInteracting} />
                 <ambientLight intensity={0.7} />
                 <pointLight position={[200, 200, 500]} intensity={1.5} castShadow />
                 <directionalLight position={[-200, -200, 400]} intensity={0.8} />
 
                 {floors.map((floor) => (
-                    <FloorPlane key={floor.id} floor={floor} floors={floors} darkMode={darkMode} gridSize={gridSize} floorGap={floorGap} />
+                    !hiddenFloorIds.has(floor.id) && <FloorPlane key={floor.id} floor={floor} floors={floors} darkMode={darkMode} gridSize={gridSize} floorGap={floorGap} />
                 ))}
 
-                {placedRooms.map(room => (
+                {visiblePlacedRooms.map(room => (
                     <RoomVolume
                         key={room.id}
                         room={room}
@@ -641,7 +642,7 @@ export function VolumesView({
                 ))}
 
                 {verticalConnections.map(conn => (
-                    <VerticalLink key={conn.id} conn={conn} rooms={rooms} floors={floors} darkMode={darkMode} floorGap={floorGap} />
+                    (!hiddenFloorIds.has(conn.fromFloor) && !hiddenFloorIds.has(conn.toFloor)) && <VerticalLink key={conn.id} conn={conn} rooms={rooms} floors={floors} darkMode={darkMode} floorGap={floorGap} />
                 ))}
 
                 <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
