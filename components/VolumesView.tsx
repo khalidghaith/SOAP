@@ -48,6 +48,12 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
     floorGap: number;
 }) {
     const color = useMemo(() => {
+        const style = zoneColors[room.zone];
+        if (style?.bg) {
+            const match = style.bg.match(/\[(#[0-9a-fA-F]{6})\]/);
+            if (match) return match[1];
+        }
+
         if (room.zone === 'Public') return '#fb923c';
         if (room.zone === 'Private') return '#60a5fa';
         if (room.zone === 'Service') return '#94a3b8';
@@ -55,7 +61,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         if (room.zone === 'Outdoor') return '#4ade80';
         if (room.zone === 'Admin') return '#c084fc';
         return '#e2e8f0';
-    }, [room.zone]);
+    }, [room.zone, zoneColors]);
 
     const floor = floors.find(f => f.id === room.floor);
     const heightInMeters = room.depth || floor?.height || 3;

@@ -34,6 +34,25 @@ if (typeof window !== 'undefined' && !window.process) {
 // Configuration
 const PIXELS_PER_METER = 20;
 
+const COLOR_PALETTE: ZoneColor[] = [
+    { bg: 'bg-[#f44336]/50', text: 'text-white', border: 'border-[#f44336]' },
+    { bg: 'bg-[#e81e63]/50', text: 'text-white', border: 'border-[#e81e63]' },
+    { bg: 'bg-[#9c27b0]/50', text: 'text-white', border: 'border-[#9c27b0]' },
+    { bg: 'bg-[#673ab7]/50', text: 'text-white', border: 'border-[#673ab7]' },
+    { bg: 'bg-[#3f51b5]/50', text: 'text-white', border: 'border-[#3f51b5]' },
+    { bg: 'bg-[#2196f3]/50', text: 'text-white', border: 'border-[#2196f3]' },
+    { bg: 'bg-[#03a9f4]/50', text: 'text-slate-900', border: 'border-[#03a9f4]' },
+    { bg: 'bg-[#00bcd4]/50', text: 'text-slate-900', border: 'border-[#00bcd4]' },
+    { bg: 'bg-[#009688]/50', text: 'text-white', border: 'border-[#009688]' },
+    { bg: 'bg-[#4caf50]/50', text: 'text-slate-900', border: 'border-[#4caf50]' },
+    { bg: 'bg-[#8bc34a]/50', text: 'text-slate-900', border: 'border-[#8bc34a]' },
+    { bg: 'bg-[#cddc39]/50', text: 'text-slate-900', border: 'border-[#cddc39]' },
+    { bg: 'bg-[#ffeb3b]/50', text: 'text-slate-900', border: 'border-[#ffeb3b]' },
+    { bg: 'bg-[#ffc107]/50', text: 'text-slate-900', border: 'border-[#ffc107]' },
+    { bg: 'bg-[#ff9800]/50', text: 'text-slate-900', border: 'border-[#ff9800]' },
+    { bg: 'bg-[#ff5722]/50', text: 'text-white', border: 'border-[#ff5722]' },
+];
+
 // --- Geometry Helpers for Shape Conversion ---
 const calculateCentroid = (points: Point[]): Point => {
     let x = 0, y = 0;
@@ -1003,8 +1022,7 @@ export default function App() {
         addToHistory();
         if (zoneColors[name] || !name.trim()) return;
         // Assign a random color style from existing ones for now
-        const styles = Object.values(ZONE_COLORS);
-        const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+        const randomStyle = COLOR_PALETTE[Math.floor(Math.random() * COLOR_PALETTE.length)];
         setZoneColors(prev => ({ ...prev, [name]: randomStyle }));
     };
 
@@ -1427,6 +1445,21 @@ export default function App() {
         return { totalArea, breakdown, commonShape };
     }, [selectedRoomsList, isMultiSelection]);
 
+    const handleMoveSelectionFloors = (direction: 1 | -1) => {
+        addToHistory();
+        setRooms(prev => prev.map(r => {
+            if (selectedRoomIds.has(r.id)) {
+                const currentIdx = floors.findIndex(f => f.id === r.floor);
+                if (currentIdx === -1) return r;
+                const newIdx = currentIdx + direction;
+                if (newIdx >= 0 && newIdx < floors.length) {
+                    return { ...r, floor: floors[newIdx].id };
+                }
+            }
+            return r;
+        }));
+    };
+
     const handleConvertShape = (shape: 'rect' | 'polygon' | 'bubble') => {
         addToHistory();
         setRooms(prev => prev.map(r => {
@@ -1752,7 +1785,7 @@ export default function App() {
                                                 </div>
                                                 <div className="flex items-center gap-3">
                                                     <span className="px-2 py-1 bg-slate-100 dark:bg-white/5 rounded-lg text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-wider">{room.area} m²</span>
-                                                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm ${ZONE_COLORS[room.zone]?.bg || 'bg-slate-100'} ${ZONE_COLORS[room.zone]?.text || 'text-slate-500'}`}>{room.zone}</span>
+                                                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm ${zoneColors[room.zone]?.bg || 'bg-slate-100'} ${zoneColors[room.zone]?.text || 'text-slate-500'}`}>{room.zone}</span>
                                                 </div>
                                             </div>
                                         )) : (
@@ -2526,6 +2559,37 @@ export default function App() {
                                                                 {Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
                                                             </div>
                                                         </div>
+                                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border flex justify-between items-center">
+                                                            <div>
+                                                                <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
+                                                                <span className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200">
+                                                                    {(() => {
+                                                                        if (selectedRoomsList.length === 0) return 'N/A';
+                                                                        const firstFloor = selectedRoomsList[0].floor;
+                                                                        const allSame = selectedRoomsList.every(r => r.floor === firstFloor);
+                                                                        return allSame ? (floors.find(f => f.id === firstFloor)?.label || 'N/A') : 'Mixed';
+                                                                    })()}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex flex-col gap-1">
+                                                                <button
+                                                                    onClick={() => handleMoveSelectionFloors(1)}
+                                                                    disabled={selectedRoomsList.every(r => floors.findIndex(f => f.id === r.floor) >= floors.length - 1)}
+                                                                    className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30"
+                                                                    title="Move Selection Up"
+                                                                >
+                                                                    <ChevronUp size={14} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleMoveSelectionFloors(-1)}
+                                                                    disabled={selectedRoomsList.every(r => floors.findIndex(f => f.id === r.floor) <= 0)}
+                                                                    className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30"
+                                                                    title="Move Selection Down"
+                                                                >
+                                                                    <ChevronDown size={14} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
                                                         <div className="p-4 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl">
                                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-2">Breakdown</span>
                                                             <p className="text-xs font-medium text-slate-600 dark:text-gray-300">{multiSelectionStats?.breakdown}</p>
@@ -2557,6 +2621,23 @@ export default function App() {
                                                             onChange={(e) => renameZone(selectedZone, e.target.value)}
                                                         />
                                                         <div className={`w-4 h-4 rounded-full ${zoneColors[selectedZone]?.bg || 'bg-slate-200'}`} />
+                                                    </div>
+                                                </div>
+
+                                                <div>
+                                                    <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Zone Color</label>
+                                                    <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
+                                                        {COLOR_PALETTE.map((style, i) => (
+                                                            <button
+                                                                    key={i}
+                                                                    onClick={() => {
+                                                                        addToHistory();
+                                                                        setZoneColors(prev => ({ ...prev, [selectedZone]: style }));
+                                                                    }}
+                                                                    className={`w-6 h-6 rounded-full ${style.bg} shadow-sm ring-2 ring-offset-2 ring-offset-white dark:ring-offset-dark-surface ${zoneColors[selectedZone]?.bg === style.bg ? 'ring-slate-900 dark:ring-white scale-110' : 'ring-transparent hover:scale-110 transition-transform'}`}
+                                                                    title="Select Color"
+                                                                />
+                                                        ))}
                                                     </div>
                                                 </div>
 
