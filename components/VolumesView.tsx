@@ -1,7 +1,8 @@
-import React, { useMemo, useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback, useLayoutEffect, useImperativeHandle, forwardRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, PerspectiveCamera, OrthographicCamera, GizmoHelper, GizmoViewport, Text, Edges, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
+import { OBJExporter } from 'three-stdlib';
 import { Room, Floor, ZoneColor, VerticalConnection, ZONE_COLORS, AppSettings, DiagramStyle } from '../types';
 import { Maximize } from 'lucide-react';
 
@@ -31,6 +32,11 @@ interface VolumesViewProps {
     active: boolean;
     floorGap: number;
     hiddenFloorIds: Set<number>;
+}
+
+export interface VolumesViewHandle {
+    exportOBJ: () => Blob | null;
+    captureScreenshot: () => Promise<Blob | null>;
 }
 
 const HEIGHT_SCALE = 2; // 1m = 2 units (consistent with horizontal scale of 20px/m / 10)
@@ -224,7 +230,7 @@ function FloorPlane({ floor, floors, darkMode, gridSize, floorGap }: { floor: Fl
     const sectionSizeValue = gridSize * 2;
 
     return (
-        <group position={[0, 0, y - 0.05]} rotation={[Math.PI / 2, 0, 0]}>
+        <group position={[0, 0, y - 0.05]} rotation={[Math.PI / 2, 0, 0]} userData={{ isGrid: true }}>
             <Grid
                 args={[100, 100]}
                 sectionSize={sectionSizeValue}
@@ -514,17 +520,65 @@ function CameraHandler({ viewState, onViewStateChange, isInteracting, cameraVers
     return null;
 }
 
+// Internal component to handle scene access and export logic
+const SceneManager = forwardRef<VolumesViewHandle, { hiddenFloorIds: Set<number> }>(({ hiddenFloorIds }, ref) => {
+    const { scene, gl, camera } = useThree();
+
+    useImperativeHandle(ref, () => ({
+        exportOBJ: () => {
+            const exporter = new OBJExporter();
+            const objectsToHide: THREE.Object3D[] = [];
+
+            // Hide grids and helpers before export
+            scene.traverse((child) => {
+                if (child.userData?.isGrid || child.type === 'GridHelper' || (child as any).isGizmo) {
+                    if (child.visible) {
+                        child.visible = false;
+                        objectsToHide.push(child);
+                    }
+                }
+                // Hide GizmoHelper container if identifiable (often added to scene directly)
+                if (child.name === 'GizmoHelper' || child.userData?.type === 'GizmoHelper') {
+                     if (child.visible) {
+                        child.visible = false;
+                        objectsToHide.push(child);
+                    }
+                }
+            });
+
+            const result = exporter.parse(scene);
+
+            // Restore visibility
+            objectsToHide.forEach(o => o.visible = true);
+
+            return new Blob([result], { type: 'text/plain' });
+        },
+        captureScreenshot: async () => {
+            gl.render(scene, camera);
+            return new Promise((resolve) => {
+                gl.domElement.toBlob((blob) => resolve(blob));
+            });
+        }
+    }));
+    return null;
+});
 
 
-export function VolumesView({
+export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
     rooms, floors, verticalConnections, zoneColors, pixelsPerMeter,
     connectionSourceId, onLinkToggle, appSettings, diagramStyle,
     selectedRoomIds, onRoomSelect, darkMode, gridSize, active, floorGap, hiddenFloorIds,
     viewState, onViewStateChange, cameraVersion
-}: VolumesViewProps) {
+}: VolumesViewProps, ref) => {
     const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0);
     const visiblePlacedRooms = useMemo(() => rooms.filter(r => r.isPlaced && !hiddenFloorIds.has(r.floor)), [rooms, hiddenFloorIds]);
     const isInteracting = useRef(false);
+    const internalRef = useRef<VolumesViewHandle>(null);
+
+    useImperativeHandle(ref, () => ({
+        exportOBJ: () => internalRef.current?.exportOBJ() ?? null,
+        captureScreenshot: () => internalRef.current?.captureScreenshot() ?? Promise.resolve(null)
+    }));
 
     // Track camera state in ref to avoid re-renders, save on unmount
     const cameraStateRef = useRef({
@@ -618,6 +672,7 @@ export function VolumesView({
                     <OrthographicCamera makeDefault near={0.1} far={2000} up={[0, 0, 1]} />
                 )}
                 <OrbitControls key={viewState.viewType} makeDefault zoomToCursor enableDamping={false} />
+                <SceneManager ref={internalRef} hiddenFloorIds={hiddenFloorIds} />
                 <CameraHandler viewState={viewState} onViewStateChange={onViewStateChange} isInteracting={isInteracting} cameraVersion={cameraVersion} />
                 <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={visiblePlacedRooms} floors={floors} onFitComplete={handleFitComplete} floorGap={floorGap} />
                 <ViewStateTracker onUpdate={handleCameraUpdate} isInteracting={isInteracting} />
@@ -706,4 +761,4 @@ export function VolumesView({
             )}
         </div>
     );
-}
+});

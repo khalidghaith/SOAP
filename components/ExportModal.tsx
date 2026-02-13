@@ -6,7 +6,7 @@ interface ExportModalProps {
     onClose: () => void;
     viewMode: 'EDITOR' | 'CANVAS' | 'VOLUMES';
     projectName: string;
-    onPreview?: () => Promise<string | null>;
+    onPreview?: (options?: ExportOptions) => Promise<string | null>;
 }
 
 type ExportFormat = 'json' | 'png' | 'pdf' | 'obj' | 'csv';
@@ -41,14 +41,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
     useEffect(() => {
         if (step === 'CONFIGURE' && onPreview && (selectedFormat === 'png' || selectedFormat === 'pdf')) {
             setIsLoadingPreview(true);
-            onPreview().then(url => {
+            onPreview(options).then(url => {
                 setPreviewUrl(url);
                 setIsLoadingPreview(false);
             });
         } else {
             setPreviewUrl(null);
         }
-    }, [step, onPreview, selectedFormat]);
+    }, [step, onPreview, selectedFormat, options]);
 
     useEffect(() => {
         setOptions(prev => ({ ...prev, filename: projectName }));

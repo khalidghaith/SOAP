@@ -1645,7 +1645,8 @@ export default function App() {
                             if (options?.transparentBackground && node.classList && node.classList.contains('grid-layer')) return false;
                             return true;
                         },
-                        backgroundColor: null
+                        backgroundColor: options?.transparentBackground ? null : (darkMode ? '#020617' : '#f0f2f5'),
+                        style: options?.transparentBackground ? { backgroundColor: 'rgba(0,0,0,0)' } : undefined
                     });
                     if (blob) await saveFile(blob, finalName, 'png');
                 }
@@ -1654,31 +1655,129 @@ export default function App() {
                 alert("Failed to export image.");
             }
         } else if (format === 'pdf') {
-            await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, currentStyle, referenceImages);
+            const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, currentStyle, referenceImages);
+            if (blob) await saveFile(blob, finalName, 'pdf');
         }
     };
 
-    const getCanvasPreview = useCallback(async () => {
+    const getCanvasPreview = useCallback(async (options?: any) => {
         if (viewMode === 'VOLUMES' && volumesViewRef.current) {
             const blob = await volumesViewRef.current.captureScreenshot();
             return blob ? URL.createObjectURL(blob) : null;
         } else if ((viewMode === 'CANVAS' || viewMode === 'EDITOR') && mainRef.current) {
             try {
-                return await htmlToImage.toPng(mainRef.current, {
-                    pixelRatio: 0.5, // Low res for preview
+                const pixelRatio = 0.5;
+                const dataUrl = await htmlToImage.toPng(mainRef.current, {
+                    pixelRatio, // Low res for preview
                     filter: (node) => {
                         if (node.classList && node.classList.contains('export-exclude')) return false;
                         return true;
                     },
                     backgroundColor: darkMode ? '#020617' : '#f0f2f5' // Preview with background
                 });
+
+                // If PDF options are present, draw the page boundary
+                if (options && options.pageSize && options.pdfScale) {
+                    return new Promise<string>((resolve) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            const ctx = canvas.getContext('2d');
+                            if (!ctx) {
+                                resolve(dataUrl);
+                                return;
+                            }
+
+                            // Draw the screenshot
+                            ctx.drawImage(img, 0, 0);
+
+                            // Calculate Content Bounds
+                            const placedRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+                            if (placedRooms.length > 0) {
+                                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                                placedRooms.forEach(r => {
+                                    if (r.polygon && r.polygon.length > 0) {
+                                        r.polygon.forEach(p => {
+                                            minX = Math.min(minX, r.x + p.x);
+                                            minY = Math.min(minY, r.y + p.y);
+                                            maxX = Math.max(maxX, r.x + p.x);
+                                            maxY = Math.max(maxY, r.y + p.y);
+                                        });
+                                    } else {
+                                        minX = Math.min(minX, r.x);
+                                        minY = Math.min(minY, r.y);
+                                        maxX = Math.max(maxX, r.x + r.width);
+                                        maxY = Math.max(maxY, r.y + r.height);
+                                    }
+                                });
+
+                                const centerX = (minX + maxX) / 2;
+                                const centerY = (minY + maxY) / 2;
+
+                                // Calculate Page Size in World Pixels
+                                const PAGE_SIZES: Record<string, [number, number]> = {
+                                    'A4': [210, 297],
+                                    'A3': [297, 420],
+                                    'Letter': [215.9, 279.4]
+                                };
+                                const size = PAGE_SIZES[options.pageSize] || PAGE_SIZES['A4'];
+                                let widthMm = size[0];
+                                let heightMm = size[1];
+
+                                if (options.orientation === 'landscape') {
+                                    [widthMm, heightMm] = [heightMm, widthMm];
+                                }
+
+                                // 1 unit on paper = scaleFactor units in world
+                                // e.g. 1:100 -> 1mm on paper = 100mm (0.1m) in world
+                                const scaleFactor = options.pdfScale;
+                                const worldWidthPx = (widthMm / 1000) * scaleFactor * PIXELS_PER_METER;
+                                const worldHeightPx = (heightMm / 1000) * scaleFactor * PIXELS_PER_METER;
+
+                                // Calculate Screen Coordinates (relative to container, not window)
+                                // screenX = worldX * scale + offset.x
+                                const worldLeft = centerX - worldWidthPx / 2;
+                                const worldTop = centerY - worldHeightPx / 2;
+
+                                const screenLeft = worldLeft * scale + offset.x;
+                                const screenTop = worldTop * scale + offset.y;
+                                const screenWidth = worldWidthPx * scale;
+                                const screenHeight = worldHeightPx * scale;
+
+                                // Scale to Image Coordinates (pixelRatio)
+                                const rectX = screenLeft * pixelRatio;
+                                const rectY = screenTop * pixelRatio;
+                                const rectW = screenWidth * pixelRatio;
+                                const rectH = screenHeight * pixelRatio;
+
+                                // Draw Boundary
+                                ctx.strokeStyle = 'rgba(255, 50, 50, 0.8)';
+                                ctx.lineWidth = 5 * pixelRatio;
+                                ctx.setLineDash([10 * pixelRatio, 10 * pixelRatio]);
+                                ctx.strokeRect(rectX, rectY, rectW, rectH);
+
+                                // Draw Label
+                                ctx.fillStyle = 'rgba(255, 50, 50, 0.8)';
+                                ctx.font = `bold ${12 * pixelRatio}px sans-serif`;
+                                ctx.fillText(`Page Boundary (1:${scaleFactor})`, rectX + 5, rectY - 5);
+                            }
+
+                            resolve(canvas.toDataURL('image/png'));
+                        };
+                        img.src = dataUrl;
+                    });
+                }
+
+                return dataUrl;
             } catch (e) {
                 console.error("Preview generation failed", e);
                 return null;
             }
         }
         return null;
-    }, [viewMode, darkMode, rooms, connections, currentFloor]);
+    }, [viewMode, darkMode, rooms, connections, currentFloor, scale, offset]);
 
     return (
         <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-dark-bg overflow-hidden font-sans selection:bg-orange-500/20 transition-colors duration-300">
