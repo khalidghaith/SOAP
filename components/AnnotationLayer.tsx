@@ -34,8 +34,10 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
     const isDraggingAnnotation = useRef(false);
     const dragStartPos = useRef<Point | null>(null);
+    const dragStartNodePos = useRef<Point | null>(null);
     const mouseDownTimestamp = useRef<number>(0);
     const isCreatingNode = useRef(false);
+    const [snapLines, setSnapLines] = useState<{ x1: number, y1: number, x2: number, y2: number }[]>([]);
 
     // Text Editing State
     const [editingTextId, setEditingTextId] = useState<string | null>(null);
@@ -69,7 +71,49 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         setActiveNodeIdx(null);
         setDragHandleType(null);
         isCreatingNode.current = false;
+        setSnapLines([]);
         // Don't clear selection on tool reset, only on explicit deselect
+    };
+
+    // Helper for axis snapping
+    const getSnappedPoint = (current: Point, base: Point | null, shiftKey: boolean) => {
+        if (!shiftKey || !base) {
+            if (snapLines.length > 0) setSnapLines([]);
+            return current;
+        }
+
+        const dx = current.x - base.x;
+        const dy = current.y - base.y;
+
+        const distH = Math.abs(dy);
+        const distV = Math.abs(dx);
+        const distD1 = Math.abs(dx - dy) / Math.sqrt(2); // y = x + c
+        const distD2 = Math.abs(dx + dy) / Math.sqrt(2); // y = -x + c
+
+        const min = Math.min(distH, distV, distD1, distD2);
+        
+        let snapped = { ...current };
+        const lines = [];
+        const L = 100000; // Guide length
+
+        if (min === distH) {
+            snapped.y = base.y;
+            lines.push({ x1: base.x - L, y1: base.y, x2: base.x + L, y2: base.y });
+        } else if (min === distV) {
+            snapped.x = base.x;
+            lines.push({ x1: base.x, y1: base.y - L, x2: base.x, y2: base.y + L });
+        } else if (min === distD1) {
+            const avg = (dx + dy) / 2;
+            snapped = { x: base.x + avg, y: base.y + avg };
+            lines.push({ x1: base.x - L, y1: base.y - L, x2: base.x + L, y2: base.y + L });
+        } else {
+            const avg = (dx - dy) / 2;
+            snapped = { x: base.x + avg, y: base.y - avg };
+            lines.push({ x1: base.x - L, y1: base.y + L, x2: base.x + L, y2: base.y - L });
+        }
+        
+        setSnapLines(lines);
+        return snapped;
     };
 
     // Handle Escape key to cancel drawing
@@ -95,28 +139,21 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [activeType, points, currentFloor, properties, onAddAnnotation, editingTextId]);
+    }, [activeType, points, currentFloor, properties, onAddAnnotation, editingTextId, isSketchMode]);
 
     const handleMouseDown = (e: React.MouseEvent) => {
         if (!isSketchMode) return;
 
         // Eraser logic is handled by onClick on individual annotations.
-        // We just prevent default to stop canvas panning and return.
         if (activeType === 'eraser') {
             e.preventDefault();
             return;
         }
 
-        // Right click check
-        if (e.button === 2) {
+        // Allow Middle (1) and Right (2) clicks to bubble up (e.g. for panning or context menu)
+        if (e.button === 1 || e.button === 2) {
             return;
         }
-
-        e.stopPropagation();
-        e.preventDefault();
-        mouseDownTimestamp.current = Date.now();
-
-        const point = toWorld(e.clientX, e.clientY);
 
         // --- Select Tool Logic (Canvas Click) ---
         if (activeType === 'select') {
@@ -124,8 +161,24 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
             // If we reach here, we are clicking empty space or the body of an annotation (if not stopped)
             if (!dragHandleType) {
                 onSelectAnnotation?.(null);
+                // Allow event to bubble to App.tsx for panning
             }
             return;
+        }
+
+        e.stopPropagation();
+        e.preventDefault();
+        mouseDownTimestamp.current = Date.now();
+        let point = toWorld(e.clientX, e.clientY);
+
+        // Apply Snap for Drawing (Initial Click)
+        if (e.shiftKey) {
+            if ((activeType === 'line' || activeType === 'polyline' || activeType === 'arc') && points.length > 0) {
+                point = getSnappedPoint(point, points[points.length - 1], true);
+            } else if (activeType === 'bezier' && points.length >= 3) {
+                // Snap relative to last anchor (index length-3)
+                point = getSnappedPoint(point, points[points.length - 3], true);
+            }
         }
 
         isDrawing.current = true;
@@ -204,7 +257,15 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                 setPoints(prev => [...prev, point]);
                 setStep(2);
             } else if (step === 2) {
-                const finalPoints = [...points, point];
+                // Calculate Quadratic Control Point so curve passes through Mid Point
+                const p0 = points[0];
+                const pOn = points[1];
+                const p2 = point;
+                const cp = {
+                    x: 2 * pOn.x - 0.5 * p0.x - 0.5 * p2.x,
+                    y: 2 * pOn.y - 0.5 * p0.y - 0.5 * p2.y
+                };
+                const finalPoints = [p0, cp, p2];
                 onAddAnnotation({
                     id: `ann-${Date.now()}`,
                     type: 'arc',
@@ -279,7 +340,37 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
 
     const handleMouseMove = (e: React.MouseEvent) => {
         if (!isSketchMode) return;
-        const point = toWorld(e.clientX, e.clientY);
+        let point = toWorld(e.clientX, e.clientY);
+
+        // --- Snap Logic ---
+        if (e.shiftKey) {
+            if (activeType === 'select' && isDrawing.current && activeNodeIdx !== null && selectedAnnotationId) {
+                const selectedAnn = annotations.find(a => a.id === selectedAnnotationId);
+                if (selectedAnn) {
+                    if (dragHandleType === 'anchor') {
+                        point = getSnappedPoint(point, dragStartNodePos.current, true);
+                    } else if (dragHandleType === 'in' || dragHandleType === 'out') {
+                        const anchor = selectedAnn.points[activeNodeIdx];
+                        point = getSnappedPoint(point, anchor, true);
+                    }
+                }
+            } else if (activeType === 'bezier' && isDrawing.current && activeNodeIdx !== null) {
+                if (dragHandleType === 'in' || dragHandleType === 'out') {
+                    const anchor = points[activeNodeIdx];
+                    point = getSnappedPoint(point, anchor, true);
+                }
+            } else if ((activeType === 'line' || activeType === 'polyline' || activeType === 'arc') && points.length > 0) {
+                point = getSnappedPoint(point, points[points.length - 1], true);
+            } else if (activeType === 'bezier' && points.length > 0) {
+                // Snap relative to last anchor
+                const lastAnchorIdx = points.length >= 3 ? points.length - 3 : 0;
+                if (points[lastAnchorIdx]) {
+                    point = getSnappedPoint(point, points[lastAnchorIdx], true);
+                }
+            }
+        } else {
+            if (snapLines.length > 0) setSnapLines([]);
+        }
 
         // --- Select Tool Dragging (Whole Annotation) ---
         if (activeType === 'select' && isDraggingAnnotation.current && selectedAnnotationId) {
@@ -307,16 +398,34 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
             const selectedAnn = annotations.find(a => a.id === selectedAnnotationId);
             if (selectedAnn) {
                 let newPoints = [...selectedAnn.points];
+                let targetPoint = point;
+
                 if (selectedAnn.type === 'bezier') {
                     if (dragHandleType === 'anchor') {
-                        const delta = { x: point.x - newPoints[activeNodeIdx].x, y: point.y - newPoints[activeNodeIdx].y };
+                        if (e.shiftKey && dragStartNodePos.current) {
+                            targetPoint = getSnappedPoint(point, dragStartNodePos.current, true);
+                        } else {
+                            if (snapLines.length > 0) setSnapLines([]);
+                        }
+                        const delta = { x: targetPoint.x - newPoints[activeNodeIdx].x, y: targetPoint.y - newPoints[activeNodeIdx].y };
                         newPoints = PenTool.moveNode(newPoints, activeNodeIdx, delta);
                     } else if (dragHandleType) {
-                        newPoints = PenTool.updateHandle(newPoints, activeNodeIdx, dragHandleType, point, e.altKey);
+                        const anchor = newPoints[activeNodeIdx];
+                        if (e.shiftKey) {
+                            targetPoint = getSnappedPoint(point, anchor, true);
+                        } else {
+                            if (snapLines.length > 0) setSnapLines([]);
+                        }
+                        newPoints = PenTool.updateHandle(newPoints, activeNodeIdx, dragHandleType, targetPoint, e.altKey);
                     }
                 } else {
                     // Polyline/Line/Arc - just move the point
-                    newPoints[activeNodeIdx] = point;
+                    if (e.shiftKey && dragStartNodePos.current) {
+                        targetPoint = getSnappedPoint(point, dragStartNodePos.current, true);
+                    } else {
+                        if (snapLines.length > 0) setSnapLines([]);
+                    }
+                    newPoints[activeNodeIdx] = targetPoint;
                 }
                 onUpdateAnnotation?.(selectedAnnotationId, { points: newPoints });
             }
@@ -369,8 +478,16 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
 
     const handleMouseUp = (e: React.MouseEvent) => {
         if (!isSketchMode) return;
-        const point = toWorld(e.clientX, e.clientY);
+        let point = toWorld(e.clientX, e.clientY);
+
+        // Apply Snap on MouseUp
+        if (e.shiftKey) {
+            if ((activeType === 'line' || activeType === 'polyline') && points.length > 0) {
+                point = getSnappedPoint(point, points[points.length - 1], true);
+            }
+        }
         isDrawing.current = false;
+        setSnapLines([]);
 
         if (activeType === 'select') {
             setActiveNodeIdx(null);
@@ -393,7 +510,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         }
 
         // --- Polyline, Arc, Line (Handled in MouseDown or ContextMenu, Line is click-click only) ---
-        if (activeType === 'polyline' || activeType === 'arc' || activeType === 'line') {
+        if (activeType === 'polyline' || activeType === 'arc') {
             return;
         }
 
@@ -403,7 +520,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
             // Prevent zero-length creation
             const dist = Math.sqrt(Math.pow(finalPoints[1].x - finalPoints[0].x, 2) + Math.pow(finalPoints[1].y - finalPoints[0].y, 2));
 
-            if (dist > 1) {
+            if (dist > 5 / scale) {
                 onAddAnnotation({
                     id: `ann-${Date.now()}`,
                     type: activeType as AnnotationType,
@@ -411,8 +528,8 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                     floor: currentFloor,
                     style: properties
                 });
+                resetTool();
             }
-            resetTool();
         }
     };
 
@@ -511,7 +628,16 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     const getPreviewPath = () => {
         if (points.length === 0 && !tempPoint) return '';
 
-        const previewPoints = tempPoint ? [...points, tempPoint] : points;
+        let previewPoints = tempPoint ? [...points, tempPoint] : points;
+
+        // Arc Preview: Calculate control point dynamically
+        if (activeType === 'arc' && points.length === 2 && tempPoint) {
+            const p0 = points[0];
+            const pOn = points[1];
+            const p2 = tempPoint;
+            const cp = { x: 2 * pOn.x - 0.5 * p0.x - 0.5 * p2.x, y: 2 * pOn.y - 0.5 * p0.y - 0.5 * p2.y };
+            previewPoints = [p0, cp, p2];
+        }
 
         // Special case for Bezier Preview
         if (activeType === 'bezier') {
@@ -546,7 +672,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     return (
         <div
             ref={containerRef}
-            className="w-full h-full"
+            className={`w-full h-full ${isSketchMode ? 'pointer-events-auto' : 'pointer-events-none'}`}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
@@ -582,6 +708,18 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                 </defs>
 
                 <g transform={`translate(${offset.x}, ${offset.y}) scale(${scale})`}>
+                    {/* Snap Guides */}
+                    {snapLines.map((line, i) => (
+                        <line
+                            key={`snap-${i}`}
+                            x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
+                            stroke="#3b82f6"
+                            strokeWidth={1 / scale}
+                            strokeDasharray={`${4 / scale},${4 / scale}`}
+                            opacity={0.6}
+                            pointerEvents="none"
+                        />
+                    ))}
                     {/* Existing Annotations */}
                     {annotations.filter(a => a.floor === currentFloor).map(ann => {
                         const isEraser = activeType === 'eraser' && isSketchMode;
@@ -737,6 +875,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                                                             setIsDragging(true);
                                                             setActiveNodeIdx(i);
                                                             setDragHandleType('anchor');
+                                                            dragStartNodePos.current = p;
                                                         }}
                                                         onContextMenu={(e) => {
                                                             e.preventDefault();
@@ -792,6 +931,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                                                 setIsDragging(true);
                                                 setActiveNodeIdx(i);
                                                 setDragHandleType('anchor'); // Reuse 'anchor' for generic point
+                                                dragStartNodePos.current = p;
                                             }}
                                             onContextMenu={(e) => {
                                                 e.preventDefault();
@@ -814,7 +954,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                                 strokeWidth={properties.strokeWidth}
                                 strokeDasharray={properties.strokeDash}
                                 fill="none"
-                                strokeLinecap="round"
+                                strokeLinecap={properties.startCap === 'round' ? 'round' : 'butt'}
                                 strokeLinejoin="round"
                                 opacity={0.6}
                                 markerStart={SketchManager.getMarkerUrl('start', properties.startCap)}
@@ -851,7 +991,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                             )}
                             {/* Visual Guides for Arc Control Points */}
                             {(activeType === 'arc') && points.map((p, i) => (
-                                <circle key={`p-${i}`} cx={p.x} cy={p.y} r={4 / scale} fill="red" opacity={0.5} />
+                                <circle key={`p-${i}`} cx={p.x} cy={p.y} r={4 / scale} fill={i === 1 ? "orange" : "red"} opacity={0.5} />
                             ))}
                         </g>
                     )}

@@ -14,17 +14,18 @@ import { arrangeRooms } from './utils/layout';
 import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
-    LandPlot, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Trash2, Lock, Unlock, BrushCleaning,
+    LandPlot, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, BrushCleaning,
     Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
     Eye, EyeOff
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
-import { SketchToolbar } from './components/SketchToolbar';
+import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
 import { AnnotationLayer } from './components/AnnotationLayer';
 import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 import * as htmlToImage from 'html-to-image';
+import { analyzeProgram, generateSpatialLayout } from './services/geminiService';
 
 // Shim process for libs that might expect it in Vite
 if (typeof window !== 'undefined' && !window.process) {
@@ -175,6 +176,7 @@ export default function App() {
     const [showApiKeyModal, setShowApiKeyModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [isAiLayoutLoading, setIsAiLayoutLoading] = useState(false);
 
     // Sketch State
     const [annotations, setAnnotations] = useState<Annotation[]>(initialData?.annotations || []);
@@ -636,20 +638,19 @@ export default function App() {
     }, [viewMode]);
 
     const handlePanStart = (e: React.MouseEvent) => {
-        // Allow pan on Middle Button OR Left Click on Background
-        if (e.button === 1 || e.button === 0) {
+        // Allow pan on Middle Button (1) OR Right Button (2)
+        if (e.button === 1 || e.button === 2) {
             setIsPanning(true);
             lastMousePos.current = { x: e.clientX, y: e.clientY };
-            // If dragging background, we might also want to clear selection?
-            // Let's clear selection if we started a pan on background and it wasn't valid selection target
-            if (e.target === e.currentTarget) {
+        }
+        // Left Click (0) on Background -> Deselect
+        else if (e.button === 0 && e.target === mainRef.current) {
                 setSelectedRoomIds(new Set());
                 setSelectedZone(null);
                 setSelectedAnnotationId(null);
                 if (connectionSourceId) setConnectionSourceId(null);
                 // Auto-lock all text when clicking empty space
                 setRooms(prev => prev.map(r => r.isTextUnlocked ? { ...r, isTextUnlocked: false } : r));
-            }
         }
     };
 
@@ -1028,7 +1029,75 @@ export default function App() {
 
     const handleAutoArrange = () => {
         addToHistory();
+        setRooms(prev => {
+            // Sort rooms by Zone then Area (descending) before passing to layout engine
+            const sortedRooms = [...prev].sort((a, b) => {
+                // Primary: Zone
+                if (a.zone !== b.zone) return a.zone.localeCompare(b.zone);
+                // Secondary: Area (Largest first)
+                return b.area - a.area;
+            });
+            return arrangeRooms(sortedRooms, currentFloor);
+        });
         setRooms(prev => arrangeRooms(prev, currentFloor));
+    };
+
+    const handleAiSpatialLayout = async () => {
+        if (!apiKey) {
+            setShowApiKeyModal(true);
+            return;
+        }
+
+        // Select rooms to arrange: either currently selected, or all unplaced/current floor rooms
+        const roomsToArrange = selectedRoomIds.size > 0
+            ? rooms.filter(r => selectedRoomIds.has(r.id))
+            : rooms.filter(r => r.floor === currentFloor || !r.isPlaced);
+
+        if (roomsToArrange.length === 0) return;
+
+        // Identify fixed rooms (placed rooms that are NOT in roomsToArrange)
+        const fixedRooms = rooms.filter(r => 
+            r.isPlaced && 
+            !roomsToArrange.some(rta => rta.id === r.id)
+        );
+
+        setIsAiLayoutLoading(true);
+        try {
+            // Convert fixed rooms to meters for the AI context
+            const fixedSpacesForAi = fixedRooms.map(r => ({
+                id: r.id,
+                name: r.name,
+                x: r.x / PIXELS_PER_METER,
+                y: r.y / PIXELS_PER_METER,
+                width: r.width / PIXELS_PER_METER,
+                height: r.height / PIXELS_PER_METER,
+                zone: r.zone,
+                floor: r.floor
+            }));
+
+            const floorsForAi = floors.map(f => ({ id: f.id, label: f.label }));
+
+            const layout = await generateSpatialLayout(
+                roomsToArrange.map(r => ({ id: r.id, name: r.name, area: r.area, zone: r.zone })), 
+                fixedSpacesForAi,
+                floorsForAi,
+                apiKey
+            );
+            
+            addToHistory();
+            setRooms(prev => prev.map(r => {
+                const match = layout.find(l => l.id === r.id);
+                if (match) {
+                    return { ...r, x: match.x * PIXELS_PER_METER, y: match.y * PIXELS_PER_METER, width: match.width * PIXELS_PER_METER, height: match.height * PIXELS_PER_METER, isPlaced: true, floor: match.floor };
+                }
+                return r;
+            }));
+        } catch (error) {
+            console.error("AI Layout failed:", error);
+            alert("Failed to generate AI layout. Please check your API key and try again.");
+        } finally {
+            setIsAiLayoutLoading(false);
+        }
     };
 
     const handleClearCanvas = () => {
@@ -1816,9 +1885,10 @@ export default function App() {
                 <main
                     ref={mainRef}
                     className={`flex-1 relative overflow-hidden bg-[#f0f2f5] dark:bg-dark-bg transition-colors duration-500 ${isZoneDragging ? 'no-transition' : ''}`}
-                    onMouseDown={isSketchMode || viewMode === 'VOLUMES' ? undefined : handlePanStart}
-                    onMouseMove={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleMouseMove}
-                    onMouseUp={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleMouseUp}
+                    onMouseDown={viewMode === 'VOLUMES' ? undefined : handlePanStart}
+                    onMouseMove={viewMode === 'VOLUMES' ? undefined : handleMouseMove}
+                    onMouseUp={viewMode === 'VOLUMES' ? undefined : handleMouseUp}
+                    onContextMenu={(e) => e.preventDefault()}
                     onTouchStart={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleTouchStart}
                     onTouchMove={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleTouchMove}
                     onTouchEnd={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleTouchEnd}
@@ -1920,7 +1990,7 @@ export default function App() {
 
                                     {/* Zone Overlay Layer - Behind everything */}
                                     <div
-                                        className={`absolute inset-0 origin-top-left pointer-events-none ${isReferenceMode ? '[&_*]:pointer-events-none' : ''}`}
+                                        className={`absolute inset-0 origin-top-left pointer-events-none ${isReferenceMode || isSketchMode ? '[&_*]:pointer-events-none' : ''}`}
                                         style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
                                     >
                                         <ZoneOverlay
@@ -2128,7 +2198,7 @@ export default function App() {
 
                                     {/* Annotation Layer - Above all spaces and zones */}
                                     <div
-                                        className={`absolute inset-0 ${isSketchMode ? '' : 'pointer-events-none'}`}
+                                        className={`absolute inset-0 ${isSketchMode ? 'pointer-events-auto' : 'pointer-events-none'}`}
                                         style={{ zIndex: 100 }}
                                     >
                                         <AnnotationLayer
@@ -2176,6 +2246,16 @@ export default function App() {
                                             >
                                                 <LayoutTemplate size={16} />
                                             </button>
+
+                                            <button
+                                                onClick={handleAiSpatialLayout}
+                                                disabled={isAiLayoutLoading}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isAiLayoutLoading ? 'bg-orange-100 text-orange-400 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-purple-600'}`}
+                                                title="AI Spatial Layout"
+                                            >
+                                                <Sparkles size={16} className={isAiLayoutLoading ? "animate-spin" : ""} />
+                                            </button>
+
                                             <div className="relative" ref={overlaySelectorRef}>
                                                 <button
                                                     onClick={() => setIsOverlaySelectorOpen(prev => !prev)}
@@ -2248,13 +2328,6 @@ export default function App() {
                                                     setIsSketchMode(newValue);
                                                     if (newValue) setIsReferenceMode(false);
                                                 }}
-                                                activeType={activeSketchType}
-                                                onTypeChange={setActiveSketchType}
-                                                properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
-                                                onPropertyChange={handleAnnotationPropertyChange}
-                                                selectedAnnotation={selectedAnnotation}
-                                                onZIndex={handleZIndex}
-                                                onDelete={() => selectedAnnotationId && deleteAnnotation(selectedAnnotationId)}
                                             />
 
                                             <button
@@ -2278,6 +2351,20 @@ export default function App() {
                                             onStartScaling={(id) => setReferenceScaleState({ imageId: id, points: [], step: 'point1' })}
                                             isScalingMode={!!referenceScaleState}
                                             onCancelScaling={() => setReferenceScaleState(null)}
+                                        />
+                                    </div>
+
+                                    {/* Sketch Panel - Aligned with Reference Panel */}
+                                    <div className="absolute top-20 left-6 z-[190] export-exclude pointer-events-auto">
+                                        <SketchPanel
+                                            isActive={isSketchMode}
+                                            activeType={activeSketchType}
+                                            onTypeChange={setActiveSketchType}
+                                            properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
+                                            onPropertyChange={handleAnnotationPropertyChange}
+                                            selectedAnnotation={selectedAnnotation}
+                                            onZIndex={handleZIndex}
+                                            onDelete={() => selectedAnnotationId && deleteAnnotation(selectedAnnotationId)}
                                         />
                                     </div>
 

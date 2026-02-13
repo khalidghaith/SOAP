@@ -46,9 +46,21 @@ interface SketchToolbarProps {
     onDelete: () => void;
 }
 
-export const SketchToolbar: React.FC<SketchToolbarProps> = ({
+const ToolButton = ({ active, onClick, icon, title }: { active: boolean, onClick: () => void, icon: React.ReactNode, title: string }) => (
+    <button
+        onClick={onClick}
+        className={`w-8 h-8 rounded-lg flex items-center justify-center ${active
+            ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm'
+            : 'text-slate-400 hover:text-slate-600 dark:text-gray-500 dark:hover:text-gray-300'
+            }`}
+        title={title}
+    >
+        {icon}
+    </button>
+);
+
+export const SketchPanel: React.FC<Omit<SketchToolbarProps, 'onToggle'>> = ({
     isActive,
-    onToggle,
     activeType,
     onTypeChange,
     properties,
@@ -58,22 +70,12 @@ export const SketchToolbar: React.FC<SketchToolbarProps> = ({
     onDelete
 }) => {
     const isTextMode = activeType === 'text' || selectedAnnotation?.type === 'text';
+    
+    if (!isActive) return null;
 
     return (
-        <div className="flex flex-col gap-2 pointer-events-auto">
-            <button
-                onClick={onToggle}
-                className={`w-8 h-8 rounded-full flex items-center justify-center ${isActive
-                    ? 'bg-orange-500 text-white shadow-lg'
-                    : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'
-                    }`}
-                title="Sketch & Annotate"
-            >
-                <Pencil size={16} />
-            </button>
-
-            {isActive && (
-                <div className="absolute top-full left-0 w-full mt-2 bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md p-2 rounded-2xl border border-slate-200 dark:border-dark-border shadow-xl flex flex-col gap-4 origin-top z-50">
+        <div className="flex flex-col gap-2 pointer-events-auto w-72">
+             <div className="bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md p-2 rounded-2xl border border-slate-200 dark:border-dark-border shadow-xl flex flex-col gap-4 animate-in slide-in-from-left-4 transition-all duration-300">
                     {/* Path Type Selection */}
                     <div>
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-2">Tool</label>
@@ -294,21 +296,19 @@ export const SketchToolbar: React.FC<SketchToolbarProps> = ({
                             </div>
                         )}
                     </div>
-                </div>
-            )}
+            </div>
         </div>
     );
 };
 
-const ToolButton = ({ active, onClick, icon, title }: { active: boolean, onClick: () => void, icon: React.ReactNode, title: string }) => (
-    <button
-        onClick={onClick}
-        className={`w-8 h-8 rounded-lg flex items-center justify-center ${active
-            ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm'
-            : 'text-slate-400 hover:text-slate-600 dark:text-gray-500 dark:hover:text-gray-300'
-            }`}
-        title={title}
-    >
-        {icon}
-    </button>
-);
+export const SketchToolbar: React.FC<Pick<SketchToolbarProps, 'isActive' | 'onToggle'>> = ({ isActive, onToggle }) => {
+    return (
+        <button
+            onClick={onToggle}
+            className={`w-8 h-8 rounded-full flex items-center justify-center ${isActive ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
+            title="Sketch & Annotate"
+        >
+            <Pencil size={16} />
+        </button>
+    );
+};

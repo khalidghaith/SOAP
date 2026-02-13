@@ -80,6 +80,16 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         return y;
     }, [floors, room.floor, floorGap]);
 
+    // Calculate centroid for label positioning
+    const centroid = useMemo(() => {
+        if (room.shape === 'rect' || !room.shape) return { x: 0, y: 0 };
+        const pts = room.polygon || [];
+        if (pts.length === 0) return { x: 0, y: 0 };
+        let cx = 0, cy = 0;
+        pts.forEach(p => { cx += p.x; cy += p.y; });
+        return { x: cx / pts.length, y: cy / pts.length };
+    }, [room.shape, room.polygon]);
+
     // Create Shape for Extrusion
     const shape = useMemo(() => {
         const s = new THREE.Shape();
@@ -97,16 +107,10 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             if (pts.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
 
             if (pts.length > 2) {
-                // Calculate centroid to center the shape
-                let cx = 0, cy = 0;
-                pts.forEach(p => { cx += p.x; cy += p.y; });
-                cx /= pts.length;
-                cy /= pts.length;
-
                 if (room.shape === 'polygon') {
-                    s.moveTo((pts[0].x - cx) / 10, -(pts[0].y - cy) / 10);
+                    s.moveTo(pts[0].x / 10, -pts[0].y / 10);
                     for (let i = 1; i < pts.length; i++) {
-                        s.lineTo((pts[i].x - cx) / 10, -(pts[i].y - cy) / 10);
+                        s.lineTo(pts[i].x / 10, -pts[i].y / 10);
                     }
                 } else if (room.shape === 'bubble') {
                     // Smooth bubble path logic
@@ -121,12 +125,12 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
                         const cp2x = p2.x - (p3.x - p1.x) / 6;
                         const cp2y = p2.y - (p3.y - p1.y) / 6;
 
-                        if (i === 0) s.moveTo((p1.x - cx) / 10, -(p1.y - cy) / 10);
+                        if (i === 0) s.moveTo(p1.x / 10, -p1.y / 10);
 
                         s.bezierCurveTo(
-                            (cp1x - cx) / 10, -(cp1y - cy) / 10,
-                            (cp2x - cx) / 10, -(cp2y - cy) / 10,
-                            (p2.x - cx) / 10, -(p2.y - cy) / 10
+                            cp1x / 10, -cp1y / 10,
+                            cp2x / 10, -cp2y / 10,
+                            p2.x / 10, -p2.y / 10
                         );
                     }
                 }
@@ -140,19 +144,11 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
 
     // Position calculation
     let posX = (room.x || 0) / 10;
-    let posY = -((room.y || 0) / 10); // Invert Y for 3D view to match Canvas (Y down)
+    let posY = -((room.y || 0) / 10);
 
     if (room.shape === 'rect' || !room.shape) {
         posX += (room.width / 10) / 2;
-        posY -= (room.height / 10) / 2; // Subtract height/2 because Y is inverted
-    } else {
-        const pts = room.polygon || [];
-        if (pts.length > 0) {
-            let cx = 0, cy = 0;
-            pts.forEach(p => { cx += p.x; cy += p.y; });
-            posX += (cx / pts.length) / 10;
-            posY -= (cy / pts.length) / 10; // Subtract centroid Y
-        }
+        posY -= (room.height / 10) / 2;
     }
 
     // Safety check: Do not render invalid polygons/bubbles to prevent ExtrudeGeometry crashes
@@ -163,6 +159,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
     return (
         <group
             position={[posX, posY, yFloor]}
+            rotation={[0, 0, -(room.rotation || 0) * Math.PI / 180]}
             onClick={(e) => { e.stopPropagation(); onSelect(); }}
         >
             <mesh>
@@ -179,7 +176,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
 
             {/* Projected Label - Billboard Style */}
             <Html
-                position={[0, 0, heightIn3D + 2]}
+                position={[centroid.x / 10, -centroid.y / 10, heightIn3D + 2]}
                 center
                 pointerEvents="none"
             >
@@ -262,7 +259,7 @@ function VerticalLink({ conn, rooms, floors, darkMode, floorGap }: { conn: Verti
         if (room.shape === 'rect' || !room.shape) {
             return [
                 (room.x + room.width / 2) / 10,
-                -((room.y + room.height / 2) / 10), // Invert Y
+                -((room.y + room.height / 2) / 10),
                 yBase + (h / 2)
             ] as [number, number, number];
         } else {
@@ -270,9 +267,17 @@ function VerticalLink({ conn, rooms, floors, darkMode, floorGap }: { conn: Verti
             if (pts.length === 0) return [(room.x + room.width / 2) / 10, -((room.y + room.height / 2) / 10), yBase + (h / 2)] as [number, number, number];
             let cx = 0, cy = 0;
             pts.forEach(p => { cx += p.x; cy += p.y; });
+            cx /= pts.length;
+            cy /= pts.length;
+
+            const angleRad = (room.rotation || 0) * Math.PI / 180;
+            const cos = Math.cos(angleRad);
+            const sin = Math.sin(angleRad);
+            const rx = cx * cos - cy * sin;
+            const ry = cx * sin + cy * cos;
             return [
-                (room.x + cx / pts.length) / 10,
-                -((room.y + cy / pts.length) / 10), // Invert Y
+                (room.x + rx) / 10,
+                -((room.y + ry) / 10),
                 yBase + (h / 2)
             ] as [number, number, number];
         }
@@ -321,7 +326,7 @@ function CameraController({ zoomTrigger, placedRooms, floors, onFitComplete, flo
 
                 if (room.shape === 'rect' || !room.shape) {
                     const x = (room.x || 0) / 10;
-                    const y = -((room.y || 0) / 10); // Invert Y
+                    const y = -((room.y || 0) / 10);
                     const w = (room.width || 1) / 10;
                     const d = (room.height || 1) / 10;
                     // Y is inverted, so "top" in canvas (low Y) is high Y in 3D.
@@ -334,7 +339,6 @@ function CameraController({ zoomTrigger, placedRooms, floors, onFitComplete, flo
                     const pts = room.polygon || [];
                     pts.forEach(p => {
                         if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
-                            // Invert Y for all points
                             box.expandByPoint(new THREE.Vector3(((room.x || 0) + p.x) / 10, -(((room.y || 0) + p.y) / 10), yBase));
                             box.expandByPoint(new THREE.Vector3(((room.x || 0) + p.x) / 10, -(((room.y || 0) + p.y) / 10), yBase + rH));
                         }
