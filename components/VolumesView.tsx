@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, PerspectiveCamera, OrthographicCamera, GizmoHelper, GizmoViewport, Text, Edges, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
@@ -429,7 +429,7 @@ function CameraHandler({ viewState, onViewStateChange, isInteracting, cameraVers
     cameraVersion: number
 }) {
     const { camera, controls, size } = useThree();
-    const prevCameraVersion = useRef(cameraVersion);
+    const prevCameraVersion = useRef(-1);
     const prevViewType = useRef(viewState.viewType);
 
     // Effect for View Type Switching (Perspective/Isometric)
@@ -471,7 +471,7 @@ function CameraHandler({ viewState, onViewStateChange, isInteracting, cameraVers
 
 
     // Effect for Programmatic Camera Moves (Driven by cameraVersion)
-    useEffect(() => {
+    useLayoutEffect(() => {
         // Only update if the version has changed (indicating an external, intentional move)
         // or if it's the very first mount (to set initial position)
         if (cameraVersion === prevCameraVersion.current) return;

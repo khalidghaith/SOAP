@@ -216,7 +216,7 @@ export default function App() {
         viewType: 'perspective' | 'isometric';
         hasInitialZoomed: boolean;
     }>({
-        cameraPosition: [300, -300, 300],
+        cameraPosition: [-300, -300, 300],
         target: [0, 0, 0],
         zoom: 1.5,
         viewType: 'perspective',
@@ -567,6 +567,11 @@ export default function App() {
         if (!element) return;
 
         const onWheel = (e: WheelEvent) => {
+            // Only handle wheel events for the 2D canvas to avoid interfering with 3D view controls.
+            if (viewMode !== 'CANVAS') {
+                return;
+            }
+
             e.preventDefault();
             const rect = element.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
