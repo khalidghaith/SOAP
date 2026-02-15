@@ -1,7 +1,3 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 # SOAP - Spatial Organization & Architectural Programming
 
 SOAP is a web-based architectural programming and spatial layout tool. It allows designers to define a program of requirements, explore spatial relationships in a 2D canvas, and visualize the resulting massing in 3D.
@@ -13,6 +9,11 @@ SOAP is a web-based architectural programming and spatial layout tool. It allows
 - **CSV Import**: Import room lists directly from CSV files (Format: Name, Area, Zone).
 - **AI Program Generation**: Generate a complete architectural program based on a project description using AI.
 - **Zone Styling**: Customize colors for different functional zones.
+
+![Soap-Screenshots_2](https://github.com/user-attachments/assets/2fdd8eab-3485-4ac3-8f4b-d3a559f3f2fd)
+
+![Soap-Screenshots_1](https://github.com/user-attachments/assets/4e3cea97-e25b-481e-aeee-a0380a0a89c0)
+
 
 ### 2. 2D Spatial Layout (Canvas)
 - **Inventory System**: Unplaced spaces reside in a sidebar inventory. Drag and drop them onto the canvas to place them.
@@ -27,16 +28,22 @@ SOAP is a web-based architectural programming and spatial layout tool. It allows
   - Magnetic Physics mode for organic packing.
 - **Connections**: Draw links between spaces to denote adjacency requirements or circulation paths.
 
+![Soap-Screenshots_3](https://github.com/user-attachments/assets/835c8231-2172-4bef-bd72-4413d3a28222)
+
 ### 3. 3D Visualization (Volumes)
 - **Real-time Massing**: Instantly view your 2D layout as extruded 3D volumes.
 - **View Modes**: Toggle between Perspective and Isometric views.
 - **Vertical Stacking**: Visualize how floors stack and relate vertically.
 - **Export**: Export the 3D model as an `.OBJ` file for use in other CAD software.
 
+![Soap-Screenshots_5](https://github.com/user-attachments/assets/1dce30c5-921b-44d6-a1cf-d51c4958d2fb)
+
 ### 4. Sketching & Annotation
 - **Drawing Tools**: Integrated sketching toolbar with pen, line, arrow, and shape tools.
 - **Dimensions**: Add measurements and text notes directly to the layout.
 - **Styling**: Customizable stroke width, colors, and line styles (dashed/solid).
+
+![Soap-Screenshots_4](https://github.com/user-attachments/assets/4388763b-552f-432f-8e2c-c7f52dcd22de)
 
 ### 5. Reference Underlays
 - **Image Import**: Import floor plans, site maps, or sketches (PNG/JPG).
