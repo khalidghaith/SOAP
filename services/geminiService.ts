@@ -54,7 +54,7 @@ export const analyzeProgram = async (programText: string, apiKey: string): Promi
   }
 };
 
-export const generateSpatialLayout = async (spaces: { id: string, name: string, area: number, zone: string }[], fixedSpaces: { id: string, name: string, x: number, y: number, width: number, height: number, zone: string, floor: number }[], floors: { id: number, label: string }[], apiKey: string): Promise<{ id: string, name: string, x: number, y: number, width: number, height: number, floor: number }[]> => {
+export const generateSpatialLayout = async (spaces: { id: string, name: string, area: number, zone: string }[], fixedSpaces: { id: string, name: string, x: number, y: number, width: number, height: number, zone: string, floor: number }[], floors: { id: number, label: string }[], apiKey: string, instructions?: string): Promise<{ id: string, name: string, x: number, y: number, width: number, height: number, floor: number }[]> => {
   if (!apiKey || apiKey === 'your_api_key_here') {
     throw new Error("Gemini API Key is missing. Please provide a key in the settings.");
   }
@@ -91,7 +91,10 @@ export const generateSpatialLayout = async (spaces: { id: string, name: string, 
       ${JSON.stringify(floors)}
       
       Task:
-      Given these architectural spaces, organize the "spaces" into a functional floor plan layout across the available floors. Determine their positions based on standard residential/commercial flow. Output the absolute coordinates and floor ID for each space in "spaces" to ensure a tight, logical cluster without overlaps with each other or fixed spaces on the same floor.`,
+      Given these architectural spaces, organize the "spaces" into a functional floor plan layout across the available floors. Determine their positions based on standard residential/commercial flow. Output the absolute coordinates and floor ID for each space in "spaces" to ensure a tight, logical cluster without overlaps with each other or fixed spaces on the same floor.
+      
+      ${instructions && instructions.trim() ? `CRITICAL USER INSTRUCTIONS (Must follow these strict requirements for floor and orientation placement):\n      ${instructions}` : ''}
+      `,
       config: {
         responseMimeType: "application/json",
         responseSchema: {

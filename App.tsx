@@ -10,6 +10,7 @@ import { ExportModal } from './components/ExportModal';
 import { SettingsModal } from './components/SettingsModal';
 import { VolumesView, VolumesViewHandle } from './components/VolumesView';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { AILayoutModal } from './components/AILayoutModal';
 import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport, getHexColorForZone, getHexBorderForZone } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
@@ -183,6 +184,7 @@ export default function App() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);
     const [isAiLayoutLoading, setIsAiLayoutLoading] = useState(false);
+    const [showAiLayoutModal, setShowAiLayoutModal] = useState(false);
 
     // Sketch State
     const [annotations, setAnnotations] = useState<Annotation[]>(initialData?.annotations || []);
@@ -1050,7 +1052,7 @@ export default function App() {
         setRooms(prev => arrangeRooms(prev, currentFloor));
     };
 
-    const handleAiSpatialLayout = async () => {
+    const handleAiSpatialLayout = async (instructions?: string) => {
         if (!apiKey) {
             setShowApiKeyModal(true);
             return;
@@ -1089,7 +1091,8 @@ export default function App() {
                 roomsToArrange.map(r => ({ id: r.id, name: r.name, area: r.area, zone: r.zone })),
                 fixedSpacesForAi,
                 floorsForAi,
-                apiKey
+                apiKey,
+                instructions
             );
 
             addToHistory();
@@ -1105,6 +1108,7 @@ export default function App() {
             alert("Failed to generate AI layout. Please check your API key and try again.");
         } finally {
             setIsAiLayoutLoading(false);
+            setShowAiLayoutModal(false);
         }
     };
 
@@ -2406,7 +2410,7 @@ export default function App() {
                                         </button>
 
                                         <button
-                                            onClick={handleAiSpatialLayout}
+                                            onClick={() => setShowAiLayoutModal(true)}
                                             disabled={isAiLayoutLoading}
                                             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isAiLayoutLoading ? 'bg-orange-100 text-orange-400 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-purple-600'}`}
                                             title="AI Spatial Layout"
@@ -3136,6 +3140,13 @@ export default function App() {
                         />
                     )
                 }
+
+                <AILayoutModal
+                    isOpen={showAiLayoutModal}
+                    onClose={() => setShowAiLayoutModal(false)}
+                    onGenerate={handleAiSpatialLayout}
+                    isLoading={isAiLayoutLoading}
+                />
             </div>
         </div >
     );
