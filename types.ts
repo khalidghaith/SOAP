@@ -10,6 +10,9 @@ export interface RoomStyle {
   opacity: number;
   cornerRadius?: number;
   strokeDasharray?: string;
+  hatchPattern?: 'brick' | 'concrete' | 'dots' | 'diagonal' | 'cross' | 'none';
+  hatchScale?: number;
+  hatchColor?: string;
 }
 
 export interface Room {
@@ -189,6 +192,7 @@ export interface Annotation {
     text?: string;
   };
   handles?: Point[]; // for Bezier curves
+  nodeModes?: ('bezier' | 'smooth' | 'corner')[];
 }
 
 export interface ReferenceImage {
@@ -211,3 +215,6 @@ export interface ReferenceScaleState {
   points: Point[];
   step: 'point1' | 'point2' | 'input';
 }
+
+export type ZoningTypology = 'residential' | 'commercial' | 'medical' | 'educational';
+

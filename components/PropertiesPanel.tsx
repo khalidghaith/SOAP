@@ -225,9 +225,88 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                 <ChevronDown size={14} />
                                             </button>
                                         </div>
-                                    </div>
                                 </div>
 
+                                {/* Architectural Hatch Styling */}
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Architectural Hatch</label>
+                                    <div className="space-y-3 bg-slate-50 dark:bg-white/5 rounded-2xl p-4 border border-slate-100 dark:border-dark-border">
+                                        {/* Hatch Pattern Selector */}
+                                        <div>
+                                            <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Pattern</span>
+                                            <select
+                                                value={selectedRoom?.style?.hatchPattern || 'none'}
+                                                onChange={(e) => {
+                                                    const pattern = e.target.value as any;
+                                                    const style = { ...selectedRoom?.style, hatchPattern: pattern };
+                                                    updateRoom(selectedRoom!.id, { style });
+                                                }}
+                                                className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-lg p-2 focus:outline-none focus:border-orange-500"
+                                            >
+                                                <option value="none">None</option>
+                                                <option value="diagonal">Diagonal Lines</option>
+                                                <option value="cross">Cross Hatch</option>
+                                                <option value="dots">Stipple Dots</option>
+                                                <option value="concrete">Concrete</option>
+                                                <option value="brick">Brick</option>
+                                            </select>
+                                        </div>
+
+                                        {selectedRoom?.style?.hatchPattern && selectedRoom?.style?.hatchPattern !== 'none' && (
+                                            <>
+                                                {/* Hatch Scale */}
+                                                <div>
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Scale</span>
+                                                        <span className="text-[10px] font-bold text-slate-700 dark:text-gray-300">{(selectedRoom?.style?.hatchScale ?? 1.0).toFixed(1)}x</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="0.5"
+                                                        max="3.0"
+                                                        step="0.1"
+                                                        value={selectedRoom?.style?.hatchScale ?? 1.0}
+                                                        onChange={(e) => {
+                                                            const scale = parseFloat(e.target.value);
+                                                            const style = { ...selectedRoom?.style, hatchScale: scale };
+                                                            updateRoom(selectedRoom!.id, { style });
+                                                        }}
+                                                        className="w-full accent-orange-500 text-orange-600 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none h-1 cursor-pointer"
+                                                    />
+                                                </div>
+
+                                                {/* Hatch Color */}
+                                                <div>
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Hatch Color</span>
+                                                        <span className="text-[10px] font-mono text-slate-500">{selectedRoom?.style?.hatchColor || 'Auto'}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="color"
+                                                            value={selectedRoom?.style?.hatchColor || '#cbd5e1'}
+                                                            onChange={(e) => {
+                                                                const style = { ...selectedRoom?.style, hatchColor: e.target.value };
+                                                                updateRoom(selectedRoom!.id, { style });
+                                                            }}
+                                                            className="w-8 h-8 rounded border border-slate-200 dark:border-dark-border cursor-pointer bg-transparent"
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                const style = { ...selectedRoom?.style };
+                                                                delete style.hatchColor;
+                                                                updateRoom(selectedRoom!.id, { style });
+                                                            }}
+                                                            className="px-2 py-1 text-[9px] font-black uppercase tracking-widest border border-slate-200 dark:border-dark-border rounded text-slate-500 hover:text-orange-600 hover:border-orange-500 transition-colors"
+                                                        >
+                                                            Use Auto
+                        </button>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
 
                                 <div>
                                     <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-3 block">Zone Category</label>

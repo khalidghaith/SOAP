@@ -39,6 +39,14 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     const isCreatingNode = useRef(false);
     const [snapLines, setSnapLines] = useState<{ x1: number, y1: number, x2: number, y2: number }[]>([]);
 
+    // Bezier control point context menu
+    const [contextMenu, setContextMenu] = useState<{
+        x: number;
+        y: number;
+        annotationId: string;
+        nodeIndex: number;
+    } | null>(null);
+
     // Text Editing State
     const [editingTextId, setEditingTextId] = useState<string | null>(null);
     const [textInputValue, setTextInputValue] = useState("");
@@ -129,10 +137,11 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
             if (e.key === 'Enter' && (activeType === 'polyline' || activeType === 'bezier') && points.length > 1) {
                 onAddAnnotation({
                     id: `ann-${Date.now()}`,
-                    type: 'polyline',
+                    type: activeType as AnnotationType,
                     points: points,
                     floor: currentFloor,
-                    style: properties
+                    style: properties,
+                    ...(activeType === 'bezier' ? { nodeModes: new Array(points.length / 3).fill('smooth') } : {})
                 });
                 resetTool();
             }
@@ -140,6 +149,14 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [activeType, points, currentFloor, properties, onAddAnnotation, editingTextId, isSketchMode]);
+
+    useEffect(() => {
+        const handleOutsideClick = () => {
+            setContextMenu(null);
+        };
+        window.addEventListener('click', handleOutsideClick);
+        return () => window.removeEventListener('click', handleOutsideClick);
+    }, []);
 
     const handleMouseDown = (e: React.PointerEvent) => {
         if (!isSketchMode) return;
@@ -157,7 +174,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
 
         // --- Select Tool Logic (Canvas Click) ---
         if (activeType === 'select') {
-            // If we are clicking a handle, that logic is handled by the handle's onMouseDown (stopPropagation)
+            // If we are clicking a handle, that logic is handled by the handle's onPointerDown (stopPropagation)
             // If we reach here, we are clicking empty space or the body of an annotation (if not stopped)
             if (!dragHandleType) {
                 onSelectAnnotation?.(null);
@@ -291,6 +308,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                         points: points,
                         floor: currentFloor,
                         style: properties,
+                        nodeModes: new Array(points.length / 3).fill('smooth'),
                         ...({ closed: true } as any)
                     });
                     resetTool();
@@ -416,7 +434,9 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                         } else {
                             if (snapLines.length > 0) setSnapLines([]);
                         }
-                        newPoints = PenTool.updateHandle(newPoints, activeNodeIdx, dragHandleType, targetPoint, e.altKey);
+                        const nodeMode = selectedAnn.nodeModes?.[activeNodeIdx / 3] || 'smooth';
+                        const isAltPressed = e.altKey || nodeMode === 'bezier';
+                        newPoints = PenTool.updateHandle(newPoints, activeNodeIdx, dragHandleType, targetPoint, isAltPressed);
                     }
                 } else {
                     // Polyline/Line/Arc - just move the point
@@ -563,7 +583,8 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                 type: 'bezier',
                 points: points,
                 floor: currentFloor,
-                style: properties
+                style: properties,
+                nodeModes: new Array(points.length / 3).fill('smooth')
             });
             resetTool();
         } else {
@@ -605,11 +626,15 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         if (!ann) return;
 
         let newPoints = [...ann.points];
+        let nodeModes = ann.nodeModes ? [...ann.nodeModes] : undefined;
         if (ann.type === 'bezier') {
             // Remove node (Anchor + In + Out)
             // Ensure we align to the anchor (index should be divisible by 3)
             const nodeIndex = pointIndex - (pointIndex % 3);
             newPoints.splice(nodeIndex, 3);
+            if (nodeModes) {
+                nodeModes.splice(nodeIndex / 3, 1);
+            }
         } else {
             newPoints.splice(pointIndex, 1);
         }
@@ -618,10 +643,135 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
             onDeleteAnnotation?.(annId);
         } else {
             onInteractionStart?.();
-            onUpdateAnnotation?.(annId, { points: newPoints });
+            onUpdateAnnotation?.(annId, { points: newPoints, nodeModes });
         }
         setActiveNodeIdx(null);
         setDragHandleType(null);
+    };
+
+    const handleSelectMode = (
+        annId: string,
+        nodeIndex: number,
+        mode: 'bezier' | 'smooth' | 'corner' | 'remove'
+    ) => {
+        if (mode === 'remove') {
+            handleRemovePoint(annId, nodeIndex);
+            return;
+        }
+
+        const ann = annotations.find(a => a.id === annId);
+        if (!ann) return;
+
+        onInteractionStart?.();
+
+        let newPoints = [...ann.points];
+        const nodeModes = ann.nodeModes ? [...ann.nodeModes] : new Array(ann.points.length / 3).fill('smooth');
+        nodeModes[nodeIndex / 3] = mode;
+
+        const p = newPoints[nodeIndex];
+        let inIdx = nodeIndex + 1;
+        let outIdx = nodeIndex + 2;
+
+        if (mode === 'corner') {
+            newPoints[inIdx] = { ...p };
+            newPoints[outIdx] = { ...p };
+        } else if (mode === 'smooth') {
+            const inHandle = newPoints[inIdx];
+            const outHandle = newPoints[outIdx];
+            const isInAtAnchor = Math.hypot(inHandle.x - p.x, inHandle.y - p.y) < 0.1;
+            const isOutAtAnchor = Math.hypot(outHandle.x - p.x, outHandle.y - p.y) < 0.1;
+
+            if (isInAtAnchor && isOutAtAnchor) {
+                let dir = { x: 20, y: 0 };
+
+                const prevAnchorIdx = nodeIndex - 3;
+                const nextAnchorIdx = nodeIndex + 3;
+
+                let hasPrev = prevAnchorIdx >= 0 && prevAnchorIdx < newPoints.length;
+                let hasNext = nextAnchorIdx >= 0 && nextAnchorIdx < newPoints.length;
+
+                if (hasPrev && hasNext) {
+                    const prev = newPoints[prevAnchorIdx];
+                    const next = newPoints[nextAnchorIdx];
+                    const dx = next.x - prev.x;
+                    const dy = next.y - prev.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > 0.1) {
+                        dir = { x: (dx / len) * 20, y: (dy / len) * 20 };
+                    }
+                } else if (hasPrev) {
+                    const prev = newPoints[prevAnchorIdx];
+                    const dx = p.x - prev.x;
+                    const dy = p.y - prev.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > 0.1) {
+                        dir = { x: (dx / len) * 20, y: (dy / len) * 20 };
+                    }
+                } else if (hasNext) {
+                    const next = newPoints[nextAnchorIdx];
+                    const dx = next.x - p.x;
+                    const dy = next.y - p.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > 0.1) {
+                        dir = { x: (dx / len) * 20, y: (dy / len) * 20 };
+                    }
+                }
+
+                newPoints[inIdx] = { x: p.x - dir.x, y: p.y - dir.y };
+                newPoints[outIdx] = { x: p.x + dir.x, y: p.y + dir.y };
+            } else {
+                const dx = outHandle.x - p.x;
+                const dy = outHandle.y - p.y;
+                newPoints[inIdx] = { x: p.x - dx, y: p.y - dy };
+            }
+        } else if (mode === 'bezier') {
+            const inHandle = newPoints[inIdx];
+            const outHandle = newPoints[outIdx];
+            const isInAtAnchor = Math.hypot(inHandle.x - p.x, inHandle.y - p.y) < 0.1;
+            const isOutAtAnchor = Math.hypot(outHandle.x - p.x, outHandle.y - p.y) < 0.1;
+
+            if (isInAtAnchor && isOutAtAnchor) {
+                let dir = { x: 20, y: 0 };
+
+                const prevAnchorIdx = nodeIndex - 3;
+                const nextAnchorIdx = nodeIndex + 3;
+
+                let hasPrev = prevAnchorIdx >= 0 && prevAnchorIdx < newPoints.length;
+                let hasNext = nextAnchorIdx >= 0 && nextAnchorIdx < newPoints.length;
+
+                if (hasPrev && hasNext) {
+                    const prev = newPoints[prevAnchorIdx];
+                    const next = newPoints[nextAnchorIdx];
+                    const dx = next.x - prev.x;
+                    const dy = next.y - prev.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > 0.1) {
+                        dir = { x: (dx / len) * 20, y: (dy / len) * 20 };
+                    }
+                } else if (hasPrev) {
+                    const prev = newPoints[prevAnchorIdx];
+                    const dx = p.x - prev.x;
+                    const dy = p.y - prev.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > 0.1) {
+                        dir = { x: (dx / len) * 20, y: (dy / len) * 20 };
+                    }
+                } else if (hasNext) {
+                    const next = newPoints[nextAnchorIdx];
+                    const dx = next.x - p.x;
+                    const dy = next.y - p.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > 0.1) {
+                        dir = { x: (dx / len) * 20, y: (dy / len) * 20 };
+                    }
+                }
+
+                newPoints[inIdx] = { x: p.x - dir.x, y: p.y - dir.y };
+                newPoints[outIdx] = { x: p.x + dir.x, y: p.y + dir.y };
+            }
+        }
+
+        onUpdateAnnotation?.(annId, { points: newPoints, nodeModes });
     };
 
     // Helper to generate preview path
@@ -865,18 +1015,24 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                                         if (i % 3 === 0) { // Anchor
                                             const handleIn = ann.points[i + 1];
                                             const handleOut = ann.points[i + 2];
+                                            const nodeMode = ann.nodeModes?.[i / 3] || 'smooth';
+                                            const isCorner = nodeMode === 'corner';
                                             return (
                                                 <React.Fragment key={i}>
                                                     {/* Lines to Handles */}
-                                                    <line x1={p.x} y1={p.y} x2={handleIn.x} y2={handleIn.y} stroke="#3b82f6" strokeWidth={1 / scale} />
-                                                    <line x1={p.x} y1={p.y} x2={handleOut.x} y2={handleOut.y} stroke="#3b82f6" strokeWidth={1 / scale} />
+                                                    {!isCorner && (
+                                                        <>
+                                                            <line x1={p.x} y1={p.y} x2={handleIn.x} y2={handleIn.y} stroke="#3b82f6" strokeWidth={1 / scale} />
+                                                            <line x1={p.x} y1={p.y} x2={handleOut.x} y2={handleOut.y} stroke="#3b82f6" strokeWidth={1 / scale} />
+                                                        </>
+                                                    )}
 
                                                     {/* Anchor Point */}
                                                     <rect
                                                         x={p.x - 4 / scale} y={p.y - 4 / scale} width={8 / scale} height={8 / scale}
                                                         fill="#fff" stroke="#3b82f6" strokeWidth={1 / scale}
                                                         style={{ cursor: isDragging && dragHandleType === 'anchor' && activeNodeIdx === i ? 'grabbing' : 'move' }}
-                                                        onMouseDown={(e) => {
+                                                        onPointerDown={(e) => {
                                                             e.stopPropagation();
                                                             onInteractionStart?.();
                                                             isDrawing.current = true;
@@ -888,37 +1044,46 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                                                         onContextMenu={(e) => {
                                                             e.preventDefault();
                                                             e.stopPropagation();
-                                                            handleRemovePoint(ann.id, i);
+                                                            setContextMenu({
+                                                                x: e.clientX,
+                                                                y: e.clientY,
+                                                                annotationId: ann.id,
+                                                                nodeIndex: i
+                                                            });
                                                         }}
                                                     />
 
                                                     {/* Handle Points */}
-                                                    <circle
-                                                        cx={handleIn.x} cy={handleIn.y} r={3 / scale}
-                                                        fill="#3b82f6"
-                                                        style={{ cursor: isDragging && dragHandleType === 'in' && activeNodeIdx === i ? 'grabbing' : 'crosshair' }}
-                                                        onMouseDown={(e) => {
-                                                            e.stopPropagation();
-                                                            onInteractionStart?.();
-                                                            isDrawing.current = true;
-                                                            setIsDragging(true);
-                                                            setActiveNodeIdx(i);
-                                                            setDragHandleType('in');
-                                                        }}
-                                                    />
-                                                    <circle
-                                                        cx={handleOut.x} cy={handleOut.y} r={3 / scale}
-                                                        fill="#3b82f6"
-                                                        style={{ cursor: isDragging && dragHandleType === 'out' && activeNodeIdx === i ? 'grabbing' : 'crosshair' }}
-                                                        onMouseDown={(e) => {
-                                                            e.stopPropagation();
-                                                            onInteractionStart?.();
-                                                            isDrawing.current = true;
-                                                            setIsDragging(true);
-                                                            setActiveNodeIdx(i);
-                                                            setDragHandleType('out');
-                                                        }}
-                                                    />
+                                                    {!isCorner && (
+                                                        <>
+                                                            <circle
+                                                                cx={handleIn.x} cy={handleIn.y} r={3 / scale}
+                                                                fill="#3b82f6"
+                                                                style={{ cursor: isDragging && dragHandleType === 'in' && activeNodeIdx === i ? 'grabbing' : 'crosshair' }}
+                                                                onPointerDown={(e) => {
+                                                                    e.stopPropagation();
+                                                                    onInteractionStart?.();
+                                                                    isDrawing.current = true;
+                                                                    setIsDragging(true);
+                                                                    setActiveNodeIdx(i);
+                                                                    setDragHandleType('in');
+                                                                }}
+                                                            />
+                                                            <circle
+                                                                cx={handleOut.x} cy={handleOut.y} r={3 / scale}
+                                                                fill="#3b82f6"
+                                                                style={{ cursor: isDragging && dragHandleType === 'out' && activeNodeIdx === i ? 'grabbing' : 'crosshair' }}
+                                                                onPointerDown={(e) => {
+                                                                    e.stopPropagation();
+                                                                    onInteractionStart?.();
+                                                                    isDrawing.current = true;
+                                                                    setIsDragging(true);
+                                                                    setActiveNodeIdx(i);
+                                                                    setDragHandleType('out');
+                                                                }}
+                                                            />
+                                                        </>
+                                                    )}
                                                 </React.Fragment>
                                             );
                                         }
@@ -932,7 +1097,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                                             x={p.x - 4 / scale} y={p.y - 4 / scale} width={8 / scale} height={8 / scale}
                                             fill="#fff" stroke="#3b82f6" strokeWidth={1 / scale}
                                             style={{ cursor: isDragging && dragHandleType === 'anchor' && activeNodeIdx === i ? 'grabbing' : 'move' }}
-                                            onMouseDown={(e) => {
+                                            onPointerDown={(e) => {
                                                 e.stopPropagation();
                                                 onInteractionStart?.();
                                                 isDrawing.current = true;
@@ -1039,7 +1204,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                                 width: 'max-content',
                                 pointerEvents: 'auto'
                             }}
-                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
                         >
                             <textarea
                                 ref={textInputRef}
@@ -1078,6 +1243,51 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                             />
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Context Menu Overlay */}
+            {contextMenu && (
+                <div
+                    className="fixed z-50 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border border-slate-200/50 dark:border-slate-800/50 shadow-2xl rounded-xl p-1.5 min-w-[140px] flex flex-col gap-0.5 select-none"
+                    style={{
+                        left: contextMenu.x,
+                        top: contextMenu.y,
+                        pointerEvents: 'auto'
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {[
+                        { id: 'bezier', label: 'Bezier', icon: '↗️' },
+                        { id: 'smooth', label: 'Smooth', icon: '〰️' },
+                        { id: 'corner', label: 'Corner', icon: '📐' },
+                        { id: 'remove', label: 'Remove', icon: '❌', danger: true }
+                    ].map((item) => {
+                        const ann = annotations.find(a => a.id === contextMenu.annotationId);
+                        const currentMode = ann?.nodeModes?.[contextMenu.nodeIndex / 3] || 'smooth';
+                        const isActive = item.id === currentMode;
+
+                        return (
+                            <button
+                                key={item.id}
+                                className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg text-left transition-colors duration-150 w-full
+                                    ${item.danger 
+                                        ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30' 
+                                        : isActive
+                                            ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 font-semibold'
+                                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
+                                    }`}
+                                onClick={() => {
+                                    handleSelectMode(contextMenu.annotationId, contextMenu.nodeIndex, item.id as any);
+                                    setContextMenu(null);
+                                }}
+                            >
+                                <span className="text-sm">{item.icon}</span>
+                                <span>{item.label}</span>
+                            </button>
+                        );
+                    })}
                 </div>
             )}
         </div>

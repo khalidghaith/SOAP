@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, Image, FileJson, FileType, FileSpreadsheet, Box, Check, ChevronRight, ArrowLeft } from 'lucide-react';
+import { X, Image, FileJson, FileType, FileSpreadsheet, Box, Check, ChevronRight, ArrowLeft, PencilRuler } from 'lucide-react';
 
 interface ExportModalProps {
-    onExport: (format: 'json' | 'png' | 'pdf' | 'obj' | 'csv', options?: any) => void;
+    onExport: (format: 'json' | 'png' | 'pdf' | 'obj' | 'csv' | 'dxf', options?: any) => void;
     onClose: () => void;
     viewMode: 'EDITOR' | 'CANVAS' | 'VOLUMES';
     projectName: string;
     onPreview?: (options?: ExportOptions) => Promise<string | null>;
 }
 
-type ExportFormat = 'json' | 'png' | 'pdf' | 'obj' | 'csv';
+type ExportFormat = 'json' | 'png' | 'pdf' | 'obj' | 'csv' | 'dxf';
 
 interface ExportOptions {
     filename: string;
@@ -155,6 +155,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                     colorClass="text-orange-600 dark:text-orange-400"
                                     bgClass="bg-orange-100 dark:bg-orange-900/30"
                                     borderClass="border-orange-100 dark:border-orange-900/30 hover:border-orange-300 dark:hover:border-orange-700"
+                                />
+                            )}
+
+                            {(viewMode === 'CANVAS' || viewMode === 'EDITOR') && (
+                                <FormatButton
+                                    format="dxf"
+                                    icon={PencilRuler}
+                                    title="CAD Drawing (.dxf)"
+                                    desc="Standard multi-layered CAD file for AutoCAD"
+                                    colorClass="text-red-600 dark:text-red-400"
+                                    bgClass="bg-red-100 dark:bg-red-900/30"
+                                    borderClass="border-red-100 dark:border-red-900/30 hover:border-red-300 dark:hover:border-red-700"
                                 />
                             )}
 
@@ -312,6 +324,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                     <p className="text-sm text-slate-600 dark:text-slate-300">
                                         Saves the entire project state including history, settings, and view configuration.
                                     </p>
+                                </div>
+                            )}
+
+                            {selectedFormat === 'dxf' && (
+                                <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
+                                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                                        Exports standard multi-layered CAD drawing containing:
+                                    </p>
+                                    <ul className="list-disc list-inside text-xs text-slate-500 dark:text-gray-400 mt-2 space-y-1">
+                                        <li><strong className="text-slate-700 dark:text-slate-300">A-WALLS:</strong> High-precision room outlines.</li>
+                                        <li><strong className="text-slate-700 dark:text-slate-300">A-ZONES:</strong> Convex hulls for functional zones.</li>
+                                        <li><strong className="text-slate-700 dark:text-slate-300">A-LABELS:</strong> Space names and areas in m².</li>
+                                        <li><strong className="text-slate-700 dark:text-slate-300">A-ANNO:</strong> Sketch annotations, lines, and circles.</li>
+                                    </ul>
                                 </div>
                             )}
                         </div>

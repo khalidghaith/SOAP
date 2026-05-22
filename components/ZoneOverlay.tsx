@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Room, Point, AppSettings, ZoneColor } from '../types';
 import { getConvexHull, createRoundedPath } from '../utils/geometry';
+import { getHexColorForZone, getHexBorderForZone } from '../utils/exportSystem';
 
 // Generate points along the curve to ensure the hull wraps it tightly
 const getBubbleCurvePoints = (points: Point[], segmentsPerCurve: number = 5): Point[] => {
@@ -114,10 +115,14 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
             // Bubbles use rounded-xl ~ 12px.
             const d = createRoundedPath(hull, cornerRadius + padding);
 
+            const matchedKey = Object.keys(zoneColors || {}).find(
+                (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
+            ) || 'Default';
+
             return {
                 zone,
                 path: d,
-                color: zoneColors[zone] || zoneColors['Default']
+                color: zoneColors[matchedKey] || zoneColors['Default']
             };
         }).filter(Boolean);
     }, [rooms, currentFloor, scale, appSettings.cornerRadius, appSettings.zonePadding, zoneColors, selectedZone]);
@@ -178,7 +183,8 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
                         {/* Stroke */}
                         <path
                             d={z.path}
-                            className={`${z.color.border.replace('border-', 'stroke-')} ${isSelected ? 'opacity-100' : 'opacity-60'} transition-opacity duration-200`}
+                            className={`${isSelected ? 'opacity-100' : 'opacity-60'} transition-opacity duration-200`}
+                            stroke={getHexBorderForZone(z.zone, zoneColors)}
                             strokeWidth={(isSelected ? appSettings.strokeWidth * 2 : appSettings.strokeWidth) / scale}
                             strokeLinejoin="round"
                             strokeLinecap="round"
@@ -188,10 +194,10 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
                         {/* Interactive Fill */}
                         <path
                             d={z.path}
-                            className={`${z.color.bg.replace('bg-', 'fill-')} hover:opacity-60 cursor-pointer active:cursor-grabbing pointer-events-auto`}
+                            className="hover:opacity-60 cursor-pointer active:cursor-grabbing pointer-events-auto"
                             style={{ fillOpacity: appSettings.zoneTransparency, touchAction: 'none' }}
                             stroke="none"
-                            fill="transparent"
+                            fill={getHexColorForZone(z.zone, zoneColors)}
                             onPointerDown={(e) => handleZonePointerDown(e, z.zone)}
                         />
                     </g>

@@ -1052,7 +1052,7 @@ export default function App() {
         setRooms(prev => arrangeRooms(prev, currentFloor));
     };
 
-    const handleAiSpatialLayout = async (instructions?: string) => {
+    const handleAiSpatialLayout = async (instructions?: string, typology?: ZoningTypology) => {
         if (!apiKey) {
             setShowApiKeyModal(true);
             return;
@@ -1092,7 +1092,8 @@ export default function App() {
                 fixedSpacesForAi,
                 floorsForAi,
                 apiKey,
-                instructions
+                instructions,
+                typology
             );
 
             addToHistory();
@@ -1561,10 +1562,156 @@ export default function App() {
             const newRoom = { ...r, shape, style: Object.keys(newStyle).length > 0 ? newStyle : undefined };
 
             if (shape === 'rect') {
-                newRoom.polygon = undefined;
-                const side = Math.sqrt(r.area) * PIXELS_PER_METER;
-                newRoom.width = side;
-                newRoom.height = side;
+                if (r.polygon && r.polygon.length > 0) {
+                    const points = r.polygon;
+                    const rotationRad = ((r.rotation || 0) * Math.PI) / 180;
+                    const cosR = Math.cos(rotationRad);
+                    const sinR = Math.sin(rotationRad);
+
+                    // 1. Convert local points to absolute canvas points
+                    const absPoints = points.map(p => {
+                        const xAbs = p.x * cosR - p.y * sinR + r.x;
+                        const yAbs = p.x * sinR + p.y * cosR + r.y;
+                        return { x: xAbs, y: yAbs };
+                    });
+
+                    // 2. Compute polygon area in pixels
+                    const polyAreaPx = (r.shape === 'bubble') ? calculateCurvedArea(points) : calculatePolygonArea(points);
+
+                    // Check if they form a rectangle/square
+                    let isRect = false;
+                    let W = 0, H = 0, rx = 0, ry = 0, rotDeg = 0;
+
+                    if (absPoints.length === 4) {
+                        const [A0, A1, A2, A3] = absPoints;
+                        const v0 = { x: A1.x - A0.x, y: A1.y - A0.y };
+                        const v1 = { x: A2.x - A1.x, y: A2.y - A1.y };
+                        const v2 = { x: A3.x - A2.x, y: A3.y - A2.y };
+                        const v3 = { x: A0.x - A3.x, y: A0.y - A3.y };
+
+                        const L0 = Math.sqrt(v0.x * v0.x + v0.y * v0.y);
+                        const L1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+                        const L2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+                        const L3 = Math.sqrt(v3.x * v3.x + v3.y * v3.y);
+
+                        if (L0 >= 0.1 && L1 >= 0.1 && L2 >= 0.1 && L3 >= 0.1) {
+                            const lenDiff1 = Math.abs(L0 - L2) / Math.max(L0, L2);
+                            const lenDiff2 = Math.abs(L1 - L3) / Math.max(L1, L3);
+
+                            const d0 = Math.abs((v0.x * v1.x + v0.y * v1.y) / (L0 * L1));
+                            const d1 = Math.abs((v1.x * v2.x + v1.y * v2.y) / (L1 * L2));
+                            const d2 = Math.abs((v2.x * v3.x + v2.y * v3.y) / (L2 * L3));
+                            const d3 = Math.abs((v3.x * v0.x + v3.y * v0.y) / (L3 * L0));
+
+                            const lenTolerance = 0.08;
+                            const orthoTolerance = 0.087; // ~5 deg
+
+                            if (lenDiff1 < lenTolerance && lenDiff2 < lenTolerance &&
+                                d0 < orthoTolerance && d1 < orthoTolerance &&
+                                d2 < orthoTolerance && d3 < orthoTolerance) {
+                                isRect = true;
+                                W = (L0 + L2) / 2;
+                                H = (L1 + L3) / 2;
+                                const C = {
+                                    x: (A0.x + A1.x + A2.x + A3.x) / 4,
+                                    y: (A0.y + A1.y + A2.y + A3.y) / 4
+                                };
+                                const thetaRad = Math.atan2(v0.y, v0.x);
+                                rotDeg = (thetaRad * 180) / Math.PI;
+                                rx = C.x - W / 2;
+                                ry = C.y - H / 2;
+                            }
+                        }
+                    }
+
+                    if (!isRect) {
+                        // Fit using Minimum Area Oriented Bounding Box (OBB)
+                        const centroid = calculateCentroid(absPoints);
+                        let minArea = Infinity;
+                        let bestTheta = 0;
+                        let bestW = 0;
+                        let bestH = 0;
+                        let bestCX = 0;
+                        let bestCY = 0;
+
+                        const N = absPoints.length;
+                        for (let i = 0; i < N; i++) {
+                            const p1 = absPoints[i];
+                            const p2 = absPoints[(i + 1) % N];
+                            const v = { x: p2.x - p1.x, y: p2.y - p1.y };
+                            const theta = Math.atan2(v.y, v.x);
+
+                            const cosA = Math.cos(-theta);
+                            const sinA = Math.sin(-theta);
+                            const rotated = absPoints.map(p => {
+                                const dx = p.x - centroid.x;
+                                const dy = p.y - centroid.y;
+                                return {
+                                    x: dx * cosA - dy * sinA,
+                                    y: dx * sinA + dy * cosA
+                                };
+                            });
+
+                            let minX = Infinity, maxX = -Infinity;
+                            let minY = Infinity, maxY = -Infinity;
+                            rotated.forEach(p => {
+                                if (p.x < minX) minX = p.x;
+                                if (p.x > maxX) maxX = p.x;
+                                if (p.y < minY) minY = p.y;
+                                if (p.y > maxY) maxY = p.y;
+                            });
+
+                            const currentW = maxX - minX;
+                            const currentH = maxY - minY;
+                            const area = currentW * currentH;
+
+                            if (area < minArea) {
+                                minArea = area;
+                                bestTheta = theta;
+                                bestW = currentW;
+                                bestH = currentH;
+                                const C_local = {
+                                    x: (minX + maxX) / 2,
+                                    y: (minY + maxY) / 2
+                                };
+                                const cosB = Math.cos(bestTheta);
+                                const sinB = Math.sin(bestTheta);
+                                bestCX = C_local.x * cosB - C_local.y * sinB + centroid.x;
+                                bestCY = C_local.x * sinB + C_local.y * cosB + centroid.y;
+                            }
+                        }
+
+                        // Scale the bestW and bestH so the bounding box area matches the original polygon's area
+                        const obbArea = bestW * bestH;
+                        if (obbArea > 10 && polyAreaPx > 10) {
+                            const s = Math.sqrt(polyAreaPx / obbArea);
+                            bestW *= s;
+                            bestH *= s;
+                        }
+
+                        W = bestW;
+                        H = bestH;
+                        rotDeg = (bestTheta * 180) / Math.PI;
+                        rx = bestCX - W / 2;
+                        ry = bestCY - H / 2;
+                    }
+
+                    // Normalize angle to standard bounds [-180, 180]
+                    if (rotDeg > 180) rotDeg -= 360;
+                    if (rotDeg < -180) rotDeg += 360;
+
+                    newRoom.polygon = undefined;
+                    newRoom.width = W;
+                    newRoom.height = H;
+                    newRoom.x = rx;
+                    newRoom.y = ry;
+                    newRoom.rotation = Number(rotDeg.toFixed(2));
+                    
+                    const newArea = Number(((W * H) / (PIXELS_PER_METER * PIXELS_PER_METER)).toFixed(2));
+                    newRoom.area = newArea > 0 ? newArea : r.area;
+                } else {
+                    newRoom.polygon = undefined;
+                }
             } else {
                 let points = r.polygon;
                 if (!points || points.length === 0) {
@@ -1600,7 +1747,7 @@ export default function App() {
 
 
 
-    const handleSave = async (format: 'json' | 'png' | 'pdf' | 'obj' | 'csv', options?: any) => {
+    const handleSave = async (format: 'json' | 'png' | 'pdf' | 'obj' | 'csv' | 'dxf', options?: any) => {
         setShowExportModal(false);
         const name = options?.filename || projectName || 'project';
         const finalName = name.trim().replace(/[\\/:"*?<>|]/g, '_'); // Sanitize filename
@@ -1669,6 +1816,8 @@ export default function App() {
         } else if (format === 'pdf') {
             const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, currentStyle, referenceImages);
             if (blob) await saveFile(blob, finalName, 'pdf');
+        } else if (format === 'dxf') {
+            await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, currentStyle, referenceImages);
         }
     };
 
@@ -1822,7 +1971,7 @@ export default function App() {
 
             <div className="hidden md:flex flex-col h-full w-full">
                 {/* Premium Header */}
-                <header className="h-[42px] bg-white/70 dark:bg-dark-surface/70 backdrop-blur-xl border-b border-slate-200/50 dark:border-dark-border flex items-center justify-between pr-4 shrink-0 z-40 shadow-[0_1px_10px_rgba(0,0,0,0.02)] relative transition-colors duration-300">
+                <header className="h-[42px] glass-panel !border-x-0 !border-t-0 flex items-center justify-between pr-4 shrink-0 z-40 shadow-sm relative transition-colors duration-300">
                     <div className="flex flex-1 items-center h-full overflow-hidden">
                         {/* Logo Block (matches inventory width) */}
                         <div className={`flex items-center h-full transition-all duration-300 shrink-0 ${isInventoryOpen ? 'w-80 border-r border-slate-200/50 dark:border-dark-border pr-2' : 'w-[42px] mr-4'}`}>
@@ -1885,7 +2034,7 @@ export default function App() {
                     </div>
 
                     {/* Workspace Toggles - Centered */}
-                    <div className="flex justify-center flex-none h-[42px] border-x border-slate-200/50 dark:border-dark-border bg-slate-50/50 dark:bg-white/[0.02] shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)]">
+                    <div className="flex justify-center flex-none h-[42px] border-x border-slate-200/20 dark:border-dark-border bg-transparent shadow-sm">
                         <button
                             onClick={() => setViewMode('EDITOR')}
                             className={`flex items-center justify-center gap-2 px-6 h-full text-[10px] font-black uppercase tracking-widest transition-colors ${viewMode === 'EDITOR' ? 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400 border-b-2 border-orange-500 shadow-[inset_0_-2px_10px_rgba(249,115,22,0.05)]' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-200/30 dark:hover:bg-white/5 border-b-2 border-transparent'}`}
@@ -1976,7 +2125,7 @@ export default function App() {
 
                 <div className="flex-1 flex overflow-hidden relative">
                     <div
-                        className="absolute inset-0 z-50 bg-slate-50 dark:bg-dark-bg flex flex-col"
+                        className={`absolute inset-0 z-50 bg-slate-50 dark:bg-dark-bg flex flex-col view-fade-enter ${viewMode === 'EDITOR' ? 'view-fade-active' : ''}`}
                         style={{
                             visibility: viewMode === 'EDITOR' ? 'visible' : 'hidden',
                             pointerEvents: viewMode === 'EDITOR' ? 'auto' : 'none',
@@ -1998,13 +2147,13 @@ export default function App() {
 
                     <aside
                         ref={inventoryRef}
-                        className={`${isInventoryOpen ? 'w-80' : 'w-[42px]'} bg-white dark:bg-dark-surface border-r border-slate-200/50 dark:border-dark-border flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] transition-all duration-300 ${isInventoryHovered ? 'ring-2 ring-orange-400 ring-inset bg-orange-50/30 dark:bg-orange-900/10' : ''}`}
+                        className={`${isInventoryOpen ? 'w-80' : 'w-[42px]'} glass-panel border-r border-slate-200/40 dark:border-dark-border flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] transition-all duration-300 ${isInventoryHovered ? 'ring-2 ring-orange-400 ring-inset bg-orange-50/30 dark:bg-orange-900/10' : ''}`}
                         onDragOver={handleInventoryDragOver}
                         onDrop={handleInventoryDrop}
                     >
                         {isInventoryOpen ? (
                             <>
-                                <div className="p-6 border-b border-slate-100 dark:border-dark-border flex justify-between items-center bg-slate-50/30 dark:bg-white/5 h-20">
+                                <div className="p-6 border-b border-slate-100/30 dark:border-dark-border/30 flex justify-between items-center bg-transparent h-20">
                                     <div>
                                         <h2 className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-2 mb-1">
                                             Space Inventory
@@ -2016,13 +2165,13 @@ export default function App() {
                                         <button onClick={() => setIsInventoryOpen(false)} className="text-slate-300 hover:text-slate-600 dark:text-gray-600 dark:hover:text-gray-400"><ChevronLeft size={18} /></button>
                                     </div>
                                 </div>
-                                <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-white to-slate-50/50 dark:from-dark-surface dark:to-dark-bg">
+                                <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-transparent">
                                     {unplacedRooms.length > 0 ? unplacedRooms.map(room => (
                                         <div
                                             key={room.id}
                                             draggable
                                             onDragStart={(e) => handleDragStart(e, room)}
-                                            className="p-5 rounded-2xl border border-slate-100 dark:border-dark-border shadow-sm hover:shadow-xl hover:border-primary/20 hover:-translate-y-1 cursor-grab active:cursor-grabbing group bg-white dark:bg-dark-surface"
+                                            className="p-5 rounded-2xl glass-card cursor-grab active:cursor-grabbing group"
                                             onClick={() => {
                                                 /* Optional: keep click to place at center if drag fails or as alternative */
                                                 /* placeRoom(room); */
@@ -2054,8 +2203,8 @@ export default function App() {
                                         </div>
                                     )}
                                 </div>
-                                <div className="p-6 bg-slate-50/50 dark:bg-white/5 border-t border-slate-100 dark:border-dark-border">
-                                    <button onClick={() => addRoom({})} className="w-full py-4 bg-white dark:bg-dark-surface border border-slate-200/80 dark:border-dark-border rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300 hover:border-orange-500 hover:text-orange-600 hover:shadow-lg flex items-center justify-center gap-3 shadow-sm group">
+                                <div className="p-6 bg-transparent border-t border-slate-100/30 dark:border-dark-border/30">
+                                    <button onClick={() => addRoom({})} className="w-full py-4 glass-card glow-effect rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300 flex items-center justify-center gap-3 group">
                                         <Plus size={18} className="group-hover:rotate-90" /> Add Manual Space
                                     </button>
                                 </div>
@@ -2105,13 +2254,13 @@ export default function App() {
                             />
                         )}
 
-                        <div style={{
-                            position: 'absolute',
-                            inset: 0,
-                            opacity: viewMode === 'VOLUMES' ? 1 : 0,
-                            pointerEvents: viewMode === 'VOLUMES' ? 'auto' : 'none',
-                            zIndex: viewMode === 'VOLUMES' ? 10 : 0,
-                        }}>
+                        <div 
+                            className={`absolute inset-0 view-fade-enter ${viewMode === 'VOLUMES' ? 'view-fade-active' : ''}`}
+                            style={{
+                                pointerEvents: viewMode === 'VOLUMES' ? 'auto' : 'none',
+                                zIndex: viewMode === 'VOLUMES' ? 10 : 0,
+                            }}
+                        >
                             <ErrorBoundary fallback={
                                 <div className="flex items-center justify-center h-full text-red-500 bg-red-50 p-8 rounded-lg flex-col gap-4">
                                     <p className="font-bold text-lg">Failed to load Volumes View</p>
@@ -2145,13 +2294,13 @@ export default function App() {
                                 />
                             </ErrorBoundary>
                         </div>
-                        <div style={{
-                            position: 'absolute',
-                            inset: 0,
-                            opacity: viewMode === 'CANVAS' ? 1 : 0,
-                            pointerEvents: 'none',
-                            zIndex: viewMode === 'CANVAS' ? 10 : 0,
-                        }}>
+                        <div 
+                            className={`absolute inset-0 view-fade-enter ${viewMode === 'CANVAS' ? 'view-fade-active' : ''}`}
+                            style={{
+                                pointerEvents: 'none',
+                                zIndex: viewMode === 'CANVAS' ? 10 : 0,
+                            }}
+                        >
                             {/* Background Reference Images */}
                             <div
                                 className="absolute inset-0 origin-top-left"
@@ -2376,7 +2525,7 @@ export default function App() {
 
                             {/* Tools Bar (Top Left) */}
                             <div className="absolute top-6 left-6 flex flex-col gap-2 z-[200] export-exclude pointer-events-auto">
-                                <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-sm p-1.5 rounded-full border border-slate-100 dark:border-dark-border shadow-lg flex items-center gap-1">
+                                <div className="glass-panel p-1.5 rounded-full shadow-lg flex items-center gap-1">
                                     {/* Mobile Expand Button */}
                                     <button
                                         onClick={() => setIsToolbarExpanded(!isToolbarExpanded)}
@@ -2427,7 +2576,7 @@ export default function App() {
                                                 <Layers size={16} />
                                             </button>
                                             {isOverlaySelectorOpen && (
-                                                <div className="absolute top-full mt-2 w-48 bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md p-2 rounded-2xl border border-slate-200 dark:border-dark-border shadow-xl flex flex-col gap-1 origin-top z-50">
+                                                <div className="absolute top-full mt-2 w-48 glass-panel p-2 rounded-2xl shadow-xl flex flex-col gap-1 origin-top z-50">
                                                     <div className="px-2 py-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">Overlay Floor</div>
                                                     {floors.filter(f => f.id !== currentFloor).map(floor => (
                                                         <button
@@ -2532,7 +2681,7 @@ export default function App() {
                             </div>
 
                             <div className="absolute top-6 right-6 flex flex-col items-end gap-2 z-[200] export-exclude pointer-events-auto">
-                                <div className="h-12 bg-white/90 dark:bg-dark-surface/90 backdrop-blur-md px-4 rounded-full border border-slate-200 dark:border-dark-border shadow-xl flex items-center gap-4 animate-in slide-in-from-right-4 transition-all duration-300">
+                                <div className="h-12 glass-panel px-4 rounded-full shadow-xl flex items-center gap-4 animate-in slide-in-from-right-4 transition-all duration-300">
                                     <div className="hidden lg:flex items-center gap-2 text-slate-400">
                                         <div className="h-1 w-12 bg-slate-300/50 dark:bg-white/10 rounded-full relative">
                                             <div className="absolute -top-3 left-0 text-[8px] font-bold">0m</div>
@@ -2559,7 +2708,7 @@ export default function App() {
                             </div>
 
                             {/* Floor Tabs Bar */}
-                            <div className="absolute bottom-0 left-0 right-0 h-8 bg-slate-200/50 dark:bg-black/40 flex items-start px-4 gap-1 z-40 backdrop-blur-sm border-t border-slate-200/50 dark:border-dark-border export-exclude pointer-events-auto">
+                            <div className="absolute bottom-0 left-0 right-0 h-8 glass-panel !border-x-0 !border-b-0 flex items-start px-4 gap-1 z-40 export-exclude pointer-events-auto">
                                 {floors.map(f => (
                                     <div
                                         key={f.id}
@@ -2613,10 +2762,10 @@ export default function App() {
                         </div>
                     </main>
 
-                    <aside className={`${isRightSidebarOpen ? 'w-80' : 'w-10'} bg-white dark:bg-dark-surface border-l border-slate-200 dark:border-dark-border flex flex-col z-20 shadow-2xl transition-all duration-300`}>
+                    <aside className={`${isRightSidebarOpen ? 'w-80' : 'w-10'} glass-panel border-l border-slate-200/40 dark:border-dark-border flex flex-col z-20 shadow-2xl transition-all duration-300`}>
                         {isRightSidebarOpen ? (
                             <>
-                                <div className="p-6 border-b border-slate-100 dark:border-dark-border flex justify-between items-center bg-slate-50/50 dark:bg-white/5 h-20">
+                                <div className="p-6 border-b border-slate-100/30 dark:border-dark-border/30 flex justify-between items-center bg-transparent h-20">
                                     <h2 className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest truncate max-w-[180px]">
                                         {isMultiSelection ? 'Multi-Selection' : selectedRoom ? 'Space Detail' : selectedZone ? 'Zone Detail' : 'Properties'}
                                     </h2>
@@ -2641,7 +2790,7 @@ export default function App() {
                                             {/* Shape Conversion Buttons */}
                                             <div>
                                                 <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Shape Type</label>
-                                                <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl">
+                                                <div className="flex glass-card p-1 rounded-xl">
                                                     <button onClick={() => handleConvertShape('rect')} className={`flex-1 flex items-center justify-center py-2 rounded-lg ${(!isMultiSelection && (!selectedRoom?.shape || selectedRoom?.shape === 'rect')) || (isMultiSelection && multiSelectionStats?.commonShape === 'rect') ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600' : 'text-slate-400 hover:text-slate-600'}`} title="Rectangle"><Square size={16} /></button>
                                                     <button onClick={() => handleConvertShape('polygon')} className={`flex-1 flex items-center justify-center py-2 rounded-lg ${(!isMultiSelection && selectedRoom?.shape === 'polygon') || (isMultiSelection && multiSelectionStats?.commonShape === 'polygon') ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600' : 'text-slate-400 hover:text-slate-600'}`} title="Polygon"><Hexagon size={16} /></button>
                                                     <button onClick={() => handleConvertShape('bubble')} className={`flex-1 flex items-center justify-center py-2 rounded-lg ${(!isMultiSelection && selectedRoom?.shape === 'bubble') || (isMultiSelection && multiSelectionStats?.commonShape === 'bubble') ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600' : 'text-slate-400 hover:text-slate-600'}`} title="Bubble"><Circle size={16} /></button>
@@ -2687,7 +2836,7 @@ export default function App() {
                                                         const linkedConnections = connections.filter(c => c.fromId === selectedRoom!.id || c.toId === selectedRoom!.id);
                                                         if (linkedConnections.length > 0) {
                                                             return (
-                                                                <div className="bg-slate-50 dark:bg-white/5 rounded-xl p-3 border border-slate-100 dark:border-dark-border">
+                                                                <div className="glass-card rounded-xl p-3">
                                                                     <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-2">Linked Spaces</span>
                                                                     <div className="space-y-1.5">
                                                                         {linkedConnections.map(conn => {
@@ -2725,7 +2874,7 @@ export default function App() {
                                             {!isMultiSelection ? (
                                                 <>
                                                     <div className="grid grid-cols-2 gap-4">
-                                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
+                                                        <div className="p-4 glass-card rounded-2xl">
                                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Area</span>
                                                             <div className="flex items-baseline gap-1">
                                                                 <input
@@ -2739,7 +2888,7 @@ export default function App() {
                                                                 <small className="text-xs opacity-60">m²</small>
                                                             </div>
                                                         </div>
-                                                        <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border flex justify-between items-center">
+                                                        <div className="p-4 glass-card rounded-2xl flex justify-between items-center">
                                                             <div>
                                                                 <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
                                                                 <span className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200">{floors.find(f => f.id === selectedRoom!.floor)?.label || 'N/A'}</span>
@@ -2774,6 +2923,88 @@ export default function App() {
                                                             </div>
                                                         </div>
                                                     </div>
+
+                                                    {/* Architectural Hatch Styling */}
+                                                    <div className="space-y-3">
+                                                        <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Architectural Hatch</label>
+                                                        <div className="space-y-3 glass-card rounded-2xl p-4">
+                                                            {/* Hatch Pattern Selector */}
+                                                            <div>
+                                                                <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Pattern</span>
+                                                                <select
+                                                                    value={selectedRoom?.style?.hatchPattern || 'none'}
+                                                                    onChange={(e) => {
+                                                                        const pattern = e.target.value as any;
+                                                                        const style = { ...selectedRoom?.style, hatchPattern: pattern };
+                                                                        updateRoom(selectedRoom!.id, { style });
+                                                                    }}
+                                                                    className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-lg p-2 focus:outline-none focus:border-orange-500"
+                                                                >
+                                                                    <option value="none">None</option>
+                                                                    <option value="diagonal">Diagonal Lines</option>
+                                                                    <option value="cross">Cross Hatch</option>
+                                                                    <option value="dots">Stipple Dots</option>
+                                                                    <option value="concrete">Concrete</option>
+                                                                    <option value="brick">Brick</option>
+                                                                </select>
+                                                            </div>
+
+                                                            {selectedRoom?.style?.hatchPattern && selectedRoom?.style?.hatchPattern !== 'none' && (
+                                                                <>
+                                                                    {/* Hatch Scale */}
+                                                                    <div>
+                                                                        <div className="flex justify-between items-center mb-1">
+                                                                            <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Scale</span>
+                                                                            <span className="text-[10px] font-bold text-slate-700 dark:text-gray-300">{(selectedRoom?.style?.hatchScale ?? 1.0).toFixed(1)}x</span>
+                                                                        </div>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="0.5"
+                                                                            max="3.0"
+                                                                            step="0.1"
+                                                                            value={selectedRoom?.style?.hatchScale ?? 1.0}
+                                                                            onChange={(e) => {
+                                                                                const scale = parseFloat(e.target.value);
+                                                                                const style = { ...selectedRoom?.style, hatchScale: scale };
+                                                                                updateRoom(selectedRoom!.id, { style });
+                                                                            }}
+                                                                            className="w-full accent-orange-500 text-orange-600 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none h-1 cursor-pointer"
+                                                                        />
+                                                                    </div>
+
+                                                                    {/* Hatch Color */}
+                                                                    <div>
+                                                                        <div className="flex justify-between items-center mb-1">
+                                                                            <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Hatch Color</span>
+                                                                            <span className="text-[10px] font-mono text-slate-500">{selectedRoom?.style?.hatchColor || 'Auto'}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input
+                                                                                type="color"
+                                                                                value={selectedRoom?.style?.hatchColor || '#cbd5e1'}
+                                                                                onChange={(e) => {
+                                                                                    const style = { ...selectedRoom?.style, hatchColor: e.target.value };
+                                                                                    updateRoom(selectedRoom!.id, { style });
+                                                                                }}
+                                                                                className="w-8 h-8 rounded border border-slate-200 dark:border-dark-border cursor-pointer bg-transparent"
+                                                                            />
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const style = { ...selectedRoom?.style };
+                                                                                    delete style.hatchColor;
+                                                                                    updateRoom(selectedRoom!.id, { style });
+                                                                                }}
+                                                                                className="px-2 py-1 text-[9px] font-black uppercase tracking-widest border border-slate-200 dark:border-dark-border rounded text-slate-500 hover:text-orange-600 hover:border-orange-500 transition-colors"
+                                                                            >
+                                                                                Use Auto
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
                                                     <div>
                                                         <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-3 block">Zone Category</label>
                                                         <div className="grid grid-cols-2 gap-2">
@@ -2801,7 +3032,7 @@ export default function App() {
                                             ) : (
                                                 // Multi-selection Summary
                                                 <div className="space-y-4">
-                                                    <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
+                                                    <div className="p-5 glass-card rounded-2xl">
                                                         <div className="flex justify-between items-center mb-2">
                                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Area</span>
                                                         </div>
@@ -2809,7 +3040,7 @@ export default function App() {
                                                             {Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
                                                         </div>
                                                     </div>
-                                                    <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border flex justify-between items-center">
+                                                    <div className="p-4 glass-card rounded-2xl flex justify-between items-center">
                                                         <div>
                                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
                                                             <span className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200">
@@ -2876,7 +3107,7 @@ export default function App() {
 
                                             <div>
                                                 <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Zone Color</label>
-                                                <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
+                                                <div className="flex flex-wrap gap-2 p-3 glass-card rounded-xl">
                                                     {COLOR_PALETTE.map((style, i) => (
                                                         <button
                                                             key={i}
@@ -2891,7 +3122,7 @@ export default function App() {
                                                 </div>
                                             </div>
 
-                                            <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border">
+                                            <div className="p-5 glass-card rounded-2xl">
                                                 <div className="flex justify-between items-center mb-4">
                                                     <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Stats</span>
                                                     <span className="text-[10px] font-bold text-orange-600 bg-orange-500/10 px-2 py-1 rounded-md">{selectedZoneRooms.length} Spaces</span>

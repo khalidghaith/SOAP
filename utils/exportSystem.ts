@@ -3,6 +3,7 @@ import { getConvexHull, createRoundedPath } from './geometry';
 import { SketchManager } from '../SketchManager';
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
+import { generateDXF } from './dxf';
 
 export type ExportFormat = 'png' | 'jpeg' | 'svg' | 'dxf' | 'json' | 'pdf';
 const PIXELS_PER_METER = 20;
@@ -162,6 +163,44 @@ const parseTailwindColor = (classString: string, type: 'bg' | 'border' | 'text',
     return { color: null, opacity };
 };
 
+const generateSvgHatchPatterns = (idPrefix: string, color: string, scale: number): string => {
+    const size = 16 * scale;
+    return `
+            <!-- Diagonal Pattern -->
+            <pattern id="${idPrefix}-diagonal" width="${size}" height="${size}" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="${size}" x2="${size}" y2="0" stroke="${color}" stroke-width="1" />
+            </pattern>
+            
+            <!-- Cross Pattern -->
+            <pattern id="${idPrefix}-cross" width="${size}" height="${size}" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="${size}" x2="${size}" y2="0" stroke="${color}" stroke-width="1" />
+                <line x1="0" y1="0" x2="${size}" y2="${size}" stroke="${color}" stroke-width="1" />
+            </pattern>
+            
+            <!-- Dots Pattern -->
+            <pattern id="${idPrefix}-dots" width="${size}" height="${size}" patternUnits="userSpaceOnUse">
+                <circle cx="${size / 2}" cy="${size / 2}" r="${1.5 * scale}" fill="${color}" />
+            </pattern>
+            
+            <!-- Concrete Pattern -->
+            <pattern id="${idPrefix}-concrete" width="${size * 2}" height="${size * 2}" patternUnits="userSpaceOnUse">
+                <circle cx="${size * 0.5}" cy="${size * 0.5}" r="${0.8 * scale}" fill="${color}" />
+                <circle cx="${size * 1.5}" cy="${size * 1.2}" r="${0.6 * scale}" fill="${color}" />
+                <path d="M ${size * 1.2} ${size * 0.4} L ${size * 1.4} ${size * 0.8} L ${size * 1.0} ${size * 0.7} Z" fill="none" stroke="${color}" stroke-width="0.5" />
+                <path d="M ${size * 0.3} ${size * 1.5} L ${size * 0.6} ${size * 1.6} L ${size * 0.4} ${size * 1.3} Z" fill="none" stroke="${color}" stroke-width="0.5" />
+            </pattern>
+            
+            <!-- Brick Pattern -->
+            <pattern id="${idPrefix}-brick" width="${size * 2}" height="${size}" patternUnits="userSpaceOnUse">
+                <rect width="${size * 2}" height="${size}" fill="none" stroke="${color}" stroke-width="1" />
+                <line x1="${size}" y1="0" x2="${size}" y2="${size / 2}" stroke="${color}" stroke-width="1" />
+                <line x1="0" y1="${size / 2}" x2="${size * 2}" y2="${size / 2}" stroke="${color}" stroke-width="1" />
+                <line x1="${size / 2}" y1="${size / 2}" x2="${size / 2}" y2="${size}" stroke="${color}" stroke-width="1" />
+                <line x1="${size * 1.5}" y1="${size / 2}" x2="${size * 1.5}" y2="${size}" stroke="${color}" stroke-width="1" />
+            </pattern>
+    `;
+};
+
 export const handleExport = async (
     format: ExportFormat,
     projectName: string,
@@ -254,72 +293,8 @@ export const handleExport = async (
 
     // --- DXF Export ---
     if (format === 'dxf') {
-        let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
-
-        visibleRooms.forEach(room => {
-            // Draw Shape
-            if (room.shape === 'bubble' && room.polygon) {
-                // Export as High-Res Polyline to approximate curve
-                const cmds = getBubblePathCommands(room.polygon);
-                const points: Point[] = [];
-
-                // Re-iterate polygon points to generate curve samples directly
-                for (let i = 0; i < room.polygon.length; i++) {
-                    const p0 = room.polygon[(i - 1 + room.polygon.length) % room.polygon.length];
-                    const p1 = room.polygon[i];
-                    const p2 = room.polygon[(i + 1) % room.polygon.length];
-                    const p3 = room.polygon[(i + 2) % room.polygon.length];
-
-                    const cp1x = p1.x + (p2.x - p0.x) / 6;
-                    const cp1y = p1.y + (p2.y - p0.y) / 6;
-                    const cp2x = p2.x - (p3.x - p1.x) / 6;
-                    const cp2y = p2.y - (p3.y - p1.y) / 6;
-
-                    // Sample 10 points per segment
-                    for (let t = 0; t < 1; t += 0.1) {
-                        const it = 1 - t;
-                        const x = it * it * it * p1.x + 3 * it * it * t * cp1x + 3 * it * t * t * cp2x + t * t * t * p2.x;
-                        const y = it * it * it * p1.y + 3 * it * it * t * cp1y + 3 * it * t * t * cp2y + t * t * t * p2.y;
-                        points.push({ x: room.x + x, y: room.y + y });
-                    }
-                }
-
-                dxf += `0\nLWPOLYLINE\n8\n${room.zone}\n90\n${points.length}\n70\n1\n`; // Closed
-                points.forEach(p => {
-                    dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`; // Invert Y for DXF
-                });
-
-            } else {
-                // Rect/Polygon
-                const pts = room.polygon || [
-                    { x: 0, y: 0 }, { x: room.width, y: 0 },
-                    { x: room.width, y: room.height }, { x: 0, y: room.height }
-                ];
-                dxf += `0\nLWPOLYLINE\n8\n${room.zone}\n90\n${pts.length}\n70\n1\n`;
-                pts.forEach(p => {
-                    dxf += `10\n${room.x + p.x + offsetX}\n20\n${-(room.y + p.y + offsetY)}\n`;
-                });
-            }
-
-            // Text Label
-            const cx = (room.polygon ? 0 : room.width / 2) + (room.polygon ? calculateCentroid(room.polygon).x : 0);
-            const cy = (room.polygon ? 0 : room.height / 2) + (room.polygon ? calculateCentroid(room.polygon).y : 0);
-            const absX = room.x + cx + offsetX;
-            const absY = -(room.y + cy + offsetY);
-
-            const width = room.polygon ? (Math.max(...room.polygon.map(p => p.x)) - Math.min(...room.polygon.map(p => p.x))) : room.width;
-            const lines = wrapText(room.name, width - 10, appSettings.fontSize);
-            const lineHeight = appSettings.fontSize * 1.2;
-            const totalHeight = lines.length * lineHeight;
-
-            lines.forEach((line, i) => {
-                const yPos = absY + (totalHeight / 2) - (i * lineHeight) - (lineHeight / 2);
-                dxf += `0\nTEXT\n8\nLabels\n10\n${absX}\n20\n${yPos}\n40\n${appSettings.fontSize}\n1\n${line}\n72\n4\n11\n${absX}\n21\n${yPos}\n`;
-            });
-        });
-
-        dxf += `0\nENDSEC\n0\nEOF`;
-        const blob = new Blob([dxf], { type: 'application/dxf' });
+        const dxfContent = generateDXF(projectName, rooms, annotations || [], currentFloor, offsetX, offsetY);
+        const blob = new Blob([dxfContent], { type: 'application/dxf' });
         const url = URL.createObjectURL(blob);
         triggerDownload(url, `${projectName}-floor-${currentFloor}.dxf`);
         return;
@@ -365,6 +340,20 @@ export const handleExport = async (
     };
     const getOpacity = (style?: DiagramStyle) => style?.opacity || 0.9;
     const isSketchy = currentStyle?.sketchy || false;
+
+    // Inject Hatch definitions into SVG defs
+    let hatchDefs = "";
+    visibleRooms.forEach(r => {
+        if (r.style?.hatchPattern && r.style.hatchPattern !== 'none') {
+            const stroke = r.style?.stroke || getStrokeColor(r.zone, currentStyle);
+            const hatchColor = r.style.hatchColor || stroke;
+            const scale = r.style.hatchScale ?? 1.0;
+            hatchDefs += generateSvgHatchPatterns(`hatch-${r.id}`, hatchColor, scale);
+        }
+    });
+    if (hatchDefs) {
+        svgContent = svgContent.replace('</defs>', hatchDefs + '</defs>');
+    }
 
     // Background
     if (format === 'jpeg' || (format === 'png' && !options?.transparentBackground)) {
@@ -468,9 +457,15 @@ export const handleExport = async (
         const lineHeight = appSettings.fontSize * 1.2;
         const startY = (cy - 6) - ((lines.length - 1) * lineHeight) / 2;
 
+        let hatchPath = "";
+        if (r.style?.hatchPattern && r.style.hatchPattern !== 'none') {
+            hatchPath = `<path d="${d}" fill="url(#hatch-${r.id}-${r.style.hatchPattern})" pointer-events="none" />`;
+        }
+
         svgContent += `
         <g transform="translate(${r.x}, ${r.y})">
             <path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" fill-opacity="${opacity}" stroke-dasharray="${isSketchy ? '5,5' : 'none'}" />
+            ${hatchPath}
             <text x="${cx}" y="${startY}" class="text title" fill="${currentStyle?.colorMode === 'monochrome' ? '#000000' : '#1e293b'}" font-family="${currentStyle?.fontFamily || 'sans-serif'}">
                 ${lines.map((line, i) => `<tspan x="${cx}" dy="${i === 0 ? 0 : lineHeight}">${line}</tspan>`).join('')}
             </text>
@@ -665,9 +660,15 @@ export const handleExport = async (
 };
 
 export const getHexColorForZone = (zone: string, zoneColors: Record<string, ZoneColor>) => {
-    // 1. Try to resolve from zoneColors config first
-    if (zoneColors[zone]) {
-        const parsed = parseTailwindColor(zoneColors[zone].bg, 'bg', false);
+    const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    
+    // 1. Try to resolve from zoneColors config first (case-insensitive lookup)
+    const zoneKey = Object.keys(zoneColors || {}).find(
+        (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
+    );
+    
+    if (zoneKey && zoneColors[zoneKey]) {
+        const parsed = parseTailwindColor(zoneColors[zoneKey].bg, 'bg', isDark);
         if (parsed.color) return parsed.color;
     }
 
@@ -680,10 +681,12 @@ export const getHexColorForZone = (zone: string, zoneColors: Record<string, Zone
         'Outdoor': '#dcfce7', // green-100
         'Default': '#f1f5f9' // slate-100
     };
-    // Try to match partial keys if exact match fails
-    // For dynamic zones, we might need a better way to get hex from tailwind classes or just generate a hash color
-    // For now, fallback to a hash-based color or default if not in standard map
-    if (map[zone]) return map[zone];
+    
+    // Check map case-insensitively too
+    const mapKey = Object.keys(map).find(
+        (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
+    );
+    if (mapKey && map[mapKey]) return map[mapKey];
 
     // Fallback for custom zones - generate a consistent color from string
     let hash = 0;
@@ -695,10 +698,16 @@ export const getHexColorForZone = (zone: string, zoneColors: Record<string, Zone
 };
 
 export const getHexBorderForZone = (zone: string, zoneColors?: Record<string, ZoneColor>) => {
-    if (zoneColors && zoneColors[zone]) {
+    const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    
+    const zoneKey = Object.keys(zoneColors || {}).find(
+        (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
+    );
+
+    if (zoneKey && zoneColors && zoneColors[zoneKey]) {
         // Try to derive border from text color or explicit border if available
-        const classKey = zoneColors[zone].border || zoneColors[zone].text?.replace('text-', 'border-') || 'border-slate-500';
-        const parsed = parseTailwindColor(classKey, 'border', false);
+        const classKey = zoneColors[zoneKey].border || zoneColors[zoneKey].text?.replace('text-', 'border-') || 'border-slate-500';
+        const parsed = parseTailwindColor(classKey, 'border', isDark);
         if (parsed.color) return parsed.color;
     }
 
@@ -710,6 +719,11 @@ export const getHexBorderForZone = (zone: string, zoneColors?: Record<string, Zo
         'Outdoor': '#22c55e', // green-500
         'Default': '#64748b' // slate-500
     };
-    if (map[zone]) return map[zone];
+    
+    const mapKey = Object.keys(map).find(
+        (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
+    );
+    if (mapKey && map[mapKey]) return map[mapKey];
+    
     return '#64748b';
 };

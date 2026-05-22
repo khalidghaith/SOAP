@@ -48,3 +48,90 @@ body {
         linear-gradient(to bottom, #e2e8f0 1px, transparent 1px);
 }
 .no-transition, .no-transition * { transition: none !important; }
+
+/* Glassmorphism Styles */
+.glass-panel {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
+}
+
+.dark .glass-panel {
+    background: rgba(30, 30, 30, 0.7) !important;
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3) !important;
+}
+
+.glass-card {
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark .glass-card {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+    background: rgba(255, 255, 255, 0.6);
+    border-color: rgba(249, 115, 22, 0.4); /* Tailwind orange-500 */
+    box-shadow: 0 8px 24px rgba(249, 115, 22, 0.08);
+    transform: translateY(-1px);
+}
+
+.dark .glass-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(249, 115, 22, 0.4);
+    box-shadow: 0 8px 24px rgba(249, 115, 22, 0.15);
+    transform: translateY(-1px);
+}
+
+/* Fluid View Swapping Transitions */
+.view-fade-enter {
+    opacity: 0;
+    transform: scale(0.98) translateY(4px);
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.view-fade-active {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+}
+
+/* Subtly animated light glow for buttons/inputs */
+.glow-effect {
+    position: relative;
+    overflow: hidden;
+}
+.glow-effect::after {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(
+        45deg,
+        transparent 45%,
+        rgba(255, 255, 255, 0.1) 48%,
+        rgba(255, 255, 255, 0.3) 50%,
+        rgba(255, 255, 255, 0.1) 52%,
+        transparent 55%
+    );
+    transform: rotate(-45deg) translate(-100%, -100%);
+    transition: transform 0.5s ease;
+    pointer-events: none;
+}
+.glow-effect:hover::after {
+    transform: rotate(-45deg) translate(100%, 100%);
+}

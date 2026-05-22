@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { Room, Point, DiagramStyle, AppSettings, ZoneColor } from '../types';
 import { Link as LinkIcon } from 'lucide-react';
 import { createRoundedPath } from '../utils/geometry';
-import { wrapText } from '../utils/exportSystem';
+import { wrapText, getHexColorForZone, getHexBorderForZone } from '../utils/exportSystem';
+
 
 interface BubbleProps {
     room: Room;
@@ -111,6 +112,46 @@ const calculateCentroid = (points: Point[]): Point => {
         y += p.y;
     }
     return { x: x / points.length, y: y / points.length };
+};
+
+const renderHatchDefs = (idPrefix: string, color: string, scale: number) => {
+    const size = 16 * scale;
+    return (
+        <defs>
+            {/* Diagonal Pattern */}
+            <pattern id={`${idPrefix}-diagonal`} width={size} height={size} patternUnits="userSpaceOnUse">
+                <line x1="0" y1={size} x2={size} y2="0" stroke={color} strokeWidth={1} />
+            </pattern>
+            
+            {/* Cross Pattern */}
+            <pattern id={`${idPrefix}-cross`} width={size} height={size} patternUnits="userSpaceOnUse">
+                <line x1="0" y1={size} x2={size} y2="0" stroke={color} strokeWidth={1} />
+                <line x1="0" y1="0" x2={size} y2={size} stroke={color} strokeWidth={1} />
+            </pattern>
+            
+            {/* Dots Pattern */}
+            <pattern id={`${idPrefix}-dots`} width={size} height={size} patternUnits="userSpaceOnUse">
+                <circle cx={size / 2} cy={size / 2} r={1.5 * scale} fill={color} />
+            </pattern>
+            
+            {/* Concrete Pattern */}
+            <pattern id={`${idPrefix}-concrete`} width={size * 2} height={size * 2} patternUnits="userSpaceOnUse">
+                <circle cx={size * 0.5} cy={size * 0.5} r={0.8 * scale} fill={color} />
+                <circle cx={size * 1.5} cy={size * 1.2} r={0.6 * scale} fill={color} />
+                <path d={`M ${size * 1.2} ${size * 0.4} L ${size * 1.4} ${size * 0.8} L ${size * 1.0} ${size * 0.7} Z`} fill="none" stroke={color} strokeWidth={0.5} />
+                <path d={`M ${size * 0.3} ${size * 1.5} L ${size * 0.6} ${size * 1.6} L ${size * 0.4} ${size * 1.3} Z`} fill="none" stroke={color} strokeWidth={0.5} />
+            </pattern>
+            
+            {/* Brick Pattern */}
+            <pattern id={`${idPrefix}-brick`} width={size * 2} height={size} patternUnits="userSpaceOnUse">
+                <rect width={size * 2} height={size} fill="none" stroke={color} strokeWidth={1} />
+                <line x1={size} y1={0} x2={size} y2={size / 2} stroke={color} strokeWidth={1} />
+                <line x1={0} y1={size / 2} x2={size * 2} y2={size / 2} stroke={color} strokeWidth={1} />
+                <line x1={size / 2} y1={size / 2} x2={size / 2} y2={size} stroke={color} strokeWidth={1} />
+                <line x1={size * 1.5} y1={size / 2} x2={size * 1.5} y2={size} stroke={color} strokeWidth={1} />
+            </pattern>
+        </defs>
+    );
 };
 
 const RenderCorner = ({ cursor, pos, zoomScale, onPointerDown }: { cursor: string, pos: React.CSSProperties, zoomScale: number, onPointerDown: (e: React.PointerEvent) => void }) => (
@@ -233,7 +274,17 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         e.preventDefault();
         onDragStart?.();
         setIsRotating(true);
-        // We don't need to store start state for rotation if we calculate absolute angle from center
+        
+        if (bubbleRef.current) {
+            const rect = bubbleRef.current.getBoundingClientRect();
+            const isPoly = room.polygon || room.shape === 'bubble';
+            const centerX = isPoly ? rect.left : rect.left + rect.width / 2;
+            const centerY = isPoly ? rect.top : rect.top + rect.height / 2;
+            const angleRad = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+            
+            (startDragState.current as any).startRotation = room.rotation || 0;
+            (startDragState.current as any).startAngle = angleRad;
+        }
     };
 
     const handleTextMouseDown = (e: React.PointerEvent) => {
@@ -420,12 +471,16 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             } else if (isRotating) {
                 if (bubbleRef.current) {
                     const rect = bubbleRef.current.getBoundingClientRect();
-                    const centerX = rect.left + rect.width / 2;
-                    const centerY = rect.top + rect.height / 2;
+                    const isPoly = room.polygon || room.shape === 'bubble';
+                    const centerX = isPoly ? rect.left : rect.left + rect.width / 2;
+                    const centerY = isPoly ? rect.top : rect.top + rect.height / 2;
 
-                    // Calculate angle from center to mouse
                     const angleRad = Math.atan2(e.clientY - centerY, e.clientX - centerX);
-                    let angleDeg = angleRad * (180 / Math.PI) + 90; // +90 to make top 0 degrees
+                    const startAngle = (startDragState.current as any).startAngle ?? angleRad;
+                    const startRotation = (startDragState.current as any).startRotation ?? (room.rotation || 0);
+                    
+                    let deltaDeg = (angleRad - startAngle) * (180 / Math.PI);
+                    let angleDeg = startRotation + deltaDeg;
 
                     if (e.shiftKey) {
                         angleDeg = Math.round(angleDeg / 45) * 45;
@@ -433,7 +488,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         angleDeg = Math.round(angleDeg / 5) * 5;
                     }
 
-                    updateRoom(room.id, { rotation: angleDeg });
+                    // Normalize angle to standard bounds [-180, 180]
+                    while (angleDeg > 180) angleDeg -= 360;
+                    while (angleDeg < -180) angleDeg += 360;
+
+                    updateRoom(room.id, { rotation: Number(angleDeg.toFixed(2)) });
                     setRotateTooltip({ x: e.clientX, y: e.clientY, angle: angleDeg });
                 }
             } else if (draggedVertex !== null && polygonSnapshot && room.shape === 'bubble') {
@@ -1077,6 +1136,9 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
     const isPolygon = room.polygon || room.shape === 'bubble';
 
+    const handleX = isPolygon ? centroid.x : room.width / 2;
+    const handleY = isPolygon ? Math.min(...activePoints.map(p => p.y)) : 0;
+
     return (
         <div
             ref={bubbleRef}
@@ -1101,8 +1163,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 strokeWidth={(room.style?.strokeWidth ?? appSettings.strokeWidth) / zoomScale}
                                 strokeDasharray={room.style?.strokeDasharray ?? (diagramStyle.sketchy ? `${10 / zoomScale},${10 / zoomScale}` : "none")}
                                 fillOpacity={room.style?.opacity ?? diagramStyle.opacity}
-                                fill={room.style?.fill}
-                                stroke={room.style?.stroke}
+                                fill={room.style?.fill || getHexColorForZone(room.zone, zoneColors)}
+                                stroke={room.style?.stroke || getHexBorderForZone(room.zone, zoneColors)}
                                 style={{
                                     filter: diagramStyle.shadow === 'shadow-md' ? 'drop-shadow(0 4px 6px rgb(0 0 0 / 0.1))' :
                                         diagramStyle.shadow === 'shadow-sm' ? 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))' :
@@ -1110,6 +1172,16 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                     transition: 'none'
                                 }}
                             />
+                            {room.style?.hatchPattern && room.style.hatchPattern !== 'none' && (
+                                <>
+                                    {renderHatchDefs('hatch-' + room.id, room.style.hatchColor || getHexBorderForZone(room.zone, zoneColors), room.style.hatchScale ?? 1)}
+                                    <path
+                                        d={polygonPath}
+                                        fill={`url(#hatch-${room.id}-${room.style.hatchPattern})`}
+                                        pointerEvents="none"
+                                    />
+                                </>
+                            )}
                             {/* Polygon Edges (Hit Areas for Editing) */}
                             {isSelected && activePoints.map((p, i) => {
                                 const next = activePoints[(i + 1) % activePoints.length];
@@ -1177,7 +1249,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     </div>
                 ) : (
                     <div
-                        className={`absolute top-0 left-0 ${diagramStyle.shadow} ${!room.style?.fill ? visualStyle.bg : ''} ${!room.style?.stroke ? visualStyle.border : ''}`}
+                        className={`absolute top-0 left-0 overflow-hidden ${diagramStyle.shadow} ${!room.style?.fill ? visualStyle.bg : ''} ${!room.style?.stroke ? visualStyle.border : ''}`}
                         style={{
                             width: room.width, height: room.height,
                             backgroundColor: room.style?.fill,
@@ -1187,7 +1259,14 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                             opacity: room.style?.opacity ?? diagramStyle.opacity,
                             borderRadius: (room.style?.cornerRadius ?? appSettings.cornerRadius)
                         }}
-                    />
+                    >
+                        {room.style?.hatchPattern && room.style.hatchPattern !== 'none' && (
+                            <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+                                {renderHatchDefs('hatch-' + room.id, room.style.hatchColor || getHexBorderForZone(room.zone, zoneColors), room.style.hatchScale ?? 1)}
+                                <rect width="100%" height="100%" fill={`url(#hatch-${room.id}-${room.style.hatchPattern})`} />
+                            </svg>
+                        )}
+                    </div>
                 )}
 
                 {/* Snap Guides (Shared for all shapes) */}
@@ -1243,14 +1322,19 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 )}
 
                 {/* Rotation Handle */}
-                {!room.polygon && room.shape !== 'bubble' && isSelected && !isDragging && (
+                {isSelected && !isDragging && (
                     <div
-                        className="absolute left-1/2 top-0 -translate-x-1/2"
-                        style={{ transform: `translate(0, 0) scale(${1 / zoomScale})` }}
+                        className="absolute -translate-x-1/2 pointer-events-auto"
+                        style={{
+                            left: handleX,
+                            top: handleY,
+                            transform: `translate(0, 0) scale(${1 / zoomScale})`,
+                            zIndex: 90
+                        }}
                     >
                         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-px bg-orange-600 h-[30px]" />
                         <div
-                            className="absolute -top-[30px] left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-orange-600 rounded-full hover:bg-orange-600 shadow-lg active:scale-150"
+                            className="absolute -top-[30px] left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-orange-600 rounded-full hover:bg-orange-600 shadow-lg active:scale-150 cursor-pointer pointer-events-auto"
                             style={{ cursor: ROTATE_CURSOR }}
                             onPointerDown={handleRotateStart}
                         />
