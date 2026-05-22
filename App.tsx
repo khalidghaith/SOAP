@@ -117,6 +117,49 @@ const isPointInPolygon = (p: Point, polygon: Point[]): boolean => {
     return inside;
 };
 
+const ccw = (A: Point, B: Point, C: Point): boolean => {
+    return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+};
+
+const intersectSegments = (A: Point, B: Point, C: Point, D: Point): boolean => {
+    return ccw(A, C, D) !== ccw(B, C, D) && ccw(A, B, C) !== ccw(A, B, D);
+};
+
+const getRoomVertices = (room: Room): Point[] => {
+    const angleRad = (room.rotation || 0) * (Math.PI / 180);
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+
+    if (room.polygon && room.polygon.length > 0) {
+        // Polygon rooms rotate around (room.x, room.y)
+        return room.polygon.map(p => {
+            const rx = p.x * cos - p.y * sin;
+            const ry = p.x * sin + p.y * cos;
+            return { x: room.x + rx, y: room.y + ry };
+        });
+    } else {
+        // Rectangular rooms rotate around center (room.x + width/2, room.y + height/2)
+        const cx = room.x + room.width / 2;
+        const cy = room.y + room.height / 2;
+        const halfW = room.width / 2;
+        const halfH = room.height / 2;
+
+        const localVertices = [
+            { x: -halfW, y: -halfH },
+            { x: halfW, y: -halfH },
+            { x: halfW, y: halfH },
+            { x: -halfW, y: halfH }
+        ];
+
+        return localVertices.map(v => {
+            const rx = v.x * cos - v.y * sin;
+            const ry = v.x * sin + v.y * cos;
+            return { x: cx + rx, y: cy + ry };
+        });
+    }
+};
+
+
 // Helper for file saving
 const saveFile = async (blob: Blob, suggestedName: string, extension: string) => {
     try {
@@ -251,6 +294,7 @@ export default function App() {
     const [currentStyle, setCurrentStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
     const [selectedZone, setSelectedZone] = useState<string | null>(null);
+    const [selectionBox, setSelectionBox] = useState<{ start: Point; end: Point } | null>(null);
     const [volumesViewState, setVolumesViewState] = useState<{
         cameraPosition: [number, number, number];
         target: [number, number, number];
@@ -323,6 +367,146 @@ export default function App() {
 
     const roomsRef = useRef(rooms);
     roomsRef.current = rooms;
+
+    const performSelection = useCallback((start: Point, end: Point) => {
+        if (!mainRef.current) return;
+
+        const rect = mainRef.current.getBoundingClientRect();
+        const clientStart = { x: start.x + rect.left, y: start.y + rect.top };
+        const clientEnd = { x: end.x + rect.left, y: end.y + rect.top };
+
+        const wStart = toWorld(clientStart.x, clientStart.y);
+        const wEnd = toWorld(clientEnd.x, clientEnd.y);
+
+        const minX = Math.min(wStart.x, wEnd.x);
+        const maxX = Math.max(wStart.x, wEnd.x);
+        const minY = Math.min(wStart.y, wEnd.y);
+        const maxY = Math.max(wStart.y, wEnd.y);
+
+        const isCrossing = start.x > end.x; // Right-to-left
+
+        // --- Select Rooms ---
+        const visibleRooms = roomsRef.current.filter(r => r.isPlaced && r.floor === currentFloor);
+        const newlySelectedRooms = new Set<string>();
+
+        visibleRooms.forEach(room => {
+            const vertices = getRoomVertices(room);
+
+            if (isCrossing) {
+                // Crossing Selection: Intersects or Inside
+                // 1. Check if any vertex of room is inside the selection box
+                const someVertexInside = vertices.some(v => v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY);
+                if (someVertexInside) {
+                    newlySelectedRooms.add(room.id);
+                    return;
+                }
+
+                // 2. Check if selection box corners are inside the room
+                const boxCorners = [
+                    { x: minX, y: minY },
+                    { x: maxX, y: minY },
+                    { x: maxX, y: maxY },
+                    { x: minX, y: maxY }
+                ];
+                const cornerInside = boxCorners.some(c => isPointInPolygon(c, vertices));
+                if (cornerInside) {
+                    newlySelectedRooms.add(room.id);
+                    return;
+                }
+
+                // 3. Check if any edge of the selection box intersects any edge of the room
+                const boxEdges = [
+                    [boxCorners[0], boxCorners[1]],
+                    [boxCorners[1], boxCorners[2]],
+                    [boxCorners[2], boxCorners[3]],
+                    [boxCorners[3], boxCorners[0]]
+                ];
+                const roomEdges: Point[][] = [];
+                for (let i = 0; i < vertices.length; i++) {
+                    roomEdges.push([vertices[i], vertices[(i + 1) % vertices.length]]);
+                }
+
+                let edgesIntersect = false;
+                for (const bEdge of boxEdges) {
+                    for (const rEdge of roomEdges) {
+                        if (intersectSegments(bEdge[0], bEdge[1], rEdge[0], rEdge[1])) {
+                            edgesIntersect = true;
+                            break;
+                        }
+                    }
+                    if (edgesIntersect) break;
+                }
+
+                if (edgesIntersect) {
+                    newlySelectedRooms.add(room.id);
+                }
+            } else {
+                // Window Selection: Completely Inside
+                const allInside = vertices.every(v => v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY);
+                if (allInside) {
+                    newlySelectedRooms.add(room.id);
+                }
+            }
+        });
+
+        setSelectedRoomIds(newlySelectedRooms);
+
+        // --- Select Annotations (if in Sketch Mode) ---
+        if (isSketchMode) {
+            const visibleAnnotations = annotations.filter(a => a.floor === currentFloor && a.points && a.points.length > 0);
+            let selectedAnnId: string | null = null;
+
+            for (const a of visibleAnnotations) {
+                if (isCrossing) {
+                    // Crossing Selection: Any point is inside, or any segment intersects the box edges
+                    const anyPointInside = a.points.some(p => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY);
+                    if (anyPointInside) {
+                        selectedAnnId = a.id;
+                        break;
+                    }
+
+                    const boxCorners = [
+                        { x: minX, y: minY },
+                        { x: maxX, y: minY },
+                        { x: maxX, y: maxY },
+                        { x: minX, y: maxY }
+                    ];
+                    const boxEdges = [
+                        [boxCorners[0], boxCorners[1]],
+                        [boxCorners[1], boxCorners[2]],
+                        [boxCorners[2], boxCorners[3]],
+                        [boxCorners[3], boxCorners[0]]
+                    ];
+
+                    let edgesIntersect = false;
+                    for (let i = 0; i < a.points.length - 1; i++) {
+                        const p1 = a.points[i];
+                        const p2 = a.points[i + 1];
+                        for (const bEdge of boxEdges) {
+                            if (intersectSegments(bEdge[0], bEdge[1], p1, p2)) {
+                                edgesIntersect = true;
+                                break;
+                            }
+                        }
+                        if (edgesIntersect) break;
+                    }
+
+                    if (edgesIntersect) {
+                        selectedAnnId = a.id;
+                        break;
+                    }
+                } else {
+                    // Window Selection: All points inside
+                    const allInside = a.points.every(p => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY);
+                    if (allInside) {
+                        selectedAnnId = a.id;
+                        break;
+                    }
+                }
+            }
+            setSelectedAnnotationId(selectedAnnId);
+        }
+    }, [currentFloor, annotations, isSketchMode, toWorld]);
 
     const overlaySelectorRef = useRef<HTMLDivElement>(null);
 
@@ -653,14 +837,27 @@ export default function App() {
             setIsPanning(true);
             lastMousePos.current = { x: e.clientX, y: e.clientY };
         }
-        // Left Click (0) on Background -> Deselect
-        else if (e.button === 0 && e.target === mainRef.current) {
+        // Left Click (0) on Background -> Start Selection Box
+        else if (e.button === 0 && !isSketchMode && !isReferenceMode) {
+            if (selectionBox) {
+                return;
+            }
             setSelectedRoomIds(new Set());
             setSelectedZone(null);
             setSelectedAnnotationId(null);
             if (connectionSourceId) setConnectionSourceId(null);
             // Auto-lock all text when clicking empty space
             setRooms(prev => prev.map(r => r.isTextUnlocked ? { ...r, isTextUnlocked: false } : r));
+
+            if (mainRef.current) {
+                const rect = mainRef.current.getBoundingClientRect();
+                const startX = e.clientX - rect.left;
+                const startY = e.clientY - rect.top;
+                setSelectionBox({
+                    start: { x: startX, y: startY },
+                    end: { x: startX, y: startY }
+                });
+            }
         }
     };
 
@@ -672,6 +869,15 @@ export default function App() {
                 ...prev,
                 offset: { x: prev.offset.x + dx, y: prev.offset.y + dy }
             }));
+        } else if (selectionBox && mainRef.current) {
+            const rect = mainRef.current.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+
+            const updatedEnd = { x: currentX, y: currentY };
+            setSelectionBox(prev => prev ? { ...prev, end: updatedEnd } : null);
+
+            performSelection(selectionBox.start, updatedEnd);
         }
         lastMousePos.current = { x: e.clientX, y: e.clientY };
     };
@@ -891,6 +1097,11 @@ export default function App() {
             } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
                 e.preventDefault();
                 handleZoomToFit();
+            } else if (e.key === 'Escape') {
+                if (selectionBox) {
+                    setSelectionBox(null);
+                    e.preventDefault();
+                }
             } else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                 // Do not hijack tab if user is in an input field.
                 const activeEl = document.activeElement;
@@ -908,7 +1119,44 @@ export default function App() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [undo, redo, handleZoomToFit]);
+    }, [undo, redo, handleZoomToFit, selectionBox]);
+
+    // Global Capturing Event Listener for Selection Box Second Click
+    useEffect(() => {
+        if (!selectionBox) return;
+
+        const handleGlobalPointerDown = (e: PointerEvent) => {
+            // Only handle left clicks (button === 0)
+            if (e.button !== 0) return;
+
+            // Check if click is inside the main canvas
+            const isInsideCanvas = mainRef.current && mainRef.current.contains(e.target as Node);
+
+            if (isInsideCanvas) {
+                // Finalize selection using actual click coordinates
+                const rect = mainRef.current!.getBoundingClientRect();
+                const currentX = e.clientX - rect.left;
+                const currentY = e.clientY - rect.top;
+
+                // Stop the event from triggering room selection, dragging, panning, etc.
+                e.stopPropagation();
+                e.preventDefault();
+
+                performSelection(selectionBox.start, { x: currentX, y: currentY });
+                setSelectionBox(null);
+            } else {
+                // Clicking outside the canvas cancels the selection box
+                setSelectionBox(null);
+            }
+        };
+
+        // Add capturing event listener to intercept click before other elements
+        document.addEventListener('pointerdown', handleGlobalPointerDown, { capture: true });
+
+        return () => {
+            document.removeEventListener('pointerdown', handleGlobalPointerDown, { capture: true });
+        };
+    }, [selectionBox, performSelection]);
 
     // Auto-zoom when switching to Canvas
     useEffect(() => {
@@ -2760,6 +3008,27 @@ export default function App() {
                                 </button>
                             </div>
                         </div>
+
+                        {selectionBox && (
+                            <div
+                                className="pointer-events-none absolute"
+                                style={{
+                                    left: Math.min(selectionBox.start.x, selectionBox.end.x),
+                                    top: Math.min(selectionBox.start.y, selectionBox.end.y),
+                                    width: Math.abs(selectionBox.start.x - selectionBox.end.x),
+                                    height: Math.abs(selectionBox.start.y - selectionBox.end.y),
+                                    zIndex: 9999,
+                                    backgroundColor: selectionBox.start.x > selectionBox.end.x 
+                                        ? 'rgba(34, 197, 94, 0.15)' // Crossing: Green
+                                        : 'rgba(59, 130, 246, 0.15)', // Window: Blue
+                                    border: selectionBox.start.x > selectionBox.end.x
+                                        ? '1.5px dashed rgb(34, 197, 94)' // Crossing: Green dashed
+                                        : '1.5px solid rgb(59, 130, 246)', // Window: Blue solid
+                                    borderRadius: '2px',
+                                    boxShadow: '0 0 8px rgba(0,0,0,0.1)'
+                                }}
+                            />
+                        )}
                     </main>
 
                     <aside className={`${isRightSidebarOpen ? 'w-80' : 'w-10'} glass-panel border-l border-slate-200/40 dark:border-dark-border flex flex-col z-20 shadow-2xl transition-all duration-300`}>
