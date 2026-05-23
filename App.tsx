@@ -19,13 +19,14 @@ import {
     TableProperties, Hexagon, Circle, Square,
     PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, BrushCleaning,
     Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
-    Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal
+    Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
 import { AnnotationLayer } from './components/AnnotationLayer';
 import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
+import { StylePanel } from './components/StylePanel';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 import * as htmlToImage from 'html-to-image';
 import { analyzeProgram, generateSpatialLayout } from './services/geminiService';
@@ -292,8 +293,10 @@ export default function App() {
     }, [offset.x, offset.y, scale]);
     const [is3DMode, setIs3DMode] = useState(false);
     const [currentStyle, setCurrentStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
+    const [showStylePanel, setShowStylePanel] = useState(false);
     const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
     const [selectedZone, setSelectedZone] = useState<string | null>(null);
+
     const [selectionBox, setSelectionBox] = useState<{ start: Point; end: Point } | null>(null);
     const [volumesViewState, setVolumesViewState] = useState<{
         cameraPosition: [number, number, number];
@@ -539,6 +542,28 @@ export default function App() {
             localStorage.setItem('SOAP_DARK_MODE', 'false');
         }
     }, [darkMode]);
+
+    const canvasTheme = useMemo(() => {
+        const id = currentStyle.id;
+        if (id === 'blueprint') {
+            return {
+                bg: darkMode ? 'bg-[#0b2b5c]' : 'bg-[#e0f2fe]',
+                gridColor: darkMode ? 'rgba(34, 211, 238, 0.25)' : 'rgba(14, 165, 233, 0.2)',
+                gridPattern: 'solid'
+            };
+        } else if (id === 'clay') {
+            return {
+                bg: darkMode ? 'bg-[#242729]' : 'bg-[#fcfaf2]',
+                gridColor: darkMode ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)',
+                gridPattern: 'solid'
+            };
+        }
+        return {
+            bg: darkMode ? 'bg-dark-bg' : 'bg-[#f0f2f5]',
+            gridColor: darkMode ? '#333' : '#e2e8f0',
+            gridPattern: 'solid'
+        };
+    }, [currentStyle.id, darkMode]);
 
     // Debounced Auto-save
     useEffect(() => {
@@ -2469,7 +2494,7 @@ export default function App() {
 
                     <main
                         ref={mainRef}
-                        className={`flex-1 relative overflow-hidden bg-[#f0f2f5] dark:bg-dark-bg transition-colors duration-500 ${isZoneDragging ? 'no-transition' : ''}`}
+                        className={`flex-1 relative overflow-hidden ${canvasTheme.bg} transition-colors duration-500 ${isZoneDragging ? 'no-transition' : ''}`}
                         onMouseDown={viewMode === 'VOLUMES' ? undefined : handlePanStart}
                         onMouseMove={viewMode === 'VOLUMES' ? undefined : handleMouseMove}
                         onMouseUp={viewMode === 'VOLUMES' ? undefined : handleMouseUp}
@@ -2493,8 +2518,8 @@ export default function App() {
                                 style={{
                                     zIndex: 0,
                                     backgroundImage: `
-                                            linear-gradient(to right, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px),
-                                            linear-gradient(to bottom, ${darkMode ? '#333' : '#e2e8f0'} 1px, transparent 1px)
+                                            linear-gradient(to right, ${canvasTheme.gridColor} 1px, transparent 1px),
+                                            linear-gradient(to bottom, ${canvasTheme.gridColor} 1px, transparent 1px)
                                         `,
                                     backgroundSize: `${gridSize * PIXELS_PER_METER * scale}px ${gridSize * PIXELS_PER_METER * scale}px`,
                                     backgroundPosition: `${offset.x}px ${offset.y}px`
@@ -2682,6 +2707,7 @@ export default function App() {
                                                     appSettings={appSettings}
                                                     zoneColors={zoneColors}
                                                     isOverlay={true}
+                                                    darkMode={darkMode}
                                                 />
                                             ))}
                                         </div>
@@ -2741,6 +2767,7 @@ export default function App() {
                                             isAnyDragging={isBubbleDragging}
                                             otherRooms={selectedRoomIds.has(room.id) ? [...visibleRooms.filter(r => r.id !== room.id), ...overlayRooms] : undefined}
                                             isSketchMode={isSketchMode || isReferenceMode}
+                                            darkMode={darkMode}
                                         />
                                     ));
                                 })()}
@@ -2771,164 +2798,222 @@ export default function App() {
                                 />
                             </div>
 
-                            {/* Tools Bar (Top Left) */}
-                            <div className="absolute top-6 left-6 flex flex-col gap-2 z-[200] export-exclude pointer-events-auto">
-                                <div className="glass-panel p-1.5 rounded-full shadow-lg flex items-center gap-1">
-                                    {/* Mobile Expand Button */}
-                                    <button
-                                        onClick={() => setIsToolbarExpanded(!isToolbarExpanded)}
-                                        className="lg:hidden w-8 h-8 rounded-full flex items-center justify-center text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5"
-                                    >
-                                        {isToolbarExpanded ? <ChevronLeft size={16} /> : <MoreHorizontal size={16} />}
-                                    </button>
+                             {/* Tools Bar (Top Left) */}
+                             <div
+                                 className="absolute top-6 left-6 flex flex-col gap-2 z-[200] export-exclude pointer-events-auto"
+                                 onMouseDown={(e) => e.stopPropagation()}
+                                 onPointerDown={(e) => e.stopPropagation()}
+                             >
+                                 <div className="glass-panel p-2 rounded-3xl shadow-xl flex flex-col items-center gap-1.5 border border-white/20 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl">
+                                     {/* Mobile Expand Button */}
+                                     <button
+                                         onClick={() => setIsToolbarExpanded(!isToolbarExpanded)}
+                                         className="lg:hidden w-8 h-8 rounded-full flex items-center justify-center text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5"
+                                     >
+                                         {isToolbarExpanded ? <ChevronLeft size={16} /> : <MoreHorizontal size={16} />}
+                                     </button>
 
-                                    <div className={`flex items-center gap-1 ${!isToolbarExpanded ? 'hidden lg:flex' : 'flex'}`}>
-                                        <div className="flex items-center bg-slate-100/50 dark:bg-white/5 rounded-full px-2 py-1 border border-slate-200/50 dark:border-dark-border gap-2 mr-1">
-                                            <span className="text-xs font-bold font-sans w-8 text-center">{gridSize}m</span>
-                                            <div className="flex flex-col -space-y-1">
-                                                <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-orange-600"><ChevronUp size={12} /></button>
-                                                <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-orange-600"><ChevronDown size={12} /></button>
-                                            </div>
-                                            <button
-                                                onClick={() => setShowGrid(!showGrid)}
-                                                className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm'}`}
-                                                title="Toggle Grid"
-                                            >
-                                                <Grid size={12} />
-                                            </button>
-                                        </div>
+                                     <div className={`flex flex-col items-center gap-2 ${!isToolbarExpanded ? 'hidden lg:flex' : 'flex'}`}>
+                                         {/* Grid Controller (Vertical Capsule) */}
+                                         <div className="flex flex-col items-center bg-slate-100/50 dark:bg-white/5 rounded-2xl py-1.5 px-1 border border-slate-200/50 dark:border-dark-border gap-1 w-8">
+                                             <span className="text-[10px] font-black font-sans text-center h-4 flex items-center justify-center leading-none">{gridSize}m</span>
+                                             <div className="flex items-center justify-center gap-0.5">
+                                                 <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-orange-600 transition-colors" title="Increase Grid"><ChevronUp size={12} /></button>
+                                                 <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-orange-600 transition-colors" title="Decrease Grid"><ChevronDown size={12} /></button>
+                                             </div>
+                                             <div className="w-6 h-px bg-slate-200/60 dark:bg-dark-border my-0.5" />
+                                             <button
+                                                 onClick={() => setShowGrid(!showGrid)}
+                                                 className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm'}`}
+                                                 title="Toggle Grid"
+                                             >
+                                                 <Grid size={11} />
+                                             </button>
+                                         </div>
 
-                                        <button
-                                            onClick={handleAutoArrange}
-                                            className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600"
-                                            title="Auto Arrange Layout"
-                                        >
-                                            <LayoutTemplate size={16} />
-                                        </button>
+                                         <button
+                                             onClick={handleAutoArrange}
+                                             className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600"
+                                             title="Auto Arrange Layout"
+                                         >
+                                             <LayoutTemplate size={16} />
+                                         </button>
 
-                                        <button
-                                            onClick={() => setShowAiLayoutModal(true)}
-                                            disabled={isAiLayoutLoading}
-                                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isAiLayoutLoading ? 'bg-orange-100 text-orange-400 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-purple-600'}`}
-                                            title="AI Spatial Layout"
-                                        >
-                                            <Sparkles size={16} className={isAiLayoutLoading ? "animate-spin" : ""} />
-                                        </button>
+                                         <button
+                                             onClick={() => setShowAiLayoutModal(true)}
+                                             disabled={isAiLayoutLoading}
+                                             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isAiLayoutLoading ? 'bg-orange-100 text-orange-400 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-purple-600'}`}
+                                             title="AI Spatial Layout"
+                                         >
+                                             <Sparkles size={16} className={isAiLayoutLoading ? "animate-spin" : ""} />
+                                         </button>
 
-                                        <div className="relative" ref={overlaySelectorRef}>
-                                            <button
-                                                onClick={() => setIsOverlaySelectorOpen(prev => !prev)}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${activeOverlayFloorId !== null ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}
-                                                title="Select Overlay Floor"
-                                            >
-                                                <Layers size={16} />
-                                            </button>
-                                            {isOverlaySelectorOpen && (
-                                                <div className="absolute top-full mt-2 w-48 glass-panel p-2 rounded-2xl shadow-xl flex flex-col gap-1 origin-top z-50">
-                                                    <div className="px-2 py-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">Overlay Floor</div>
-                                                    {floors.filter(f => f.id !== currentFloor).map(floor => (
-                                                        <button
-                                                            key={floor.id}
-                                                            onClick={() => {
-                                                                setFloorOverlays(prev => ({
-                                                                    ...prev,
-                                                                    [currentFloor]: prev[currentFloor] === floor.id ? null : floor.id
-                                                                }));
-                                                                setIsOverlaySelectorOpen(false);
-                                                            }}
-                                                            className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${activeOverlayFloorId === floor.id ? 'bg-orange-100 dark:bg-orange-900/20 text-orange-600' : 'text-slate-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-white/5'}`}
-                                                        >
-                                                            {floor.label}
-                                                        </button>
-                                                    ))}
-                                                    {floors.length > 1 && <div className="h-px bg-slate-200 dark:bg-dark-border my-1" />}
-                                                    <button
-                                                        onClick={() => {
-                                                            setFloorOverlays(prev => ({
-                                                                ...prev,
-                                                                [currentFloor]: null
-                                                            }));
-                                                            setIsOverlaySelectorOpen(false);
-                                                        }}
-                                                        className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${activeOverlayFloorId === null ? 'bg-slate-200 dark:bg-white/10 text-slate-800 dark:text-white' : 'text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-white/5'}`}
-                                                    >
-                                                        None
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
+                                         <div className="relative" ref={overlaySelectorRef}>
+                                             <button
+                                                 onClick={() => setIsOverlaySelectorOpen(prev => !prev)}
+                                                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${activeOverlayFloorId !== null ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                                                 title="Select Overlay Floor"
+                                             >
+                                                 <Layers size={16} />
+                                             </button>
+                                             {isOverlaySelectorOpen && (
+                                                 <div className="absolute left-full top-0 ml-2.5 w-48 glass-panel p-2.5 rounded-2xl shadow-xl flex flex-col gap-1 origin-left z-50 border border-white/20 dark:border-white/10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl">
+                                                     <div className="px-2 py-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">Overlay Floor</div>
+                                                     {floors.filter(f => f.id !== currentFloor).map(floor => (
+                                                         <button
+                                                             key={floor.id}
+                                                             onClick={() => {
+                                                                 setFloorOverlays(prev => ({
+                                                                     ...prev,
+                                                                     [currentFloor]: prev[currentFloor] === floor.id ? null : floor.id
+                                                                 }));
+                                                                 setIsOverlaySelectorOpen(false);
+                                                             }}
+                                                             className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${activeOverlayFloorId === floor.id ? 'bg-orange-100 dark:bg-orange-900/20 text-orange-600' : 'text-slate-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-white/5'}`}
+                                                         >
+                                                             {floor.label}
+                                                         </button>
+                                                     ))}
+                                                     {floors.length > 1 && <div className="h-px bg-slate-200 dark:bg-dark-border my-1" />}
+                                                     <button
+                                                         onClick={() => {
+                                                             setFloorOverlays(prev => ({
+                                                                 ...prev,
+                                                                 [currentFloor]: null
+                                                             }));
+                                                             setIsOverlaySelectorOpen(false);
+                                                         }}
+                                                         className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${activeOverlayFloorId === null ? 'bg-slate-200 dark:bg-white/10 text-slate-800 dark:text-white' : 'text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-white/5'}`}
+                                                     >
+                                                         None
+                                                     </button>
+                                                 </div>
+                                             )}
+                                         </div>
 
-                                        <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50'}`} title="Toggle Snapping"><Magnet size={16} /></button>
+                                         <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50'}`} title="Toggle Snapping"><Magnet size={16} /></button>
 
-                                        <button
-                                            onClick={() => setIsMagnetMode(!isMagnetMode)}
-                                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
-                                            title="Physics / Magnetic Zones"
-                                        >
-                                            <Atom size={16} className={isMagnetMode ? "animate-spin" : ""} />
-                                        </button>
+                                         <button
+                                             onClick={() => setIsMagnetMode(!isMagnetMode)}
+                                             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
+                                             title="Physics / Magnetic Zones"
+                                         >
+                                             <Atom size={16} className={isMagnetMode ? "animate-spin" : ""} />
+                                         </button>
 
-                                        <button
-                                            onClick={() => {
-                                                const newValue = !isReferenceMode;
-                                                setIsReferenceMode(newValue);
-                                                if (newValue) setIsSketchMode(false);
-                                            }}
-                                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isReferenceMode ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
-                                            title="Edit Reference Images"
-                                        >
-                                            <ImageIcon size={16} />
-                                        </button>
+                                         <button
+                                             onClick={() => {
+                                                 const newValue = !isReferenceMode;
+                                                 setIsReferenceMode(newValue);
+                                                 if (newValue) {
+                                                     setIsSketchMode(false);
+                                                     setShowStylePanel(false);
+                                                 }
+                                             }}
+                                             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isReferenceMode ? 'bg-orange-500 text-white shadow-lg scale-105' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
+                                             title="Edit Reference Images"
+                                         >
+                                             <ImageIcon size={16} />
+                                         </button>
 
-                                        <SketchToolbar
-                                            isActive={isSketchMode}
-                                            onToggle={() => {
-                                                const newValue = !isSketchMode;
-                                                setIsSketchMode(newValue);
-                                                if (newValue) setIsReferenceMode(false);
-                                            }}
-                                        />
+                                         <SketchToolbar
+                                             isActive={isSketchMode}
+                                             onToggle={() => {
+                                                 const newValue = !isSketchMode;
+                                                 setIsSketchMode(newValue);
+                                                 if (newValue) {
+                                                     setIsReferenceMode(false);
+                                                     setShowStylePanel(false);
+                                                 }
+                                             }}
+                                         />
 
-                                        <button
-                                            onClick={handleClearCanvas}
-                                            className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500"
-                                            title="Clear Canvas"
-                                        >
-                                            <BrushCleaning size={16} />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                                         {/* Style Selector Toggle */}
+                                         <button
+                                             onClick={() => {
+                                                 const newValue = !showStylePanel;
+                                                 setShowStylePanel(newValue);
+                                                 if (newValue) {
+                                                     setIsReferenceMode(false);
+                                                     setIsSketchMode(false);
+                                                 }
+                                             }}
+                                             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${showStylePanel ? 'bg-orange-500 text-white shadow-lg scale-105' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
+                                             title="Visual Styles"
+                                         >
+                                             <Palette size={16} />
+                                         </button>
 
-                            {/* Reference Panel - Moved to Top Left (Below Toolbar) */}
-                            <div className="absolute top-20 left-6 z-[190] export-exclude pointer-events-auto">
-                                <ReferenceToolbar
-                                    isReferenceMode={isReferenceMode}
-                                    selectedImage={referenceImages.find(i => i.id === selectedReferenceImageId) || null}
-                                    onUpdateImage={handleUpdateReferenceImage}
-                                    onDeleteImage={handleDeleteReferenceImage}
-                                    onImportImage={handleImportReference}
-                                    onStartScaling={(id) => setReferenceScaleState({ imageId: id, points: [], step: 'point1' })}
-                                    isScalingMode={!!referenceScaleState}
-                                    onCancelScaling={() => setReferenceScaleState(null)}
-                                />
-                            </div>
+                                         <button
+                                             onClick={handleClearCanvas}
+                                             className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500"
+                                             title="Clear Canvas"
+                                         >
+                                             <BrushCleaning size={16} />
+                                         </button>
+                                     </div>
+                                 </div>
+                             </div>
 
-                            {/* Sketch Panel - Aligned with Reference Panel */}
-                            <div className="absolute top-20 left-6 z-[190] export-exclude pointer-events-auto">
-                                <SketchPanel
-                                    isActive={isSketchMode}
-                                    activeType={activeSketchType}
-                                    onTypeChange={setActiveSketchType}
-                                    properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
-                                    onPropertyChange={handleAnnotationPropertyChange}
+                             {/* Style Selector panel floating alongside vertical toolbar */}
+                             {showStylePanel && (
+                                 <div
+                                     className="absolute top-6 left-[78px] z-[190] export-exclude pointer-events-auto"
+                                     onMouseDown={(e) => e.stopPropagation()}
+                                     onPointerDown={(e) => e.stopPropagation()}
+                                 >
+                                     <StylePanel
+                                         currentStyle={currentStyle}
+                                         onStyleSelect={(style) => {
+                                             setCurrentStyle(style);
+                                             setShowStylePanel(false);
+                                         }}
+                                         onClose={() => setShowStylePanel(false)}
+                                     />
+                                 </div>
+                             )}
+
+                             {/* Reference Panel - Moved to left-[78px] top-6 */}
+                             <div
+                                 className="absolute top-6 left-[78px] z-[190] export-exclude pointer-events-auto"
+                                 onMouseDown={(e) => e.stopPropagation()}
+                                 onPointerDown={(e) => e.stopPropagation()}
+                             >
+                                 <ReferenceToolbar
+                                     isReferenceMode={isReferenceMode}
+                                     selectedImage={referenceImages.find(i => i.id === selectedReferenceImageId) || null}
+                                     onUpdateImage={handleUpdateReferenceImage}
+                                     onDeleteImage={handleDeleteReferenceImage}
+                                     onImportImage={handleImportReference}
+                                     onStartScaling={(id) => setReferenceScaleState({ imageId: id, points: [], step: 'point1' })}
+                                     isScalingMode={!!referenceScaleState}
+                                     onCancelScaling={() => setReferenceScaleState(null)}
+                                 />
+                             </div>
+
+                             {/* Sketch Panel - Moved to left-[78px] top-6 */}
+                             <div
+                                 className="absolute top-6 left-[78px] z-[190] export-exclude pointer-events-auto"
+                                 onMouseDown={(e) => e.stopPropagation()}
+                                 onPointerDown={(e) => e.stopPropagation()}
+                             >
+                                 <SketchPanel
+                                     isActive={isSketchMode}
+                                     activeType={activeSketchType}
+                                     onTypeChange={setActiveSketchType}
+                                     properties={selectedAnnotation ? selectedAnnotation.style : sketchProperties}
+                                     onPropertyChange={handleAnnotationPropertyChange}
                                     selectedAnnotation={selectedAnnotation}
                                     onZIndex={handleZIndex}
                                     onDelete={() => selectedAnnotationId && deleteAnnotation(selectedAnnotationId)}
                                 />
                             </div>
 
-                            <div className="absolute top-6 right-6 flex flex-col items-end gap-2 z-[200] export-exclude pointer-events-auto">
+                            <div
+                                className="absolute top-6 right-6 flex flex-col items-end gap-2 z-[200] export-exclude pointer-events-auto"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                            >
                                 <div className="h-12 glass-panel px-4 rounded-full shadow-xl flex items-center gap-4 animate-in slide-in-from-right-4 transition-all duration-300">
                                     <div className="hidden lg:flex items-center gap-2 text-slate-400">
                                         <div className="h-1 w-12 bg-slate-300/50 dark:bg-white/10 rounded-full relative">
@@ -2956,7 +3041,11 @@ export default function App() {
                             </div>
 
                             {/* Floor Tabs Bar */}
-                            <div className="absolute bottom-0 left-0 right-0 h-8 glass-panel !border-x-0 !border-b-0 flex items-start px-4 gap-1 z-40 export-exclude pointer-events-auto">
+                            <div
+                                className="absolute bottom-0 left-0 right-0 h-8 glass-panel !border-x-0 !border-b-0 flex items-start px-4 gap-1 z-40 export-exclude pointer-events-auto"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                            >
                                 {floors.map(f => (
                                     <div
                                         key={f.id}

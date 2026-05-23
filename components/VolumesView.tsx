@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { OBJExporter } from 'three-stdlib';
 import { Room, Floor, ZoneColor, VerticalConnection, ZONE_COLORS, AppSettings, DiagramStyle } from '../types';
 import { Maximize } from 'lucide-react';
+import { getHexColorForZone } from '../utils/exportSystem';
 
 interface VolumesViewProps {
     rooms: Room[];
@@ -58,20 +59,8 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
     labelFontSize: number;
 }) {
     const color = useMemo(() => {
-        const style = zoneColors[room.zone];
-        if (style?.bg) {
-            const match = style.bg.match(/\[(#[0-9a-fA-F]{6})\]/);
-            if (match) return match[1];
-        }
-
-        if (room.zone === 'Public') return '#fb923c';
-        if (room.zone === 'Private') return '#60a5fa';
-        if (room.zone === 'Service') return '#94a3b8';
-        if (room.zone === 'Circulation') return '#facc15';
-        if (room.zone === 'Outdoor') return '#4ade80';
-        if (room.zone === 'Admin') return '#c084fc';
-        return '#e2e8f0';
-    }, [room.zone, zoneColors]);
+        return getHexColorForZone(room.zone, zoneColors);
+    }, [room.zone, zoneColors, darkMode]);
 
     const floor = floors.find(f => f.id === room.floor);
     const heightInMeters = room.depth || floor?.height || 3;
@@ -166,22 +155,117 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         return null;
     }
 
+    const themeParams = useMemo(() => {
+        const id = diagramStyle.id;
+        
+        let meshColor = isLinkingSource ? '#f59e0b' : color;
+        let opacity = isSelected ? 0.9 : 0.6;
+        let transparent = true;
+        let roughness = 0.2;
+        let metalness = 0.1;
+        let edgesColor = isSelected || isLinkingSource ? "#f59e0b" : "white";
+        let castShadow = false;
+        let receiveShadow = false;
+
+        if (id === 'blueprint') {
+            meshColor = '#0284c7';
+            opacity = isSelected ? 0.65 : 0.45;
+            transparent = true;
+            roughness = 0.1;
+            metalness = 0.1;
+            edgesColor = isSelected || isLinkingSource ? "#fb923c" : "#e2e8f0";
+            castShadow = false;
+            receiveShadow = false;
+        } else if (id === 'clay') {
+            meshColor = darkMode ? '#373d43' : '#ffffff';
+            opacity = 1.0;
+            transparent = false;
+            roughness = 0.95;
+            metalness = 0.0;
+            edgesColor = isSelected || isLinkingSource ? "#f59e0b" : (darkMode ? '#1e293b' : '#cbd5e1');
+            castShadow = true;
+            receiveShadow = true;
+        }
+
+        return {
+            meshColor,
+            opacity,
+            transparent,
+            roughness,
+            metalness,
+            edgesColor,
+            castShadow,
+            receiveShadow
+        };
+    }, [diagramStyle.id, color, isSelected, isLinkingSource, darkMode]);
+
+    const labelStyle = useMemo(() => {
+        const id = diagramStyle.id;
+        let fontFamily = diagramStyle.fontFamily;
+        let labelColor = isSelected ? '#f97316' : darkMode ? '#fff' : '#000';
+        let bg = darkMode ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)';
+        let border = isSelected ? '1.5px solid #f97316' : darkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.05)';
+        let borderRadius = '6px';
+        let backdropFilter = 'blur(8px)';
+        let filter = 'drop-shadow(0 4px 6px rgba(0,0,0,0.4))';
+        let padding = '3px 8px';
+        let textTransform: React.CSSProperties['textTransform'] = 'none';
+        let letterSpacing = 'normal';
+
+        if (id === 'blueprint') {
+            fontFamily = 'font-mono';
+            labelColor = isSelected ? '#fb923c' : (darkMode ? '#bae6fd' : '#0369a1');
+            bg = darkMode ? 'rgba(14, 165, 233, 0.25)' : 'rgba(224, 242, 254, 0.8)';
+            border = isSelected ? '1.5px solid #fb923c' : (darkMode ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(14, 165, 233, 0.3)');
+            borderRadius = '0px';
+            backdropFilter = 'none';
+            filter = 'none';
+            padding = '2px 6px';
+        } else if (id === 'clay') {
+            fontFamily = 'font-serif';
+            labelColor = isSelected ? '#f97316' : (darkMode ? '#e2e8f0' : '#1e293b');
+            bg = darkMode ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.98)';
+            border = isSelected ? '1.5px solid #f97316' : (darkMode ? '1px solid #1e293b' : '1px solid #e2e8f0');
+            borderRadius = '12px';
+            filter = 'drop-shadow(0 8px 12px rgba(0, 0, 0, 0.15))';
+            padding = '4px 10px';
+        }
+
+        return {
+            fontFamily,
+            labelColor,
+            bg,
+            border,
+            borderRadius,
+            backdropFilter,
+            filter,
+            padding,
+            textTransform,
+            letterSpacing
+        };
+    }, [diagramStyle.id, isSelected, darkMode, color]);
+
     return (
         <group
             position={[posX, posY, yFloor]}
             rotation={[0, 0, -(room.rotation || 0) * Math.PI / 180]}
             onClick={(e) => { e.stopPropagation(); onSelect(); }}
         >
-            <mesh>
+            <mesh
+                key={`${diagramStyle.id}-${themeParams.transparent}`}
+                castShadow={themeParams.castShadow}
+                receiveShadow={themeParams.receiveShadow}
+            >
                 <extrudeGeometry args={[shape, { depth: heightIn3D, bevelEnabled: false }]} />
                 <meshStandardMaterial
-                    color={isLinkingSource ? '#f59e0b' : color}
-                    transparent
-                    opacity={isSelected ? 0.9 : 0.6}
-                    roughness={0.2}
-                    metalness={0.1}
+                    key={`mat-${diagramStyle.id}-${themeParams.transparent}`}
+                    color={themeParams.meshColor}
+                    transparent={themeParams.transparent}
+                    opacity={themeParams.opacity}
+                    roughness={themeParams.roughness}
+                    metalness={themeParams.metalness}
                 />
-                <Edges color={isSelected || isLinkingSource ? "#f59e0b" : "white"} threshold={15} />
+                <Edges color={themeParams.edgesColor} threshold={15} />
             </mesh>
 
             {/* Projected Label - Billboard Style */}
@@ -192,18 +276,20 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
                 pointerEvents="none"
             >
                 <div
-                    className={`flex flex-col items-center justify-center text-center select-none ${diagramStyle.fontFamily}`}
+                    className={`flex flex-col items-center justify-center text-center select-none ${labelStyle.fontFamily}`}
                     style={{
-                        color: isSelected ? '#f97316' : darkMode ? '#fff' : '#000',
+                        color: labelStyle.labelColor,
                         fontSize: `${labelFontSize}px`,
                         fontWeight: 'bold',
                         minWidth: '80px',
-                        filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.4))',
-                        background: darkMode ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)',
-                        backdropFilter: 'blur(8px)',
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        border: isSelected ? '1.5px solid #f97316' : darkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.05)',
+                        filter: labelStyle.filter,
+                        background: labelStyle.bg,
+                        backdropFilter: labelStyle.backdropFilter,
+                        padding: labelStyle.padding,
+                        borderRadius: labelStyle.borderRadius,
+                        border: labelStyle.border,
+                        textTransform: labelStyle.textTransform,
+                        letterSpacing: labelStyle.letterSpacing,
                         transform: 'translateY(-100%)'
                     }}
                 >
@@ -216,7 +302,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
     );
 }
 
-function FloorPlane({ floor, floors, darkMode, gridSize, floorGap }: { floor: Floor, floors: Floor[], darkMode: boolean, gridSize: number, floorGap: number }) {
+function FloorPlane({ floor, floors, darkMode, gridSize, floorGap, diagramStyle }: { floor: Floor, floors: Floor[], darkMode: boolean, gridSize: number, floorGap: number, diagramStyle: DiagramStyle }) {
     const y = useMemo(() => {
         let totalY = 0;
         const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
@@ -231,26 +317,44 @@ function FloorPlane({ floor, floors, darkMode, gridSize, floorGap }: { floor: Fl
     // Only render grid for ground floor
     if (floor.id !== 0) return null;
 
-    // 1m = 2 units (since height 10 = 5m). 
-    // If gridSize is 2m, sectionSize should be 4 units.
     const sectionSizeValue = gridSize * 2;
+    const id = diagramStyle.id;
+
+    let sectionColor = darkMode ? "#1e293b" : "#cbd5e1";
+    let cellSizeValue = 0;
+    let cellColor = "transparent";
+    let sectionThickness = 1.5;
+    let fadeDistance = 100;
+
+    if (id === 'blueprint') {
+        sectionColor = darkMode ? "rgba(56, 189, 248, 0.35)" : "rgba(14, 165, 233, 0.3)";
+        cellSizeValue = sectionSizeValue / 4; // fine technical grid lines
+        cellColor = darkMode ? "rgba(56, 189, 248, 0.12)" : "rgba(14, 165, 233, 0.08)";
+        sectionThickness = 1.5;
+    } else if (id === 'clay') {
+        sectionColor = darkMode ? "#2e343b" : "#e2e8f0";
+        cellSizeValue = 0;
+        sectionThickness = 1.0;
+    }
 
     return (
         <group position={[0, 0, y - 0.05]} rotation={[Math.PI / 2, 0, 0]} userData={{ isGrid: true }}>
             <Grid
-                args={[100, 100]}
+                args={[150, 150]}
                 sectionSize={sectionSizeValue}
-                sectionColor={darkMode ? "#1e293b" : "#cbd5e1"}
-                cellSize={0}
-                infiniteGrid={false}
-                fadeDistance={100}
-                sectionThickness={1.5}
+                sectionColor={sectionColor}
+                cellSize={cellSizeValue}
+                cellColor={cellColor}
+                infiniteGrid={true}
+                fadeDistance={fadeDistance}
+                sectionThickness={sectionThickness}
+                cellThickness={0.7}
             />
         </group>
     );
 }
 
-function VerticalLink({ conn, rooms, floors, darkMode, floorGap }: { conn: VerticalConnection; rooms: Room[]; floors: Floor[]; darkMode: boolean; floorGap: number }) {
+function VerticalLink({ conn, rooms, floors, darkMode, floorGap, diagramStyle }: { conn: VerticalConnection; rooms: Room[]; floors: Floor[]; darkMode: boolean; floorGap: number, diagramStyle: DiagramStyle }) {
     const fromRoom = rooms.find(r => r.id === conn.fromId);
     const toRoom = rooms.find(r => r.id === conn.toId);
 
@@ -301,14 +405,38 @@ function VerticalLink({ conn, rooms, floors, darkMode, floorGap }: { conn: Verti
     // Safety check for NaN coordinates
     if (!p1 || !p2 || p1.some(v => !Number.isFinite(v)) || p2.some(v => !Number.isFinite(v))) return null;
 
+    const styleParams = useMemo(() => {
+        const id = diagramStyle.id;
+        let color = darkMode ? "#fb923c" : "#f97316";
+        let lineWidth = 3;
+        let opacity = 0.6;
+        let dashed = false;
+
+        if (id === 'blueprint') {
+            color = darkMode ? '#38bdf8' : '#0284c7';
+            lineWidth = 2;
+            opacity = 0.8;
+            dashed = true;
+        } else if (id === 'clay') {
+            color = darkMode ? '#94a3b8' : '#64748b';
+            lineWidth = 2.5;
+            opacity = 0.5;
+            dashed = false;
+        }
+
+        return { color, lineWidth, opacity, dashed };
+    }, [diagramStyle.id, darkMode]);
+
     return (
         <Line
             points={[p1, p2]}
-            color={darkMode ? "#fb923c" : "#f97316"}
-            lineWidth={3}
+            color={styleParams.color}
+            lineWidth={styleParams.lineWidth}
             transparent
-            opacity={0.6}
-            dashed={false}
+            opacity={styleParams.opacity}
+            dashed={styleParams.dashed}
+            dashSize={0.5}
+            gapSize={0.25}
         />
     );
 }
@@ -593,6 +721,27 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
         zoom: viewState.zoom
     });
 
+    const viewBg = useMemo(() => {
+        const id = diagramStyle.id;
+        if (id === 'blueprint') {
+            return darkMode ? '#0b2b5c' : '#e0f2fe';
+        } else if (id === 'clay') {
+            return darkMode ? '#242729' : '#fcfaf2';
+        }
+        return darkMode ? '#020617' : '#f8fafc';
+    }, [diagramStyle.id, darkMode]);
+
+    const isClay = diagramStyle.id === 'clay';
+    const isBlueprint = diagramStyle.id === 'blueprint';
+
+
+    const gizmoLabelColor = useMemo(() => {
+        if (diagramStyle.id === 'blueprint') {
+            return '#bae6fd';
+        }
+        return darkMode ? '#ffffff' : '#000000';
+    }, [diagramStyle.id, darkMode]);
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
@@ -663,7 +812,7 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
     };
 
     return (
-        <div className="h-full w-full bg-[#f8fafc] dark:bg-[#020617] relative" style={{ cursor: 'default' }}>
+        <div className="h-full w-full relative transition-colors duration-500" style={{ backgroundColor: viewBg, cursor: 'default' }}>
             <Canvas
                 shadows
                 gl={{ antialias: true }}
@@ -682,12 +831,86 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                 <CameraHandler viewState={viewState} onViewStateChange={onViewStateChange} isInteracting={isInteracting} cameraVersion={cameraVersion} />
                 <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={visiblePlacedRooms} floors={floors} onFitComplete={handleFitComplete} floorGap={floorGap} />
                 <ViewStateTracker onUpdate={handleCameraUpdate} isInteracting={isInteracting} />
-                <ambientLight intensity={0.7} />
-                <pointLight position={[200, 200, 500]} intensity={1.5} castShadow />
-                <directionalLight position={[-200, -200, 400]} intensity={0.8} />
+                
+                {/* Dynamic curated lighting environments per theme */}
+                {/* Unified lighting structure to prevent Three.js shader recompilation issues (black materials) */}
+                {isClay ? (
+                    <>
+                        <ambientLight intensity={darkMode ? 0.35 : 0.55} color="#fffbf2" />
+                        <directionalLight
+                            position={[80, 120, 160]}
+                            intensity={darkMode ? 1.0 : 1.5}
+                            color="#fffaed"
+                            castShadow
+                            shadow-mapSize-width={2048}
+                            shadow-mapSize-height={2048}
+                            shadow-bias={-0.0004}
+                            shadow-camera-left={-100}
+                            shadow-camera-right={100}
+                            shadow-camera-top={100}
+                            shadow-camera-bottom={-100}
+                            shadow-camera-near={0.1}
+                            shadow-camera-far={500}
+                        />
+                        <directionalLight position={[-80, -120, -50]} intensity={darkMode ? 0.25 : 0.4} color="#e0f2fe" />
+                    </>
+                ) : isBlueprint ? (
+                    <>
+                        <ambientLight intensity={darkMode ? 0.85 : 0.9} color="#bae6fd" />
+                        <directionalLight 
+                            position={[100, 100, 200]} 
+                            intensity={darkMode ? 0.35 : 0.4} 
+                            color="#ffffff" 
+                            castShadow={false}
+                        />
+                        <directionalLight 
+                            position={[-100, -100, 100]} 
+                            intensity={darkMode ? 0.25 : 0.3} 
+                            color="#0284c7" 
+                            castShadow={false}
+                        />
+                    </>
+                ) : (
+                    <>
+                        <ambientLight intensity={0.7} color="#ffffff" />
+                        <directionalLight 
+                            position={[200, 200, 500]} 
+                            intensity={1.5} 
+                            color="#ffffff"
+                            castShadow 
+                            shadow-mapSize-width={2048}
+                            shadow-mapSize-height={2048}
+                            shadow-bias={-0.0004}
+                            shadow-camera-left={-100}
+                            shadow-camera-right={100}
+                            shadow-camera-top={100}
+                            shadow-camera-bottom={-100}
+                            shadow-camera-near={0.1}
+                            shadow-camera-far={500}
+                        />
+                        <directionalLight 
+                            position={[-200, -200, 400]} 
+                            intensity={0.8} 
+                            color="#ffffff" 
+                            castShadow={false}
+                        />
+                    </>
+                )}
+
+                {/* Plaster Ground Plane for Clay Plaster sun shadow projection */}
+                {isClay && (
+                    <mesh position={[0, 0, -0.06]} receiveShadow>
+                        <planeGeometry args={[1000, 1000]} />
+                        <meshStandardMaterial
+                            color={darkMode ? "#242729" : "#fcfaf2"}
+                            roughness={0.95}
+                            metalness={0.0}
+                        />
+                    </mesh>
+                )}
 
                 {floors.map((floor) => (
-                    !hiddenFloorIds.has(floor.id) && <FloorPlane key={floor.id} floor={floor} floors={floors} darkMode={darkMode} gridSize={gridSize} floorGap={floorGap} />
+                    !hiddenFloorIds.has(floor.id) && <FloorPlane key={floor.id} floor={floor} floors={floors} darkMode={darkMode} gridSize={gridSize} floorGap={floorGap} diagramStyle={diagramStyle} />
                 ))}
 
                 {visiblePlacedRooms.map(room => (
@@ -715,11 +938,11 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                 ))}
 
                 {verticalConnections.map(conn => (
-                    (!hiddenFloorIds.has(conn.fromFloor) && !hiddenFloorIds.has(conn.toFloor)) && <VerticalLink key={conn.id} conn={conn} rooms={rooms} floors={floors} darkMode={darkMode} floorGap={floorGap} />
+                    (!hiddenFloorIds.has(conn.fromFloor) && !hiddenFloorIds.has(conn.toFloor)) && <VerticalLink key={conn.id} conn={conn} rooms={rooms} floors={floors} darkMode={darkMode} floorGap={floorGap} diagramStyle={diagramStyle} />
                 ))}
 
                 <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-                    <GizmoViewport axisColors={['#f87171', '#4ade80', '#60a5fa']} labelColor="black" />
+                    <GizmoViewport axisColors={['#f87171', '#4ade80', '#60a5fa']} labelColor={gizmoLabelColor} />
                 </GizmoHelper>
             </Canvas>
 

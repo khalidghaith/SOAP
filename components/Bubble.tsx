@@ -29,7 +29,9 @@ interface BubbleProps {
     otherRooms?: Room[];
     isSketchMode?: boolean;
     isOverlay?: boolean;
+    darkMode?: boolean;
 }
+
 
 // area utility
 const calculatePolygonArea = (points: Point[]): number => {
@@ -171,7 +173,7 @@ const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.or
 
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay
+    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isRotating, setIsRotating] = useState(false);
@@ -207,6 +209,77 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         return key ? zoneColors[key] : zoneColors['Default'];
     };
     const visualStyle = getZoneStyle(room.zone);
+
+    const themeStyles = useMemo(() => {
+        const id = diagramStyle.id;
+        const baseBorderColor = getHexBorderForZone(room.zone, zoneColors);
+        const baseFillColor = getHexColorForZone(room.zone, zoneColors);
+
+        // Common default fallback values
+        let fill = room.style?.fill || baseFillColor;
+        let stroke = room.style?.stroke || baseBorderColor;
+        let strokeWidth = (room.style?.strokeWidth ?? appSettings.strokeWidth);
+        let strokeDasharray = room.style?.strokeDasharray ?? (diagramStyle.sketchy ? `${10 / zoomScale},${10 / zoomScale}` : "none");
+        let fillOpacity = room.style?.opacity ?? diagramStyle.opacity;
+        
+        let shadowFilter = 'none';
+        if (diagramStyle.shadow === 'shadow-md') {
+            shadowFilter = 'drop-shadow(0 4px 6px rgb(0 0 0 / 0.1))';
+        } else if (diagramStyle.shadow === 'shadow-sm') {
+            shadowFilter = 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))';
+        } else if (diagramStyle.shadow === 'shadow-lg') {
+            shadowFilter = 'drop-shadow(0 10px 8px rgb(0 0 0 / 0.04)) drop-shadow(0 4px 3px rgb(0 0 0 / 0.1))';
+        } else if (diagramStyle.shadow !== 'shadow-none') {
+            shadowFilter = 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))';
+        }
+
+        let borderRadius = room.style?.cornerRadius ?? appSettings.cornerRadius;
+        let boxShadow = '';
+        if (diagramStyle.shadow === 'shadow-sm') {
+            boxShadow = '0 1px 2px 0 rgb(0 0 0 / 0.05)';
+        } else if (diagramStyle.shadow === 'shadow-md') {
+            boxShadow = '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)';
+        } else if (diagramStyle.shadow === 'shadow-lg') {
+            boxShadow = '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)';
+        } else if (diagramStyle.shadow === 'shadow-none') {
+            boxShadow = 'none';
+        }
+
+        let textClass = `${visualStyle.text} ${diagramStyle.fontFamily}`;
+
+        if (id === 'blueprint') {
+            fill = darkMode ? 'rgba(14, 165, 233, 0.3)' : 'rgba(14, 165, 233, 0.15)';
+            fillOpacity = 1;
+            strokeWidth = 1.5;
+            borderRadius = 0;
+            stroke = baseBorderColor;
+            shadowFilter = 'none';
+            boxShadow = 'none';
+            textClass = `font-mono tracking-tight text-[10px] ${darkMode ? 'text-sky-200' : 'text-sky-950'}`;
+        } else if (id === 'clay') {
+            fill = darkMode ? '#373d43' : '#ffffff';
+            fillOpacity = 0.95;
+            strokeWidth = 3;
+            borderRadius = 16;
+            stroke = baseBorderColor;
+            shadowFilter = 'drop-shadow(0 12px 16px rgba(0, 0, 0, 0.15))';
+            boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.15)';
+            textClass = `font-serif tracking-normal font-semibold ${darkMode ? 'text-stone-200' : 'text-stone-900'}`;
+        }
+
+        return {
+            fill,
+            stroke,
+            strokeWidth: strokeWidth / zoomScale,
+            strokeDasharray,
+            fillOpacity,
+            shadowFilter,
+            borderRadius,
+            boxShadow,
+            textClass
+        };
+    }, [diagramStyle, room.zone, room.style, zoneColors, appSettings, zoomScale, darkMode, visualStyle]);
+
 
     const activePoints = useMemo(() => (room.polygon && room.polygon.length > 0) ? room.polygon : [
         { x: 0, y: 0 }, { x: room.width, y: 0 }, { x: room.width, y: room.height }, { x: 0, y: room.height }
@@ -1159,16 +1232,18 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         <svg className="overflow-visible pointer-events-none">
                             <path
                                 d={polygonPath}
-                                className={`${!room.style?.fill ? visualStyle.bg.replace(/bg-/g, 'fill-') : ''} ${!room.style?.stroke ? visualStyle.border.replace(/border-/g, 'stroke-') : ''} pointer-events-auto`}
-                                strokeWidth={(room.style?.strokeWidth ?? appSettings.strokeWidth) / zoomScale}
-                                strokeDasharray={room.style?.strokeDasharray ?? (diagramStyle.sketchy ? `${10 / zoomScale},${10 / zoomScale}` : "none")}
-                                fillOpacity={room.style?.opacity ?? diagramStyle.opacity}
-                                fill={room.style?.fill || getHexColorForZone(room.zone, zoneColors)}
-                                stroke={room.style?.stroke || getHexBorderForZone(room.zone, zoneColors)}
+                                className={`pointer-events-auto ${
+                                    ['blueprint', 'clay'].includes(diagramStyle.id)
+                                        ? ''
+                                        : `${!room.style?.fill ? visualStyle.bg.replace(/bg-/g, 'fill-') : ''} ${!room.style?.stroke ? visualStyle.border.replace(/border-/g, 'stroke-') : ''}`
+                                }`}
+                                strokeWidth={themeStyles.strokeWidth}
+                                strokeDasharray={themeStyles.strokeDasharray}
+                                fillOpacity={themeStyles.fillOpacity}
+                                fill={themeStyles.fill}
+                                stroke={themeStyles.stroke}
                                 style={{
-                                    filter: diagramStyle.shadow === 'shadow-md' ? 'drop-shadow(0 4px 6px rgb(0 0 0 / 0.1))' :
-                                        diagramStyle.shadow === 'shadow-sm' ? 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))' :
-                                            diagramStyle.shadow === 'shadow-none' ? 'none' : 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))',
+                                    filter: themeStyles.shadowFilter,
                                     transition: 'none'
                                 }}
                             />
@@ -1249,15 +1324,20 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     </div>
                 ) : (
                     <div
-                        className={`absolute top-0 left-0 overflow-hidden ${diagramStyle.shadow} ${!room.style?.fill ? visualStyle.bg : ''} ${!room.style?.stroke ? visualStyle.border : ''}`}
+                        className={`absolute top-0 left-0 overflow-hidden ${
+                            ['blueprint', 'clay'].includes(diagramStyle.id)
+                                ? ''
+                                : `${diagramStyle.shadow} ${!room.style?.fill ? visualStyle.bg : ''} ${!room.style?.stroke ? visualStyle.border : ''}`
+                        }`}
                         style={{
                             width: room.width, height: room.height,
-                            backgroundColor: room.style?.fill,
-                            borderColor: room.style?.stroke,
+                            backgroundColor: themeStyles.fill,
+                            borderColor: themeStyles.stroke,
                             borderStyle: 'solid',
-                            borderWidth: (room.style?.strokeWidth ?? appSettings.strokeWidth) / zoomScale,
-                            opacity: room.style?.opacity ?? diagramStyle.opacity,
-                            borderRadius: (room.style?.cornerRadius ?? appSettings.cornerRadius)
+                            borderWidth: themeStyles.strokeWidth,
+                            opacity: themeStyles.fillOpacity,
+                            borderRadius: themeStyles.borderRadius,
+                            boxShadow: themeStyles.boxShadow
                         }}
                     >
                         {room.style?.hatchPattern && room.style.hatchPattern !== 'none' && (
@@ -1390,7 +1470,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 MozHyphens: 'auto',
                                 msHyphens: 'auto'
                             }}
-                            className={`flex flex-col items-center w-full px-2 text-center ${visualStyle.text} ${diagramStyle.fontFamily} leading-tight select-none ${room.isTextUnlocked ? 'pointer-events-auto cursor-move' : 'pointer-events-auto'}`}
+                            className={`flex flex-col items-center w-full px-2 text-center ${themeStyles.textClass} leading-tight select-none ${room.isTextUnlocked ? 'pointer-events-auto cursor-move' : 'pointer-events-auto'}`}
                         >
                             <div className="font-bold w-full">
                                 {wrappedNameLines.map((line, i) => (

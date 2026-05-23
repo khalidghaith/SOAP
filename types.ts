@@ -97,36 +97,25 @@ export const DIAGRAM_STYLES: DiagramStyle[] = [
     colorMode: 'default'
   },
   {
-    id: 'minimal',
-    name: 'Minimal',
-    fontFamily: 'font-sans font-light',
-    cornerRadius: 'rounded-sm',
-    borderWidth: 1,
-    opacity: 0.8,
-    sketchy: false,
-    shadow: 'shadow-none',
-    colorMode: 'default'
-  },
-  {
-    id: 'sketchy',
-    name: 'Sketchy',
-    fontFamily: 'font-sans',
-    cornerRadius: 'rounded-[255px_15px_225px_15px/15px_225px_15px_255px]',
-    borderWidth: 2,
-    opacity: 0.9,
-    sketchy: true,
-    shadow: 'shadow-md',
-    colorMode: 'pastel'
-  },
-  {
-    id: 'monochrome',
-    name: 'Technical',
-    fontFamily: 'font-sans tracking-tight',
+    id: 'blueprint',
+    name: 'Blueprint',
+    fontFamily: 'font-mono text-[10px] tracking-tight',
     cornerRadius: 'rounded-none',
-    borderWidth: 1,
-    opacity: 1,
+    borderWidth: 1.5,
+    opacity: 0.85,
     sketchy: false,
     shadow: 'shadow-none',
+    colorMode: 'monochrome'
+  },
+  {
+    id: 'clay',
+    name: 'Clay Plaster',
+    fontFamily: 'font-serif tracking-normal font-semibold',
+    cornerRadius: 'rounded-[16px]',
+    borderWidth: 3,
+    opacity: 0.95,
+    sketchy: false,
+    shadow: 'shadow-lg',
     colorMode: 'monochrome'
   }
 ];
