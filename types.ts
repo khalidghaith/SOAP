@@ -153,6 +153,8 @@ export interface AppSettings {
   snapToGrid: boolean;
   snapToObjects: boolean;
   snapWhileScaling: boolean;
+  volumesOpacity?: number;
+  colorSaturation?: number;
 }
 
 export type AnnotationType = 'line' | 'polyline' | 'arc' | 'bezier' | 'text' | 'rect' | 'circle' | 'arrow';

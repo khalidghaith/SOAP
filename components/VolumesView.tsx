@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { OBJExporter } from 'three-stdlib';
 import { Room, Floor, ZoneColor, VerticalConnection, ZONE_COLORS, AppSettings, DiagramStyle } from '../types';
 import { Maximize } from 'lucide-react';
-import { getHexColorForZone } from '../utils/exportSystem';
+import { getHexColorForZone, getHexBorderForZone } from '../utils/exportSystem';
 
 interface VolumesViewProps {
     rooms: Room[];
@@ -35,6 +35,7 @@ interface VolumesViewProps {
     hiddenFloorIds: Set<number>;
     showLabels: boolean;
     labelFontSize: number;
+    showGrid?: boolean;
 }
 
 export interface VolumesViewHandle {
@@ -177,19 +178,68 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             castShadow = false;
             receiveShadow = false;
         } else if (id === 'clay') {
-            meshColor = darkMode ? '#373d43' : '#ffffff';
+            meshColor = '#c05c46';
             opacity = 1.0;
             transparent = false;
             roughness = 0.95;
             metalness = 0.0;
-            edgesColor = isSelected || isLinkingSource ? "#f59e0b" : (darkMode ? '#1e293b' : '#cbd5e1');
-            castShadow = true;
-            receiveShadow = true;
+            edgesColor = isSelected || isLinkingSource ? "#f59e0b" : (darkMode ? '#000000' : '#ffffff');
+            castShadow = false;
+            receiveShadow = false;
+        }
+
+        // Apply visual sliders
+        let finalOpacity = opacity;
+        if (appSettings.volumesOpacity !== undefined) {
+            if (id === 'clay') {
+                finalOpacity = appSettings.volumesOpacity;
+            } else if (id === 'blueprint') {
+                finalOpacity = isSelected ? Math.min(1.0, appSettings.volumesOpacity * 1.3) : appSettings.volumesOpacity * 0.75;
+            } else {
+                finalOpacity = isSelected ? Math.min(1.0, appSettings.volumesOpacity * 1.5) : appSettings.volumesOpacity;
+            }
+        }
+        transparent = finalOpacity < 1.0;
+
+        let finalMeshColor = meshColor;
+        if (id === 'standard' && !isLinkingSource) {
+            const sat = appSettings.colorSaturation ?? 1.0;
+            const color1 = new THREE.Color(color);
+            const color2 = new THREE.Color(getHexBorderForZone(room.zone, zoneColors));
+            
+            if (sat >= 0.5) {
+                // Lerp between pale pastel color (at sat = 0.5) and rich color (at sat = 1.0)
+                const t = (sat - 0.5) / 0.5;
+                color1.lerp(color2, t);
+                finalMeshColor = '#' + color1.getHexString();
+            } else {
+                // Lerp between grayscale color (at sat = 0.0) and pale pastel color (at sat = 0.5)
+                const t = sat / 0.5;
+                const grayscaleColor = color1.clone();
+                const hsl = { h: 0, s: 0, l: 0 };
+                grayscaleColor.getHSL(hsl);
+                grayscaleColor.setHSL(hsl.h, 0, hsl.l);
+                grayscaleColor.lerp(color1, t);
+                finalMeshColor = '#' + grayscaleColor.getHexString();
+            }
+        } else {
+            if (appSettings.colorSaturation !== undefined && appSettings.colorSaturation !== 1.0) {
+                try {
+                    const cObj = new THREE.Color(meshColor);
+                    const hsl = { h: 0, s: 0, l: 0 };
+                    cObj.getHSL(hsl);
+                    hsl.s = Math.min(1.0, Math.max(0.0, hsl.s * appSettings.colorSaturation));
+                    cObj.setHSL(hsl.h, hsl.s, hsl.l);
+                    finalMeshColor = '#' + cObj.getHexString();
+                } catch (err) {
+                    console.error("Error manipulating color saturation:", err);
+                }
+            }
         }
 
         return {
-            meshColor,
-            opacity,
+            meshColor: finalMeshColor,
+            opacity: finalOpacity,
             transparent,
             roughness,
             metalness,
@@ -197,11 +247,11 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             castShadow,
             receiveShadow
         };
-    }, [diagramStyle.id, color, isSelected, isLinkingSource, darkMode]);
+    }, [diagramStyle.id, color, room.zone, zoneColors, isSelected, isLinkingSource, darkMode, appSettings.volumesOpacity, appSettings.colorSaturation]);
 
     const labelStyle = useMemo(() => {
         const id = diagramStyle.id;
-        let fontFamily = diagramStyle.fontFamily;
+        let fontFamily = 'font-sans';
         let labelColor = isSelected ? '#f97316' : darkMode ? '#fff' : '#000';
         let bg = darkMode ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)';
         let border = isSelected ? '1.5px solid #f97316' : darkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.05)';
@@ -221,14 +271,6 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             backdropFilter = 'none';
             filter = 'none';
             padding = '2px 6px';
-        } else if (id === 'clay') {
-            fontFamily = 'font-serif';
-            labelColor = isSelected ? '#f97316' : (darkMode ? '#e2e8f0' : '#1e293b');
-            bg = darkMode ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.98)';
-            border = isSelected ? '1.5px solid #f97316' : (darkMode ? '1px solid #1e293b' : '1px solid #e2e8f0');
-            borderRadius = '12px';
-            filter = 'drop-shadow(0 8px 12px rgba(0, 0, 0, 0.15))';
-            padding = '4px 10px';
         }
 
         return {
@@ -702,7 +744,7 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
     rooms, floors, verticalConnections, zoneColors, pixelsPerMeter,
     connectionSourceId, onLinkToggle, appSettings, diagramStyle,
     selectedRoomIds, onRoomSelect, darkMode, gridSize, active, floorGap, hiddenFloorIds, showLabels, labelFontSize,
-    viewState, onViewStateChange, cameraVersion
+    viewState, onViewStateChange, cameraVersion, showGrid = true
 }: VolumesViewProps, ref) => {
     const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0);
     const visiblePlacedRooms = useMemo(() => rooms.filter(r => r.isPlaced && !hiddenFloorIds.has(r.floor)), [rooms, hiddenFloorIds]);
@@ -841,7 +883,7 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                             position={[80, 120, 160]}
                             intensity={darkMode ? 1.0 : 1.5}
                             color="#fffaed"
-                            castShadow
+                            castShadow={false}
                             shadow-mapSize-width={2048}
                             shadow-mapSize-height={2048}
                             shadow-bias={-0.0004}
@@ -899,7 +941,7 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
 
                 {/* Plaster Ground Plane for Clay Plaster sun shadow projection */}
                 {isClay && (
-                    <mesh position={[0, 0, -0.06]} receiveShadow>
+                    <mesh position={[0, 0, -0.06]} receiveShadow={false}>
                         <planeGeometry args={[1000, 1000]} />
                         <meshStandardMaterial
                             color={darkMode ? "#242729" : "#fcfaf2"}
@@ -909,7 +951,7 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                     </mesh>
                 )}
 
-                {floors.map((floor) => (
+                {showGrid && floors.map((floor) => (
                     !hiddenFloorIds.has(floor.id) && <FloorPlane key={floor.id} floor={floor} floors={floors} darkMode={darkMode} gridSize={gridSize} floorGap={floorGap} diagramStyle={diagramStyle} />
                 ))}
 
@@ -958,27 +1000,6 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                 </div>
             </div>
 
-            <div className="absolute top-6 left-6 pointer-events-none flex flex-col gap-4">
-                <div className="bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md p-4 rounded-3xl border border-slate-200 dark:border-dark-border shadow-2xl animate-in fade-in slide-in-from-left-4 pointer-events-auto">
-                    <div className="flex justify-between items-center mb-3">
-                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">View Orientation</h3>
-                    </div>
-                    <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-2xl">
-                        <button
-                            onClick={() => handleViewTypeChange('perspective')}
-                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewState.viewType === 'perspective' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
-                        >
-                            Perspective
-                        </button>
-                        <button
-                            onClick={() => handleViewTypeChange('isometric')}
-                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewState.viewType === 'isometric' ? 'bg-white dark:bg-dark-surface shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700 dark:text-gray-400'}`}
-                        >
-                            Isometric
-                        </button>
-                    </div>
-                </div>
-            </div>
 
             {connectionSourceId && (
                 <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">

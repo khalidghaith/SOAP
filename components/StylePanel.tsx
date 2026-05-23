@@ -1,14 +1,17 @@
 import React from 'react';
 import { X, Palette, LayoutTemplate, Square, PencilRuler, Settings2, Box, Layers, Eye } from 'lucide-react';
-import { DIAGRAM_STYLES, DiagramStyle } from '../types';
+import { DIAGRAM_STYLES, DiagramStyle, AppSettings } from '../types';
 
 interface StylePanelProps {
     currentStyle: DiagramStyle;
     onStyleSelect: (style: DiagramStyle) => void;
     onClose: () => void;
+    settings: AppSettings;
+    onUpdateSettings: (settings: AppSettings) => void;
+    viewMode: 'CANVAS' | 'VOLUMES' | 'EDITOR';
 }
 
-export function StylePanel({ currentStyle, onStyleSelect, onClose }: StylePanelProps) {
+export function StylePanel({ currentStyle, onStyleSelect, onClose, settings, onUpdateSettings, viewMode }: StylePanelProps) {
     const styleDescriptions: Record<string, { desc: string; icon: React.ReactNode; bg: string; border: string }> = {
         standard: {
             desc: 'Clean vectors with standard functional zoning fills.',
@@ -30,9 +33,13 @@ export function StylePanel({ currentStyle, onStyleSelect, onClose }: StylePanelP
         }
     };
 
+    const handleSettingChange = (key: keyof AppSettings, value: number | boolean) => {
+        onUpdateSettings({ ...settings, [key]: value });
+    };
+
     return (
         <div
-            className="glass-panel p-4 rounded-3xl shadow-2xl flex flex-col gap-3 w-80 border border-white/20 dark:border-white/10 backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 z-[190] absolute top-0 left-0 max-h-[80vh] overflow-y-auto animate-in fade-in slide-in-from-left-4 duration-300"
+            className="glass-panel p-4 rounded-3xl shadow-2xl flex flex-col gap-4 w-80 border border-white/20 dark:border-white/10 backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 z-[190] absolute top-0 left-0 max-h-[85vh] overflow-y-auto animate-in fade-in slide-in-from-left-4 duration-300 custom-scrollbar"
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
         >
@@ -102,6 +109,129 @@ export function StylePanel({ currentStyle, onStyleSelect, onClose }: StylePanelP
                     );
                 })}
             </div>
+
+            {/* Premium Divider */}
+            <div className="h-px bg-slate-200/55 dark:bg-white/10 my-0.5" />
+
+            {/* Visual Sliders Section */}
+            <div className="flex flex-col gap-3.5 pb-1">
+                <div>
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-gray-500">Appearance Settings</h4>
+                    <p className="text-[9px] text-slate-400 dark:text-gray-500 font-medium leading-none mt-1">
+                        {viewMode === 'VOLUMES' ? 'Tune 3D volume transparency and saturation' : 'Tune visual outlines and space attributes'}
+                    </p>
+                </div>
+
+                <div className="space-y-3.5">
+                    {viewMode === 'VOLUMES' ? (
+                        <>
+                            {/* Volume Opacity */}
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-[11px] font-bold text-slate-700 dark:text-gray-300">
+                                    <span>Volume Opacity</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{((settings.volumesOpacity ?? 0.6) * 100).toFixed(0)}%</span>
+                                </div>
+                                <input 
+                                    type="range" min="0" max="1" step="0.05" 
+                                    value={settings.volumesOpacity ?? 0.6} 
+                                    onChange={(e) => handleSettingChange('volumesOpacity', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                            </div>
+
+                            {/* Color Saturation */}
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-[11px] font-bold text-slate-700 dark:text-gray-300">
+                                    <span>Color Saturation</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{((settings.colorSaturation ?? 1.0) * 100).toFixed(0)}%</span>
+                                </div>
+                                <input 
+                                    type="range" min="0" max="1" step="0.05" 
+                                    value={settings.colorSaturation ?? 1.0} 
+                                    onChange={(e) => handleSettingChange('colorSaturation', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                                <p className="text-[9px] text-slate-400 dark:text-gray-500 font-medium leading-normal mt-1">
+                                    Adjust to monochrome (0%), pale pastel (50%), or rich vibrant colors (100%).
+                                </p>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            {/* Zone Transparency */}
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-[11px] font-bold text-slate-700 dark:text-gray-300">
+                                    <span>Zone Transparency</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{(settings.zoneTransparency * 100).toFixed(0)}%</span>
+                                </div>
+                                <input 
+                                    type="range" min="0" max="1" step="0.05" 
+                                    value={settings.zoneTransparency} 
+                                    onChange={(e) => handleSettingChange('zoneTransparency', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                            </div>
+
+                            {/* Zone Padding */}
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-[11px] font-bold text-slate-700 dark:text-gray-300">
+                                    <span>Zone Padding</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{settings.zonePadding}px</span>
+                                </div>
+                                <input 
+                                    type="range" min="0" max="100" step="1" 
+                                    value={settings.zonePadding} 
+                                    onChange={(e) => handleSettingChange('zonePadding', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                            </div>
+
+                            {/* Stroke Width */}
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-[11px] font-bold text-slate-700 dark:text-gray-300">
+                                    <span>Stroke Width</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{settings.strokeWidth}px</span>
+                                </div>
+                                <input 
+                                    type="range" min="1" max="10" step="0.5" 
+                                    value={settings.strokeWidth} 
+                                    onChange={(e) => handleSettingChange('strokeWidth', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                            </div>
+
+                            {/* Corner Radius */}
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-[11px] font-bold text-slate-700 dark:text-gray-300">
+                                    <span>Corner Radius</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{settings.cornerRadius}px</span>
+                                </div>
+                                <input 
+                                    type="range" min="0" max="50" step="1" 
+                                    value={settings.cornerRadius} 
+                                    onChange={(e) => handleSettingChange('cornerRadius', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                            </div>
+
+                            {/* Font Size (Base) */}
+                            <div className="space-y-1.5">
+                                <div className="flex justify-between text-[11px] font-bold text-slate-700 dark:text-gray-300">
+                                    <span>Font Size (Base)</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{settings.fontSize}px</span>
+                                </div>
+                                <input 
+                                    type="range" min="4" max="24" step="1" 
+                                    value={settings.fontSize} 
+                                    onChange={(e) => handleSettingChange('fontSize', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
+
