@@ -1,11 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { Room, ZoneColor } from '../types';
+import { Room, ZoneColor, Floor, AppSettings, DEFAULT_STAIR_PARAMS, VCType } from '../types';
 import {
     X, Search, Trash2, LayoutGrid,
     ChevronDown, ChevronRight, ChevronLeft, Plus, Wand2, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { ApiKeyModal } from './ApiKeyModal';
 import { analyzeProgram } from '../services/geminiService';
+import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
+import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
+import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
+
 
 interface ProgramEditorProps {
     rooms: Room[];
@@ -14,10 +18,13 @@ interface ProgramEditorProps {
     addRoom: (room: Partial<Room>) => void;
     apiKey: string;
     onSaveApiKey: (key: string) => void;
-    setRooms: (rooms: Room[]) => void;
+    setRooms: React.Dispatch<React.SetStateAction<Room[]>>;
     zoneColors: Record<string, ZoneColor>;
     onAddZone: (name: string) => void;
     onInteractionStart?: () => void;
+    floors: Floor[];
+    appSettings: AppSettings;
+    onUpdateSettings: (updates: Partial<AppSettings>) => void;
 }
 
 function escapeRegExp(string: string) {
@@ -60,7 +67,7 @@ const NameInput = ({ value, onChange, onFocus, highlight, placeholder }: any) =>
 };
 
 export const ProgramEditor: React.FC<ProgramEditorProps> = ({
-    rooms, updateRoom, deleteRoom, addRoom, apiKey, onSaveApiKey, setRooms, zoneColors, onAddZone, onInteractionStart
+    rooms, updateRoom, deleteRoom, addRoom, apiKey, onSaveApiKey, setRooms, zoneColors, onAddZone, onInteractionStart, floors, appSettings, onUpdateSettings
 }) => {
     const [showAiModal, setShowAiModal] = useState(false);
     const [aiPrompt, setAiPrompt] = useState("");
@@ -204,6 +211,18 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                             <button onClick={() => addRoom({ name: 'New Space', area: 15, zone: 'Default' })} className="h-8 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border text-slate-700 dark:text-gray-300 rounded-lg text-[10px] font-black hover:border-orange-500 hover:text-orange-600 flex items-center gap-2 uppercase tracking-widest shadow-sm">
                                 <Plus size={16} /> Add Space
                             </button>
+                            <button onClick={() => addRoom({
+                                name: 'Stair',
+                                area: 8,
+                                zone: 'Circulation',
+                                spaceType: 'verticalConnection',
+                                vcType: 'stair' as VCType,
+                                vcFromFloor: Math.min(...floors.map(f => f.id)),
+                                vcToFloor: Math.max(...floors.map(f => f.id)),
+                                stairParams: { ...DEFAULT_STAIR_PARAMS },
+                            })} className="h-8 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-dark-border text-slate-700 dark:text-gray-300 rounded-lg text-[10px] font-black hover:border-orange-500 hover:text-orange-600 flex items-center gap-2 uppercase tracking-widest shadow-sm">
+                                <ArrowUpDown size={16} /> Add VC
+                            </button>
                         </div>
                     </div>
 
@@ -330,6 +349,57 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                             <span>Total Area: {Number(totalArea.toFixed(2))} m²</span>
                         </div>
                     </div>
+
+                    {/* Vertical Connections Section */}
+                    {(() => {
+                        const vcRooms = rooms.filter(r => r.spaceType === 'verticalConnection');
+                        if (vcRooms.length === 0) return null;
+                        return (
+                            <div className="mt-4 bg-white dark:bg-dark-surface rounded-2xl shadow-sm border border-slate-200 dark:border-dark-border overflow-hidden">
+                                <div className="bg-slate-50 dark:bg-white/5 px-4 py-3 border-b border-slate-200 dark:border-dark-border flex justify-between items-center">
+                                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                        <ArrowUpDown size={12} /> Vertical Connections
+                                    </h3>
+                                    <span className="text-[10px] font-bold text-slate-400">{vcRooms.length}</span>
+                                </div>
+                                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {vcRooms.map(vc => {
+                                        const fromFloor = floors.find(f => f.id === (vc.vcFromFloor ?? Math.min(...floors.map(f => f.id))));
+                                        const toFloor = floors.find(f => f.id === (vc.vcToFloor ?? Math.max(...floors.map(f => f.id))));
+                                        return (
+                                            <div key={vc.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-white/5 group">
+                                                <div 
+                                                    className="w-4 h-4 flex items-center justify-center text-slate-400 dark:text-gray-500 shrink-0"
+                                                    dangerouslySetInnerHTML={{
+                                                        __html: (vc.vcType === 'stair' ? stairSvgRaw : vc.vcType === 'elevator' ? elevatorSvgRaw : rampSvgRaw)
+                                                            .replaceAll('stroke:black', 'stroke:currentColor')
+                                                            .replaceAll('stroke:#000000', 'stroke:currentColor')
+                                                            .replaceAll('fill:black', 'fill:currentColor')
+                                                    }}
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <input
+                                                        className="w-full bg-transparent font-bold text-slate-700 dark:text-gray-200 text-sm focus:outline-none focus:text-orange-600 border-b border-transparent focus:border-orange-500/20"
+                                                        value={vc.name}
+                                                        onChange={(e) => updateRoom(vc.id, { name: e.target.value })}
+                                                    />
+                                                </div>
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                                                    {fromFloor?.label || '?'} → {toFloor?.label || '?'}
+                                                </span>
+                                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                                                    {vc.stairParams?.config || '—'}
+                                                </span>
+                                                <button onClick={() => deleteRoom(vc.id)} className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100">
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
 
@@ -347,26 +417,112 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                             </button>
                         </div>
 
-                        {/* Stats Cards */}
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
-                                <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Gross (x1.3)</span>
-                                <span className="text-base font-black text-slate-700 dark:text-gray-200">{Number(((totalArea as number) * 1.3).toFixed(2))} m²</span>
-                            </div>
-                            <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
-                                <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Count</span>
-                                <span className="text-base font-black text-orange-600">{rooms.length}</span>
-                            </div>
-                        </div>
+                        {/* Area Breakdown */}
+                        {(() => {
+                            const netRooms = rooms.filter(r => !r.spaceType || r.spaceType === 'standard' || r.spaceType === 'multistory');
+                            const vcRooms = rooms.filter(r => r.spaceType === 'verticalConnection');
+                            const outdoorRooms = rooms.filter(r => r.spaceType === 'outdoor');
+                            const terraceRooms = rooms.filter(r => r.spaceType === 'terrace');
 
-                        {/* Net Area Circle */}
-                        <div className="flex flex-col items-center justify-center py-4">
-                            <div className="w-32 h-32 rounded-full border-[8px] border-slate-50 dark:border-white/5 flex flex-col items-center justify-center shadow-inner bg-white dark:bg-dark-surface relative">
-                                <div className="absolute inset-0 rounded-full border border-slate-200 dark:border-white/10" />
-                                <span className="text-2xl font-black text-slate-800 dark:text-gray-100 tracking-tight">{Number(totalArea.toFixed(2))}</span>
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Net m²</span>
-                            </div>
-                        </div>
+                            const netArea = netRooms.reduce((s, r) => s + r.area, 0);
+                            const vcArea = vcRooms.reduce((s, r) => s + r.area, 0);
+                            const outdoorArea = outdoorRooms.reduce((s, r) => s + r.area, 0);
+                            const terraceArea = terraceRooms.reduce((s, r) => s + r.area, 0);
+
+                            const terraceFactor = appSettings.terraceAreaFactor ?? 0.5;
+                            const includeTerraceInGFA = appSettings.includeTerraceInGFA ?? false;
+
+                            const gfa = netArea + vcArea + (includeTerraceInGFA ? terraceArea * terraceFactor : 0);
+                            const totalAll = netArea + vcArea + outdoorArea + terraceArea;
+
+                            return (
+                                <>
+                                    {/* Stats Cards */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
+                                            <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">GFA</span>
+                                            <span className="text-base font-black text-slate-700 dark:text-gray-200">{Number(gfa.toFixed(2))} m²</span>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-dark-border">
+                                            <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Count</span>
+                                            <span className="text-base font-black text-orange-600">{rooms.length}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Net Area Circle */}
+                                    <div className="flex flex-col items-center justify-center py-4">
+                                        <div className="w-32 h-32 rounded-full border-[8px] border-slate-50 dark:border-white/5 flex flex-col items-center justify-center shadow-inner bg-white dark:bg-dark-surface relative">
+                                            <div className="absolute inset-0 rounded-full border border-slate-200 dark:border-white/10" />
+                                            <span className="text-2xl font-black text-slate-800 dark:text-gray-100 tracking-tight">{Number(netArea.toFixed(2))}</span>
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Net m²</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Area Breakdown Detail */}
+                                    <div>
+                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Area Breakdown</h3>
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between items-center py-1.5 px-2 rounded-lg">
+                                                <span className="text-xs font-bold text-slate-600 dark:text-gray-300">Net Area</span>
+                                                <span className="text-xs font-black text-slate-700 dark:text-gray-200">{Number(netArea.toFixed(2))} m²</span>
+                                            </div>
+                                            <div className="flex justify-between items-center py-1.5 px-2 rounded-lg">
+                                                <span className="text-xs font-bold text-slate-600 dark:text-gray-300">Circulation (VC)</span>
+                                                <span className="text-xs font-black text-slate-700 dark:text-gray-200">{Number(vcArea.toFixed(2))} m²</span>
+                                            </div>
+                                            <div className="flex justify-between items-center py-1.5 px-2 rounded-lg">
+                                                <span className="text-xs font-bold text-slate-600 dark:text-gray-300">Outdoor</span>
+                                                <span className="text-xs font-black text-slate-400">{Number(outdoorArea.toFixed(2))} m²</span>
+                                            </div>
+                                            <div className="flex justify-between items-center py-1.5 px-2 rounded-lg">
+                                                <span className="text-xs font-bold text-slate-600 dark:text-gray-300">Terrace</span>
+                                                <span className="text-xs font-black text-slate-400">{Number(terraceArea.toFixed(2))} m² {includeTerraceInGFA ? `(×${terraceFactor})` : ''}</span>
+                                            </div>
+                                            <div className="border-t border-slate-100 dark:border-dark-border pt-2 mt-2">
+                                                <div className="flex justify-between items-center py-1.5 px-2">
+                                                    <span className="text-xs font-black text-orange-600 uppercase">GFA</span>
+                                                    <span className="text-sm font-black text-orange-600">{Number(gfa.toFixed(2))} m²</span>
+                                                </div>
+                                                <div className="flex justify-between items-center py-1.5 px-2">
+                                                    <span className="text-xs font-bold text-slate-400">Total (all)</span>
+                                                    <span className="text-xs font-bold text-slate-400">{Number(totalAll.toFixed(2))} m²</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Terrace Factor Toggle */}
+                                    <div className="bg-slate-50 dark:bg-white/5 rounded-xl p-3 border border-slate-100 dark:border-dark-border space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Include terrace in GFA</span>
+                                            <button
+                                                onClick={() => onUpdateSettings({ includeTerraceInGFA: !includeTerraceInGFA })}
+                                                className={`w-8 h-4.5 rounded-full transition-colors relative ${includeTerraceInGFA ? 'bg-orange-500' : 'bg-slate-200 dark:bg-white/10'}`}
+                                            >
+                                                <div className={`w-3.5 h-3.5 rounded-full bg-white shadow absolute top-0.5 transition-transform ${includeTerraceInGFA ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                                            </button>
+                                        </div>
+                                        {includeTerraceInGFA && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[9px] font-bold text-slate-400">Terrace Factor</span>
+                                                <div className="flex items-center gap-1">
+                                                    <span className="text-[9px] text-slate-400">×</span>
+                                                    <input
+                                                        type="number"
+                                                        step="0.1"
+                                                        min="0"
+                                                        max="1"
+                                                        value={terraceFactor}
+                                                        onChange={(e) => onUpdateSettings({ terraceAreaFactor: parseFloat(e.target.value) || 0.5 })}
+                                                        className="w-12 text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-md p-1 text-center focus:outline-none focus:border-orange-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            );
+                        })()}
 
                         {/* Zone Distribution */}
                         <div>

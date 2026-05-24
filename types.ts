@@ -15,6 +15,24 @@ export interface RoomStyle {
   hatchColor?: string;
 }
 
+export type SpaceType = 'standard' | 'outdoor' | 'terrace' | 'multistory' | 'verticalConnection';
+export type VCType = 'stair' | 'elevator' | 'ramp';
+export type StairConfig = 'straight' | 'l-shaped' | 'u-shaped' | 'spiral';
+
+export interface StairParams {
+  width: number;        // meters (default 1.2)
+  treadDepth: number;   // meters (default 0.28)
+  riserHeight: number;  // meters (default 0.17)
+  config: StairConfig;  // stair configuration type
+}
+
+export const DEFAULT_STAIR_PARAMS: StairParams = {
+  width: 1.2,
+  treadDepth: 0.28,
+  riserHeight: 0.17,
+  config: 'straight',
+};
+
 export interface Room {
   id: string;
   name: string;
@@ -38,6 +56,14 @@ export interface Room {
   isTextUnlocked?: boolean;
   textPos?: Point;
   depth?: number;
+
+  // Space Type
+  spaceType?: SpaceType;       // default 'standard'
+  spanFloors?: number;         // for 'multistory' — how many floors it spans (default 2)
+  vcType?: VCType;             // for 'verticalConnection'
+  vcFromFloor?: number;        // for VC — starting floor (defaults to lowest floor)
+  vcToFloor?: number;          // for VC — ending floor (defaults to highest floor)
+  stairParams?: StairParams;   // for VC type 'stair'
 }
 
 export interface ZoneColor {
@@ -160,6 +186,8 @@ export interface AppSettings {
   magnetPadding?: number;
   layerPrefix?: string;
   exportGrid?: boolean;
+  terraceAreaFactor?: number;    // default 0.5
+  includeTerraceInGFA?: boolean; // default false
 }
 
 export type AnnotationType = 'line' | 'polyline' | 'arc' | 'bezier' | 'text' | 'rect' | 'circle' | 'arrow';

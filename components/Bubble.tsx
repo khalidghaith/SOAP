@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Room, Point, DiagramStyle, AppSettings, ZoneColor } from '../types';
+import { Room, Point, DiagramStyle, AppSettings, ZoneColor, SpaceType } from '../types';
 import { Link as LinkIcon } from 'lucide-react';
 import { createRoundedPath } from '../utils/geometry';
 import { wrapText, getHexColorForZone, getHexBorderForZone } from '../utils/exportSystem';
-
+import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
+import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
+import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
 
 interface BubbleProps {
     room: Room;
@@ -300,6 +302,16 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             textClass = `font-sans tracking-normal font-semibold ${darkMode ? 'text-stone-200' : 'text-stone-900'}`;
         }
 
+        // Space type overrides
+        const st = room.spaceType || 'standard';
+        if (st === 'outdoor') {
+            strokeDasharray = `${8 / zoomScale},${6 / zoomScale}`;
+            fillOpacity = Math.min(fillOpacity, 0.25);
+        } else if (st === 'terrace') {
+            strokeDasharray = `${3 / zoomScale},${3 / zoomScale}`;
+            fillOpacity = Math.min(fillOpacity, 0.35);
+        }
+
         return {
             fill,
             stroke,
@@ -311,7 +323,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             boxShadow,
             textClass
         };
-    }, [diagramStyle, room.zone, room.style, zoneColors, appSettings, zoomScale, darkMode, visualStyle]);
+    }, [diagramStyle, room.zone, room.style, room.spaceType, zoneColors, appSettings, zoomScale, darkMode, visualStyle]);
 
 
     const activePoints = useMemo(() => (room.polygon && room.polygon.length > 0) ? room.polygon : [
@@ -1533,6 +1545,43 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         </div>
                     </div>
                 </div>
+
+                {/* Vertical Connection Symbol Overlay */}
+                {room.spaceType === 'verticalConnection' && (() => {
+                    const isPoly = room.polygon || room.shape === 'bubble';
+                    const symW = isPoly ? bounds.width : room.width;
+                    const symH = isPoly ? bounds.height : room.height;
+                    const symX = isPoly ? centroid.x - bounds.width / 2 : 0;
+                    const symY = isPoly ? centroid.y - bounds.height / 2 : 0;
+                    const vcType = room.vcType || 'stair';
+                    const symbolColor = themeStyles.stroke;
+
+                    const rawSvg = vcType === 'stair' ? stairSvgRaw : vcType === 'elevator' ? elevatorSvgRaw : rampSvgRaw;
+                    const processedSvg = rawSvg
+                        .replaceAll('stroke:black', 'stroke:currentColor')
+                        .replaceAll('stroke:#000000', 'stroke:currentColor')
+                        .replaceAll('fill:black', 'fill:currentColor');
+
+                    const size = Math.min(symW, symH) * 0.7;
+                    const left = symX + (symW - size) / 2;
+                    const top = symY + (symH - size) / 2;
+
+                    return (
+                        <div
+                            className="absolute pointer-events-none flex items-center justify-center"
+                            style={{
+                                left,
+                                top,
+                                width: size,
+                                height: size,
+                                color: symbolColor,
+                                opacity: 0.18,
+                                zIndex: 0
+                            }}
+                            dangerouslySetInnerHTML={{ __html: processedSvg }}
+                        />
+                    );
+                })()}
             </div>
 
             {/* Rotation Tooltip */}

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection } from './types';
+import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection, SpaceType, VCType, StairConfig, DEFAULT_STAIR_PARAMS, ZoningTypology } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { HelpModal } from './components/HelpModal';
@@ -19,7 +19,8 @@ import {
     TableProperties, Hexagon, Circle, Square,
     PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock,
     Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
-    Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, Shapes
+    Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, Shapes,
+    TreePine, Building2, Home, ArrowUpDown
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
@@ -31,6 +32,10 @@ import { SnapPanel } from './components/SnapPanel';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
 import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
+import stairSvgRaw from './lib/symbols/stairs.svg?raw';
+import elevatorSvgRaw from './lib/symbols/Elevator.svg?raw';
+import rampSvgRaw from './lib/symbols/Ramp.svg?raw';
+
 import * as htmlToImage from 'html-to-image';
 import { analyzeProgram, generateSpatialLayout } from './services/geminiService';
 
@@ -162,6 +167,9 @@ const getRoomVertices = (room: Room): Point[] => {
         });
     }
 };
+
+
+
 
 const ZonesIcon: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className = '', ...props }) => (
     <div
@@ -591,6 +599,8 @@ export default function App() {
             gridPattern: 'solid'
         };
     }, [canvasStyle.id, darkMode]);
+
+
 
     // Debounced Auto-save
     useEffect(() => {
@@ -1514,10 +1524,8 @@ export default function App() {
         setRooms(prev => prev.map(r => {
             if (r.id !== id) return r;
 
-            const updatedRoom = { ...r, ...updates };
+            let updatedRoom = { ...r, ...updates };
 
-            // Auto-resize bubble if Area changes without explicit dimension updates
-            // Only applies to standard bubbles (no polygon)
             if (updates.area !== undefined &&
                 updates.width === undefined &&
                 updates.height === undefined &&
@@ -1532,6 +1540,7 @@ export default function App() {
             return updatedRoom;
         }));
     }, []);
+
 
     const handleMoveRoom = useCallback((id: string, x: number, y: number) => {
         setRooms(prev => {
@@ -2454,6 +2463,9 @@ export default function App() {
                             zoneColors={zoneColors}
                             onAddZone={handleAddZone}
                             onInteractionStart={addToHistory}
+                            floors={floors}
+                            appSettings={appSettings}
+                            onUpdateSettings={(updates) => setAppSettings(prev => ({ ...prev, ...updates }))}
                         />
                     </div>
 
@@ -3302,6 +3314,141 @@ export default function App() {
                                                     <button onClick={() => handleConvertShape('bubble')} className={`flex-1 flex items-center justify-center py-2 rounded-lg ${(!isMultiSelection && selectedRoom?.shape === 'bubble') || (isMultiSelection && multiSelectionStats?.commonShape === 'bubble') ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600' : 'text-slate-400 hover:text-slate-600'}`} title="Bubble"><Circle size={16} /></button>
                                                 </div>
                                             </div>
+
+                                            {/* Space Type Selector */}
+                                            {!isMultiSelection && (
+                                                <div>
+                                                    <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Space Type</label>
+                                                    <div className="grid grid-cols-3 glass-card p-1 rounded-xl gap-0.5">
+                                                        {[
+                                                            { type: 'standard' as SpaceType, icon: <Home size={13} />, label: 'Standard' },
+                                                            { type: 'outdoor' as SpaceType, icon: <Sun size={13} />, label: 'Outdoor' },
+                                                            { type: 'terrace' as SpaceType, icon: <TreePine size={13} />, label: 'Terrace' },
+                                                            { type: 'multistory' as SpaceType, icon: <Building2 size={13} />, label: 'Multi' },
+                                                            { type: 'verticalConnection' as SpaceType, icon: <ArrowUpDown size={13} />, label: 'Vert.C' },
+                                                        ].map(item => (
+                                                            <button
+                                                                key={item.type}
+                                                                onClick={() => updateRoom(selectedRoom!.id, {
+                                                                    spaceType: item.type,
+                                                                    ...(item.type === 'verticalConnection' && !selectedRoom!.vcType ? {
+                                                                        vcType: 'stair' as VCType,
+                                                                        vcFromFloor: Math.min(...floors.map(f => f.id)),
+                                                                        vcToFloor: Math.max(...floors.map(f => f.id)),
+                                                                        stairParams: { ...DEFAULT_STAIR_PARAMS },
+                                                                        zone: 'Circulation',
+                                                                    } : {}),
+                                                                    ...(item.type === 'multistory' && !selectedRoom!.spanFloors ? { spanFloors: 2 } : {}),
+                                                                })}
+                                                                className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9px] font-bold transition-all ${
+                                                                    (selectedRoom?.spaceType || 'standard') === item.type
+                                                                        ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600'
+                                                                        : 'text-slate-400 hover:text-slate-600 dark:hover:text-gray-300'
+                                                                }`}
+                                                                title={item.label}
+                                                            >
+                                                                {item.icon}
+                                                                <span className="hidden sm:inline">{item.label}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+
+                                                    {/* Multistory: spanFloors input */}
+                                                    {(selectedRoom?.spaceType === 'multistory') && (
+                                                        <div className="mt-3 bg-slate-50/50 dark:bg-white/5 rounded-xl p-3 border border-slate-100/30 dark:border-dark-border/30">
+                                                            <div className="flex justify-between items-center">
+                                                                <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Spans Floors</span>
+                                                                <div className="flex items-center gap-2">
+                                                                    <button
+                                                                        onClick={() => updateRoom(selectedRoom!.id, { spanFloors: Math.max(2, (selectedRoom!.spanFloors || 2) - 1) })}
+                                                                        className="w-6 h-6 rounded-md bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 flex items-center justify-center text-slate-400 hover:text-orange-600 hover:border-orange-500"
+                                                                    >
+                                                                        <ChevronDown size={12} />
+                                                                    </button>
+                                                                    <span className="text-lg font-black text-slate-700 dark:text-gray-200 w-6 text-center">{selectedRoom!.spanFloors || 2}</span>
+                                                                    <button
+                                                                        onClick={() => updateRoom(selectedRoom!.id, { spanFloors: Math.min(floors.length, (selectedRoom!.spanFloors || 2) + 1) })}
+                                                                        className="w-6 h-6 rounded-md bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 flex items-center justify-center text-slate-400 hover:text-orange-600 hover:border-orange-500"
+                                                                    >
+                                                                        <ChevronUp size={12} />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Vertical Connection sub-panel */}
+                                                    {(selectedRoom?.spaceType === 'verticalConnection') && (() => {
+                                                        const vcType = selectedRoom.vcType || 'stair';
+                                                        const vcFrom = selectedRoom.vcFromFloor ?? Math.min(...floors.map(f => f.id));
+                                                        const vcTo = selectedRoom.vcToFloor ?? Math.max(...floors.map(f => f.id));
+
+                                                        return (
+                                                            <div className="mt-3 space-y-3">
+                                                                {/* VC Type selector */}
+                                                                <div className="bg-slate-50/50 dark:bg-white/5 rounded-xl p-3 border border-slate-100/30 dark:border-dark-border/30 space-y-3">
+                                                                    <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Connection Type</span>
+                                                                    <div className="flex bg-white dark:bg-dark-surface p-1 rounded-lg gap-0.5 border border-slate-100/30 dark:border-dark-border/30">
+                                                                        {(['stair', 'elevator', 'ramp'] as VCType[]).map(t => (
+                                                                            <button
+                                                                                key={t}
+                                                                                onClick={() => updateRoom(selectedRoom!.id, {
+                                                                                    vcType: t,
+                                                                                })}
+                                                                                className={`flex-1 py-1.5 px-1 rounded-md text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all ${
+                                                                                    vcType === t
+                                                                                        ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 shadow-sm'
+                                                                                        : 'text-slate-400 hover:text-slate-600 dark:hover:text-gray-300'
+                                                                                }`}
+                                                                            >
+                                                                                <div
+                                                                                    className="w-3.5 h-3.5 flex items-center justify-center shrink-0"
+                                                                                    dangerouslySetInnerHTML={{
+                                                                                        __html: (t === 'stair' ? stairSvgRaw : t === 'elevator' ? elevatorSvgRaw : rampSvgRaw)
+                                                                                            .replaceAll('stroke:black', 'stroke:currentColor')
+                                                                                            .replaceAll('stroke:#000000', 'stroke:currentColor')
+                                                                                            .replaceAll('fill:black', 'fill:currentColor')
+                                                                                    }}
+                                                                                />
+                                                                                <span>{t === 'stair' ? 'Stair' : t === 'elevator' ? 'Elevator' : 'Ramp'}</span>
+                                                                            </button>
+                                                                        ))}
+
+                                                                    </div>
+
+                                                                    {/* Floor Range */}
+                                                                    <div>
+                                                                        <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Floor Range</span>
+                                                                        <div className="flex gap-2 items-center">
+                                                                            <div className="flex-1">
+                                                                                <label className="text-[8px] font-bold text-slate-400 uppercase">From</label>
+                                                                                <select
+                                                                                    value={vcFrom}
+                                                                                    onChange={(e) => updateRoom(selectedRoom!.id, { vcFromFloor: parseInt(e.target.value) })}
+                                                                                    className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
+                                                                                >
+                                                                                    {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                                                                                </select>
+                                                                            </div>
+                                                                            <ArrowUpDown size={14} className="text-slate-300 mt-3" />
+                                                                            <div className="flex-1">
+                                                                                <label className="text-[8px] font-bold text-slate-400 uppercase">To</label>
+                                                                                <select
+                                                                                    value={vcTo}
+                                                                                    onChange={(e) => updateRoom(selectedRoom!.id, { vcToFloor: parseInt(e.target.value) })}
+                                                                                    className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
+                                                                                >
+                                                                                    {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                                                                                </select>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            )}
 
                                             {/* Link Logic Button */}
                                             {!isMultiSelection && (

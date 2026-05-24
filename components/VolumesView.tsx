@@ -64,21 +64,82 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
     }, [room.zone, zoneColors, darkMode]);
 
     const floor = floors.find(f => f.id === room.floor);
-    const heightInMeters = room.depth || floor?.height || 3;
-    const heightIn3D = heightInMeters * HEIGHT_SCALE;
+    const spaceType = room.spaceType || 'standard';
+
+    // Calculate height based on space type
+    const heightInMeters = useMemo(() => {
+        const baseHeight = room.depth || floor?.height || 3;
+        const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
+
+        switch (spaceType) {
+            case 'outdoor':
+                return 0.1; // Flat plane
+            case 'terrace':
+                return baseHeight * 0.15; // Thin slab
+            case 'multistory': {
+                const span = room.spanFloors || 2;
+                const startIdx = sortedFloors.findIndex(f => f.id === room.floor);
+                let total = 0;
+                for (let i = startIdx; i < Math.min(startIdx + span, sortedFloors.length); i++) {
+                    total += sortedFloors[i]?.height || 3;
+                }
+                return total || baseHeight;
+            }
+            case 'verticalConnection': {
+                const from = room.vcFromFloor ?? Math.min(...floors.map(f => f.id));
+                const to = room.vcToFloor ?? Math.max(...floors.map(f => f.id));
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
+                let total = 0;
+                for (const f of sortedFloors) {
+                    if (f.id >= minF && f.id <= maxF) total += f.height;
+                }
+                return total || baseHeight;
+            }
+            default:
+                return baseHeight;
+        }
+    }, [spaceType, room.depth, room.spanFloors, room.vcFromFloor, room.vcToFloor, floor, floors]);
+
+    const heightIn3D = useMemo(() => {
+        if (spaceType === 'verticalConnection') {
+            const from = room.vcFromFloor ?? Math.min(...floors.map(f => f.id));
+            const to = room.vcToFloor ?? Math.max(...floors.map(f => f.id));
+            const minF = Math.min(from, to);
+            const maxF = Math.max(from, to);
+            const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
+            let total = 0;
+            let numGaps = 0;
+            for (const f of sortedFloors) {
+                if (f.id >= minF && f.id <= maxF) {
+                    total += f.height * HEIGHT_SCALE;
+                }
+                if (f.id >= minF && f.id < maxF) {
+                    numGaps++;
+                }
+            }
+            return total + numGaps * floorGap;
+        }
+        return heightInMeters * HEIGHT_SCALE;
+    }, [spaceType, heightInMeters, room.vcFromFloor, room.vcToFloor, floors, floorGap]);
 
     // Calculate cumulative floor Y position
     const yFloor = useMemo(() => {
         let y = 0;
-        // Sort floors by ID to calculate cumulative height correctly from bottom up
         const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
+
+        // For vertical connections, start from their fromFloor
+        const startFloor = spaceType === 'verticalConnection'
+            ? Math.min(room.vcFromFloor ?? room.floor, room.vcToFloor ?? room.floor)
+            : room.floor;
+
         for (const f of sortedFloors) {
-            if (f.id < room.floor) {
+            if (f.id < startFloor) {
                 y += (f.height * HEIGHT_SCALE) + floorGap;
             }
         }
         return y;
-    }, [floors, room.floor, floorGap]);
+    }, [floors, room.floor, room.vcFromFloor, room.vcToFloor, spaceType, floorGap]);
 
     // Calculate centroid for label positioning
     const centroid = useMemo(() => {
@@ -158,7 +219,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
 
     const themeParams = useMemo(() => {
         const id = diagramStyle.id;
-        
+
         let meshColor = isLinkingSource ? '#f59e0b' : color;
         let opacity = isSelected ? 0.9 : 0.6;
         let transparent = true;
@@ -206,7 +267,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             const sat = appSettings.colorSaturation ?? 1.0;
             const color1 = new THREE.Color(color);
             const color2 = new THREE.Color(getHexBorderForZone(room.zone, zoneColors));
-            
+
             if (sat >= 0.5) {
                 // Lerp between pale pastel color (at sat = 0.5) and rich color (at sat = 1.0)
                 const t = (sat - 0.5) / 0.5;
@@ -294,56 +355,67 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             onClick={(e) => { e.stopPropagation(); onSelect(); }}
         >
             <mesh
-                key={`${diagramStyle.id}-${themeParams.transparent}`}
+                key={`${diagramStyle.id}-${themeParams.transparent}-${spaceType}`}
                 castShadow={themeParams.castShadow}
                 receiveShadow={themeParams.receiveShadow}
             >
                 <extrudeGeometry args={[shape, { depth: heightIn3D, bevelEnabled: false }]} />
-                <meshStandardMaterial
-                    key={`mat-${diagramStyle.id}-${themeParams.transparent}`}
-                    color={themeParams.meshColor}
-                    transparent={themeParams.transparent}
-                    opacity={themeParams.opacity}
-                    roughness={themeParams.roughness}
-                    metalness={themeParams.metalness}
-                />
+                {spaceType === 'outdoor' ? (
+                    <meshStandardMaterial
+                        key={`mat-${diagramStyle.id}-outdoor`}
+                        color={themeParams.meshColor}
+                        transparent={true}
+                        opacity={Math.min(themeParams.opacity, 0.2)}
+                        wireframe={false}
+                        roughness={0.5}
+                    />
+                ) : (
+                    <meshStandardMaterial
+                        key={`mat-${diagramStyle.id}-${themeParams.transparent}`}
+                        color={themeParams.meshColor}
+                        transparent={themeParams.transparent}
+                        opacity={spaceType === 'terrace' ? Math.min(themeParams.opacity, 0.35) : themeParams.opacity}
+                        roughness={themeParams.roughness}
+                        metalness={themeParams.metalness}
+                    />
+                )}
                 <Edges color={themeParams.edgesColor} threshold={15} />
             </mesh>
 
             {/* Projected Label - Billboard Style */}
             {showLabels && (
                 <Html
-                position={[centroid.x / 10, -centroid.y / 10, heightIn3D + 2]}
-                center
-                pointerEvents="none"
-            >
-                <div
-                    className={`flex flex-col items-center justify-center text-center select-none ${labelStyle.fontFamily}`}
-                    style={{
-                        color: labelStyle.labelColor,
-                        fontSize: `${labelFontSize}px`,
-                        fontWeight: 'bold',
-                        minWidth: '80px',
-                        filter: labelStyle.filter,
-                        background: labelStyle.bg,
-                        backdropFilter: labelStyle.backdropFilter,
-                        padding: labelStyle.padding,
-                        borderRadius: labelStyle.borderRadius,
-                        border: labelStyle.border,
-                        textTransform: labelStyle.textTransform,
-                        letterSpacing: labelStyle.letterSpacing,
-                        transform: 'translateY(-100%)'
-                    }}
+                    position={[centroid.x / 10, -centroid.y / 10, heightIn3D + 2]}
+                    center
+                    pointerEvents="none"
                 >
-                    <div className="leading-tight whitespace-nowrap">{room.name}</div>
-                    <div className="text-[0.8em] opacity-80 font-mono tracking-tighter mt-0.5">
-                        {appSettings.unitSystem === 'imperial'
-                            ? `${Math.round(room.area * 10.7639)} sq ft`
-                            : `${Math.round(room.area)}m²`
-                        }
+                    <div
+                        className={`flex flex-col items-center justify-center text-center select-none ${labelStyle.fontFamily}`}
+                        style={{
+                            color: labelStyle.labelColor,
+                            fontSize: `${labelFontSize}px`,
+                            fontWeight: 'bold',
+                            minWidth: '80px',
+                            filter: labelStyle.filter,
+                            background: labelStyle.bg,
+                            backdropFilter: labelStyle.backdropFilter,
+                            padding: labelStyle.padding,
+                            borderRadius: labelStyle.borderRadius,
+                            border: labelStyle.border,
+                            textTransform: labelStyle.textTransform,
+                            letterSpacing: labelStyle.letterSpacing,
+                            transform: 'translateY(-100%)'
+                        }}
+                    >
+                        <div className="leading-tight whitespace-nowrap">{room.name}</div>
+                        <div className="text-[0.8em] opacity-80 font-mono tracking-tighter mt-0.5">
+                            {appSettings.unitSystem === 'imperial'
+                                ? `${Math.round(room.area * 10.7639)} sq ft`
+                                : `${Math.round(room.area)}m²`
+                            }
+                        </div>
                     </div>
-                </div>
-            </Html>
+                </Html>
             )}
         </group>
     );
@@ -720,7 +792,7 @@ const SceneManager = forwardRef<VolumesViewHandle, { hiddenFloorIds: Set<number>
                 }
                 // Hide GizmoHelper container if identifiable (often added to scene directly)
                 if (child.name === 'GizmoHelper' || child.userData?.type === 'GizmoHelper') {
-                     if (child.visible) {
+                    if (child.visible) {
                         child.visible = false;
                         objectsToHide.push(child);
                     }
@@ -878,7 +950,7 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                 <CameraHandler viewState={viewState} onViewStateChange={onViewStateChange} isInteracting={isInteracting} cameraVersion={cameraVersion} />
                 <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={visiblePlacedRooms} floors={floors} onFitComplete={handleFitComplete} floorGap={floorGap} />
                 <ViewStateTracker onUpdate={handleCameraUpdate} isInteracting={isInteracting} />
-                
+
                 {/* Dynamic curated lighting environments per theme */}
                 {/* Unified lighting structure to prevent Three.js shader recompilation issues (black materials) */}
                 {isClay ? (
@@ -904,27 +976,27 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                 ) : isBlueprint ? (
                     <>
                         <ambientLight intensity={darkMode ? 0.85 : 0.9} color="#bae6fd" />
-                        <directionalLight 
-                            position={[100, 100, 200]} 
-                            intensity={darkMode ? 0.35 : 0.4} 
-                            color="#ffffff" 
+                        <directionalLight
+                            position={[100, 100, 200]}
+                            intensity={darkMode ? 0.35 : 0.4}
+                            color="#ffffff"
                             castShadow={false}
                         />
-                        <directionalLight 
-                            position={[-100, -100, 100]} 
-                            intensity={darkMode ? 0.25 : 0.3} 
-                            color="#0284c7" 
+                        <directionalLight
+                            position={[-100, -100, 100]}
+                            intensity={darkMode ? 0.25 : 0.3}
+                            color="#0284c7"
                             castShadow={false}
                         />
                     </>
                 ) : (
                     <>
                         <ambientLight intensity={0.7} color="#ffffff" />
-                        <directionalLight 
-                            position={[200, 200, 500]} 
-                            intensity={1.5} 
+                        <directionalLight
+                            position={[200, 200, 500]}
+                            intensity={1.5}
                             color="#ffffff"
-                            castShadow 
+                            castShadow
                             shadow-mapSize-width={2048}
                             shadow-mapSize-height={2048}
                             shadow-bias={-0.0004}
@@ -935,10 +1007,10 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                             shadow-camera-near={0.1}
                             shadow-camera-far={500}
                         />
-                        <directionalLight 
-                            position={[-200, -200, 400]} 
-                            intensity={0.8} 
-                            color="#ffffff" 
+                        <directionalLight
+                            position={[-200, -200, 400]}
+                            intensity={0.8}
+                            color="#ffffff"
                             castShadow={false}
                         />
                     </>
