@@ -1150,40 +1150,29 @@ export default function App() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [undo, redo, handleZoomToFit, selectionBox]);
 
-    // Global Capturing Event Listener for Selection Box Second Click
+    // Global Event Listener to finalize Selection Box on release (pointerup)
     useEffect(() => {
         if (!selectionBox) return;
 
-        const handleGlobalPointerDown = (e: PointerEvent) => {
-            // Only handle left clicks (button === 0)
+        const handleGlobalPointerUp = (e: PointerEvent) => {
+            // Only handle left click release (button === 0)
             if (e.button !== 0) return;
 
-            // Check if click is inside the main canvas
-            const isInsideCanvas = mainRef.current && mainRef.current.contains(e.target as Node);
-
-            if (isInsideCanvas) {
-                // Finalize selection using actual click coordinates
-                const rect = mainRef.current!.getBoundingClientRect();
+            if (mainRef.current) {
+                const rect = mainRef.current.getBoundingClientRect();
                 const currentX = e.clientX - rect.left;
                 const currentY = e.clientY - rect.top;
 
-                // Stop the event from triggering room selection, dragging, panning, etc.
-                e.stopPropagation();
-                e.preventDefault();
-
                 performSelection(selectionBox.start, { x: currentX, y: currentY });
-                setSelectionBox(null);
-            } else {
-                // Clicking outside the canvas cancels the selection box
-                setSelectionBox(null);
             }
+            setSelectionBox(null);
         };
 
-        // Add capturing event listener to intercept click before other elements
-        document.addEventListener('pointerdown', handleGlobalPointerDown, { capture: true });
+        // Add capturing event listener to handle pointerup anywhere on the screen
+        document.addEventListener('pointerup', handleGlobalPointerUp, { capture: true });
 
         return () => {
-            document.removeEventListener('pointerdown', handleGlobalPointerDown, { capture: true });
+            document.removeEventListener('pointerup', handleGlobalPointerUp, { capture: true });
         };
     }, [selectionBox, performSelection]);
 
