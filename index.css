@@ -135,3 +135,35 @@ body {
 .glow-effect:hover::after {
     transform: rotate(-45deg) translate(100%, 100%);
 }
+
+/* Custom Zones Icon Styles to make raw-inlined SVGs inherit toolbar styles */
+.zones-icon-container svg {
+    width: 100% !important;
+    height: 100% !important;
+}
+.zones-icon-container svg rect,
+.zones-icon-container svg path {
+    stroke: currentColor !important;
+    fill: none !important;
+}
+
+/* Custom Polyline Icon Styles */
+.polyline-icon-container svg {
+    width: 100% !important;
+    height: 100% !important;
+}
+.polyline-icon-container svg path {
+    stroke: currentColor !important;
+    fill: none !important;
+}
+
+/* Custom Brush Cleaning Icon Styles */
+.brush-cleaning-icon-container svg {
+    width: 100% !important;
+    height: 100% !important;
+}
+.brush-cleaning-icon-container svg path {
+    stroke: currentColor !important;
+    fill: none !important;
+}
+

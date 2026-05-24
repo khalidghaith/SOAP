@@ -17,7 +17,7 @@ import { arrangeRooms } from './utils/layout';
 import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
-    PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, BrushCleaning,
+    PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock,
     Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
     Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, Shapes
 } from 'lucide-react';
@@ -27,7 +27,10 @@ import { AnnotationLayer } from './components/AnnotationLayer';
 import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
 import { StylePanel } from './components/StylePanel';
+import { SnapPanel } from './components/SnapPanel';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
+import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
+import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
 import * as htmlToImage from 'html-to-image';
 import { analyzeProgram, generateSpatialLayout } from './services/geminiService';
 
@@ -160,6 +163,22 @@ const getRoomVertices = (room: Room): Point[] => {
     }
 };
 
+const ZonesIcon: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className = '', ...props }) => (
+    <div
+        className={`w-4 h-4 flex items-center justify-center zones-icon-container ${className}`}
+        dangerouslySetInnerHTML={{ __html: ZonesIconRaw }}
+        {...props}
+    />
+);
+
+const BrushCleaningIcon: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className = '', ...props }) => (
+    <div
+        className={`w-4 h-4 flex items-center justify-center brush-cleaning-icon-container ${className}`}
+        dangerouslySetInnerHTML={{ __html: brushCleaningSvgRaw }}
+        {...props}
+    />
+);
+
 
 // Helper for file saving
 const saveFile = async (blob: Blob, suggestedName: string, extension: string) => {
@@ -224,6 +243,7 @@ export default function App() {
     const [showExportModal, setShowExportModal] = useState(false);
     const [showHelpModal, setShowHelpModal] = useState(false);
     const [showAboutModal, setShowAboutModal] = useState(false);
+    const [showSnapPanel, setShowSnapPanel] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);
@@ -264,7 +284,10 @@ export default function App() {
         snapToObjects: true,
         snapWhileScaling: false,
         volumesOpacity: 0.6,
-        colorSaturation: 1.0
+        colorSaturation: 1.0,
+        unitSystem: 'metric',
+        magnetStrength: 50,
+        magnetPadding: 10
     });
 
     // View State
@@ -798,13 +821,17 @@ export default function App() {
 
         const interval = setInterval(() => {
             setRooms(currentRooms => {
-                const updated = applyMagneticPhysics(currentRooms);
+                const updated = applyMagneticPhysics(
+                    currentRooms,
+                    appSettings.magnetStrength ?? 50,
+                    appSettings.magnetPadding ?? 10
+                );
                 return updated === currentRooms ? currentRooms : updated;
             });
         }, 50); // 20fps for physics to save CPU
 
         return () => clearInterval(interval);
-    }, [isMagnetMode]);
+    }, [isMagnetMode, appSettings.magnetStrength, appSettings.magnetPadding]);
 
     // Inventory Hover Detection during Drag
     useEffect(() => {
@@ -906,7 +933,11 @@ export default function App() {
             const updatedEnd = { x: currentX, y: currentY };
             setSelectionBox(prev => prev ? { ...prev, end: updatedEnd } : null);
 
-            performSelection(selectionBox.start, updatedEnd);
+            const dx = currentX - selectionBox.start.x;
+            const dy = currentY - selectionBox.start.y;
+            if (Math.hypot(dx, dy) > 5) {
+                performSelection(selectionBox.start, updatedEnd);
+            }
         }
         lastMousePos.current = { x: e.clientX, y: e.clientY };
     };
@@ -1163,7 +1194,17 @@ export default function App() {
                 const currentX = e.clientX - rect.left;
                 const currentY = e.clientY - rect.top;
 
-                performSelection(selectionBox.start, { x: currentX, y: currentY });
+                const dx = currentX - selectionBox.start.x;
+                const dy = currentY - selectionBox.start.y;
+                if (Math.hypot(dx, dy) > 5) {
+                    performSelection(selectionBox.start, { x: currentX, y: currentY });
+                } else {
+                    // It's a simple click - clear selections and close connection sources
+                    setSelectedRoomIds(new Set());
+                    setSelectedZone(null);
+                    setSelectedAnnotationId(null);
+                    if (connectionSourceId) setConnectionSourceId(null);
+                }
             }
             setSelectionBox(null);
         };
@@ -1972,7 +2013,7 @@ export default function App() {
                     newRoom.x = rx;
                     newRoom.y = ry;
                     newRoom.rotation = Number(rotDeg.toFixed(2));
-                    
+
                     const newArea = Number(((W * H) / (PIXELS_PER_METER * PIXELS_PER_METER)).toFixed(2));
                     newRoom.area = newArea > 0 ? newArea : r.area;
                 } else {
@@ -2266,7 +2307,12 @@ export default function App() {
                             >
                                 <Key size={14} />
                             </button>
-                            <button onClick={() => setShowSettingsModal(true)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5" title="Settings">
+                            <button onClick={() => {
+                                setShowSettingsModal(true);
+                                setShowSnapPanel(false);
+                                setShowStylePanel(false);
+                                setIsReferenceMode(false);
+                            }} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5" title="Advanced Preferences">
                                 <Settings size={14} />
                             </button>
                             <button onClick={() => setShowHelpModal(true)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5" title="Help">
@@ -2456,7 +2502,9 @@ export default function App() {
                                                 </button>
                                             </div>
                                             <div className="flex items-center gap-3">
-                                                <span className="px-2 py-1 bg-slate-100 dark:bg-white/5 rounded-lg text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-wider">{room.area} m²</span>
+                                                <span className="px-2 py-1 bg-slate-100 dark:bg-white/5 rounded-lg text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-wider">
+                                                    {appSettings.unitSystem === 'imperial' ? `${Number((room.area * 10.7639).toFixed(1))} sq ft` : `${room.area} m²`}
+                                                </span>
                                                 <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm ${zoneColors[room.zone]?.bg || 'bg-slate-100'} ${zoneColors[room.zone]?.text || 'text-slate-500'}`}>{room.zone}</span>
                                             </div>
                                         </div>
@@ -2520,7 +2568,7 @@ export default function App() {
                             />
                         )}
 
-                        <div 
+                        <div
                             className={`absolute inset-0 view-fade-enter ${viewMode === 'VOLUMES' ? 'view-fade-active' : ''}`}
                             style={{
                                 pointerEvents: viewMode === 'VOLUMES' ? 'auto' : 'none',
@@ -2561,7 +2609,7 @@ export default function App() {
                                 />
                             </ErrorBoundary>
                         </div>
-                        <div 
+                        <div
                             className={`absolute inset-0 view-fade-enter ${viewMode === 'CANVAS' ? 'view-fade-active' : ''}`}
                             style={{
                                 pointerEvents: 'none',
@@ -2895,7 +2943,7 @@ export default function App() {
                                     width: Math.abs(selectionBox.start.x - selectionBox.end.x),
                                     height: Math.abs(selectionBox.start.y - selectionBox.end.y),
                                     zIndex: 9999,
-                                    backgroundColor: selectionBox.start.x > selectionBox.end.x 
+                                    backgroundColor: selectionBox.start.x > selectionBox.end.x
                                         ? 'rgba(34, 197, 94, 0.15)' // Crossing: Green
                                         : 'rgba(59, 130, 246, 0.15)', // Window: Blue
                                     border: selectionBox.start.x > selectionBox.end.x
@@ -3005,8 +3053,29 @@ export default function App() {
                                                             </div>
                                                         )}
                                                     </div>
-                                                    <button onClick={() => setSnapEnabled(!snapEnabled)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!snapEnabled ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 animate-pulse' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50'}`} title="Toggle Snapping"><Magnet size={16} /></button>
- 
+
+                                                    <button
+                                                        onClick={() => {
+                                                            const newValue = !showSnapPanel;
+                                                            setShowSnapPanel(newValue);
+                                                            if (newValue) {
+                                                                setShowStylePanel(false);
+                                                                setIsReferenceMode(false);
+                                                                setIsSketchMode(false);
+                                                            }
+                                                        }}
+                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 relative ${
+                                                            showSnapPanel
+                                                                ? 'bg-gradient-to-tr from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30 scale-110'
+                                                                : snapEnabled
+                                                                    ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'
+                                                                    : 'text-slate-400 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500 bg-white/5 border border-slate-200/50 dark:border-white/5 hover:border-orange-500/20'
+                                                        }`}
+                                                        title="Snapping Settings & Grid"
+                                                    >
+                                                        <Magnet size={16} />
+                                                    </button>
+
                                                     <button
                                                         onClick={() => setIsMagnetMode(!isMagnetMode)}
                                                         className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
@@ -3014,22 +3083,22 @@ export default function App() {
                                                     >
                                                         <Atom size={16} className={isMagnetMode ? "animate-spin" : ""} />
                                                     </button>
- 
+
                                                     <button
                                                         onClick={() => setShowZones(!showZones)}
                                                         className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!showZones ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
                                                         title="Toggle Zone Overlays"
                                                     >
-                                                        <Shapes size={16} />
+                                                        <ZonesIcon className="w-4 h-4 transition-all duration-300" />
                                                     </button>
-
-                                                    <button
+                                                     <button
                                                         onClick={() => {
                                                             const newValue = !isReferenceMode;
                                                             setIsReferenceMode(newValue);
                                                             if (newValue) {
                                                                 setIsSketchMode(false);
                                                                 setShowStylePanel(false);
+                                                                setShowSnapPanel(false);
                                                             }
                                                         }}
                                                         className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isReferenceMode ? 'bg-orange-500 text-white shadow-lg scale-105 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
@@ -3046,6 +3115,7 @@ export default function App() {
                                                             if (newValue) {
                                                                 setIsReferenceMode(false);
                                                                 setShowStylePanel(false);
+                                                                setShowSnapPanel(false);
                                                             }
                                                         }}
                                                     />
@@ -3060,13 +3130,13 @@ export default function App() {
                                                     if (newValue) {
                                                         setIsReferenceMode(false);
                                                         setIsSketchMode(false);
+                                                        setShowSnapPanel(false);
                                                     }
                                                 }}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 relative ${
-                                                    showStylePanel
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 relative ${showStylePanel
                                                         ? 'bg-gradient-to-tr from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30 scale-110'
                                                         : 'text-slate-400 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500 bg-white/5 border border-slate-200/50 dark:border-white/5 hover:border-orange-500/20'
-                                                }`}
+                                                    }`}
                                                 title="Visual Styles & Appearance"
                                             >
                                                 <Palette size={16} />
@@ -3077,22 +3147,20 @@ export default function App() {
                                                 <div className="flex flex-col items-center bg-slate-100/50 dark:bg-white/5 rounded-2xl py-1.5 px-1 border border-slate-200/50 dark:border-dark-border gap-1 w-8">
                                                     <button
                                                         onClick={() => handleViewStateChange({ viewType: 'perspective' }, true)}
-                                                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black tracking-tighter transition-all ${
-                                                            volumesViewState.viewType === 'perspective'
+                                                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black tracking-tighter transition-all ${volumesViewState.viewType === 'perspective'
                                                                 ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm font-black'
                                                                 : 'text-slate-400 hover:text-slate-600 dark:text-gray-500 dark:hover:text-gray-300'
-                                                        }`}
+                                                            }`}
                                                         title="Perspective View"
                                                     >
                                                         3D
                                                     </button>
                                                     <button
                                                         onClick={() => handleViewStateChange({ viewType: 'isometric' }, true)}
-                                                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black tracking-tighter transition-all ${
-                                                            volumesViewState.viewType === 'isometric'
+                                                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black tracking-tighter transition-all ${volumesViewState.viewType === 'isometric'
                                                                 ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm font-black'
                                                                 : 'text-slate-400 hover:text-slate-600 dark:text-gray-500 dark:hover:text-gray-300'
-                                                        }`}
+                                                            }`}
                                                         title="Isometric View"
                                                     >
                                                         ISO
@@ -3106,7 +3174,7 @@ export default function App() {
                                                     className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500"
                                                     title="Clear Canvas"
                                                 >
-                                                    <BrushCleaning size={16} />
+                                                    <BrushCleaningIcon className="w-4 h-4" />
                                                 </button>
                                             )}
                                         </div>
@@ -3133,6 +3201,26 @@ export default function App() {
                                             settings={appSettings}
                                             onUpdateSettings={setAppSettings}
                                             viewMode={viewMode}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Snapping panel floating alongside vertical toolbar */}
+                                {showSnapPanel && (
+                                    <div
+                                        className="absolute top-6 left-[78px] z-[190] export-exclude pointer-events-auto"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                    >
+                                        <SnapPanel
+                                            settings={appSettings}
+                                            onUpdateSettings={setAppSettings}
+                                            onClose={() => setShowSnapPanel(false)}
+                                            snapEnabled={snapEnabled}
+                                            onToggleSnapEnabled={setSnapEnabled}
+                                            gridSizeIndex={gridSizeIndex}
+                                            onGridSizeIndexChange={setGridSizeIndex}
+                                            GRID_SIZES={GRID_SIZES}
                                         />
                                     </div>
                                 )}
@@ -3298,12 +3386,12 @@ export default function App() {
                                                                 <input
                                                                     type="number"
                                                                     className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200 bg-transparent border-b border-transparent focus:border-orange-500 outline-none w-full"
-                                                                    value={Number(selectedRoom!.area.toFixed(2))}
+                                                                    value={appSettings.unitSystem === 'imperial' ? Number((selectedRoom!.area * 10.7639).toFixed(1)) : Number(selectedRoom!.area.toFixed(2))}
                                                                     onChange={(e) => {
                                                                         const val = parseFloat(e.target.value);
-                                                                        if (!isNaN(val)) updateRoom(selectedRoom!.id, { area: val });
+                                                                        if (!isNaN(val)) updateRoom(selectedRoom!.id, { area: appSettings.unitSystem === 'imperial' ? val / 10.7639 : val });
                                                                     }} />
-                                                                <small className="text-xs opacity-60">m²</small>
+                                                                <small className="text-xs opacity-60 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</small>
                                                             </div>
                                                         </div>
                                                         <div className="p-4 glass-card rounded-2xl flex justify-between items-center">
@@ -3455,7 +3543,7 @@ export default function App() {
                                                             <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Area</span>
                                                         </div>
                                                         <div className="text-2xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                                            {Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
+                                                            {appSettings.unitSystem === 'imperial' ? Number((multiSelectionStats?.totalArea * 10.7639).toFixed(1)) : Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</span>
                                                         </div>
                                                     </div>
                                                     <div className="p-4 glass-card rounded-2xl flex justify-between items-center">
@@ -3546,7 +3634,7 @@ export default function App() {
                                                     <span className="text-[10px] font-bold text-orange-600 bg-orange-500/10 px-2 py-1 rounded-md">{selectedZoneRooms.length} Spaces</span>
                                                 </div>
                                                 <div className="text-3xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                                    {Number(zoneArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
+                                                    {appSettings.unitSystem === 'imperial' ? Number((zoneArea * 10.7639).toFixed(1)) : Number(zoneArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</span>
                                                 </div>
                                             </div>
 
@@ -3559,7 +3647,7 @@ export default function App() {
                                                         <div key={r.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl hover:shadow-md hover:border-orange-300 dark:hover:border-orange-800 cursor-pointer group"
                                                             onClick={() => setSelectedRoomIds(new Set([r.id]))}>
                                                             <span className="text-sm font-bold text-slate-700 dark:text-gray-300 group-hover:text-orange-600">{r.name}</span>
-                                                            <span className="text-[10px] font-sans text-slate-400 dark:text-gray-500">{r.area} m²</span>
+                                                            <span className="text-[10px] font-sans text-slate-400 dark:text-gray-500">{appSettings.unitSystem === 'imperial' ? `${Number((r.area * 10.7639).toFixed(1))} sq ft` : `${r.area} m²`}</span>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -3662,7 +3750,7 @@ export default function App() {
                                                                         <div className="flex-1">
                                                                             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Total Area</label>
                                                                             <div className="px-2 py-1 text-xs font-bold text-slate-500 dark:text-gray-400">
-                                                                                {Math.round(floorArea)} m²
+                                                                                {appSettings.unitSystem === 'imperial' ? `${Math.round(floorArea * 10.7639)} sq ft` : `${Math.round(floorArea)} m²`}
                                                                             </div>
                                                                         </div>
                                                                     </div>

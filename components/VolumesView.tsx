@@ -336,7 +336,12 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
                     }}
                 >
                     <div className="leading-tight whitespace-nowrap">{room.name}</div>
-                    <div className="text-[0.8em] opacity-80 font-mono tracking-tighter mt-0.5">{Math.round(room.area)}m²</div>
+                    <div className="text-[0.8em] opacity-80 font-mono tracking-tighter mt-0.5">
+                        {appSettings.unitSystem === 'imperial'
+                            ? `${Math.round(room.area * 10.7639)} sq ft`
+                            : `${Math.round(room.area)}m²`
+                        }
+                    </div>
                 </div>
             </Html>
             )}

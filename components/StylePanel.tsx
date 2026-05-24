@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Palette, LayoutTemplate, Square, PencilRuler, Settings2, Box, Layers, Eye } from 'lucide-react';
+import { X, Palette } from 'lucide-react';
 import { DIAGRAM_STYLES, DiagramStyle, AppSettings } from '../types';
 
 interface StylePanelProps {
@@ -12,24 +12,15 @@ interface StylePanelProps {
 }
 
 export function StylePanel({ currentStyle, onStyleSelect, onClose, settings, onUpdateSettings, viewMode }: StylePanelProps) {
-    const styleDescriptions: Record<string, { desc: string; icon: React.ReactNode; bg: string; border: string }> = {
+    const styleDescriptions: Record<string, { desc: string }> = {
         standard: {
-            desc: 'Clean vectors with standard functional zoning fills.',
-            icon: <LayoutTemplate size={16} />,
-            bg: 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300',
-            border: 'border-slate-300 dark:border-white/10'
+            desc: 'Clean vectors with standard functional zoning fills.'
         },
         blueprint: {
-            desc: 'Technical grids, mono fonts, and deep translucent blue shells.',
-            icon: <Layers size={16} />,
-            bg: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400',
-            border: 'border-blue-200 dark:border-blue-800/50'
+            desc: 'Technical grids, mono fonts, and deep translucent blue shells.'
         },
         clay: {
-            desc: 'Warm untextured plaster mockup with physical shadows in 3D.',
-            icon: <Box size={16} />,
-            bg: 'bg-orange-50 dark:bg-orange-950/20 text-orange-600 dark:text-orange-400',
-            border: 'border-orange-200 dark:border-orange-900/50'
+            desc: 'Warm untextured plaster mockup with physical shadows in 3D.'
         }
     };
 
@@ -66,10 +57,7 @@ export function StylePanel({ currentStyle, onStyleSelect, onClose, settings, onU
             <div className="flex flex-col gap-2">
                 {DIAGRAM_STYLES.map((style) => {
                     const info = styleDescriptions[style.id] || {
-                        desc: 'Elegant vector diagram style representation.',
-                        icon: <LayoutTemplate size={16} />,
-                        bg: 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300',
-                        border: 'border-slate-300 dark:border-white/10'
+                        desc: 'Elegant vector diagram style representation.'
                     };
                     const isSelected = currentStyle.id === style.id;
 
@@ -77,7 +65,7 @@ export function StylePanel({ currentStyle, onStyleSelect, onClose, settings, onU
                         <button
                             key={style.id}
                             onClick={() => onStyleSelect(style)}
-                            className={`w-full text-left p-2.5 rounded-2xl border transition-all duration-300 flex items-start gap-3 group relative overflow-hidden ${
+                            className={`w-full text-left p-2.5 pl-4 rounded-2xl border transition-all duration-300 flex items-start group relative overflow-hidden ${
                                 isSelected
                                     ? 'bg-orange-500/10 border-orange-500/80 dark:border-orange-500 shadow-md shadow-orange-500/5'
                                     : 'bg-white/40 hover:bg-white/90 dark:bg-white/5 dark:hover:bg-white/10 border-slate-200/50 dark:border-white/5'
@@ -85,11 +73,6 @@ export function StylePanel({ currentStyle, onStyleSelect, onClose, settings, onU
                         >
                             {/* Hover accent line */}
                             <div className={`absolute top-0 left-0 w-1 h-full transition-transform duration-300 origin-left ${isSelected ? 'bg-orange-500' : 'bg-transparent group-hover:bg-slate-300 dark:group-hover:bg-white/20'}`} />
-
-                            {/* Icon */}
-                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${info.bg} ${info.border} ${isSelected ? 'scale-105' : 'group-hover:scale-105'} transition-transform duration-300`}>
-                                {info.icon}
-                            </div>
 
                             {/* Info */}
                             <div className="flex flex-col gap-0.5">

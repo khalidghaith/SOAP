@@ -110,7 +110,7 @@ export const DIAGRAM_STYLES: DiagramStyle[] = [
   {
     id: 'clay',
     name: 'Clay Plaster',
-    fontFamily: 'font-serif tracking-normal font-semibold',
+    fontFamily: 'font-sans tracking-normal font-semibold',
     cornerRadius: 'rounded-[16px]',
     borderWidth: 3,
     opacity: 0.95,
@@ -155,6 +155,11 @@ export interface AppSettings {
   snapWhileScaling: boolean;
   volumesOpacity?: number;
   colorSaturation?: number;
+  unitSystem?: 'metric' | 'imperial';
+  magnetStrength?: number;
+  magnetPadding?: number;
+  layerPrefix?: string;
+  exportGrid?: boolean;
 }
 
 export type AnnotationType = 'line' | 'polyline' | 'arc' | 'bezier' | 'text' | 'rect' | 'circle' | 'arrow';

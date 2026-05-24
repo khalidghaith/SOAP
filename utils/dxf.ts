@@ -66,10 +66,21 @@ export const generateDXF = (
   annotations: Annotation[] = [],
   currentFloor: number,
   offsetX: number = 0,
-  offsetY: number = 0
+  offsetY: number = 0,
+  unitSystem?: 'metric' | 'imperial',
+  layerPrefix?: string,
+  exportGrid?: boolean
 ): string => {
   const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
   const visibleAnnotations = annotations.filter(a => a.floor === currentFloor);
+
+  // Setup dynamic Layer names
+  const prefix = layerPrefix || '';
+  const lWalls = `${prefix}WALLS`;
+  const lZones = `${prefix}ZONES`;
+  const lLabels = `${prefix}LABELS`;
+  const lAnno = `${prefix}ANNO`;
+  const lGrid = `${prefix}GRID`;
 
   // DXF structure header and tables
   let dxf = `0
@@ -90,6 +101,8 @@ TABLES
 TABLE
 2
 LTYPE
+70
+64
 0
 LTYPE
 2
@@ -111,11 +124,11 @@ TABLE
 2
 LAYER
 70
-4
+5
 0
 LAYER
 2
-A-WALLS
+${lWalls}
 70
 0
 62
@@ -125,7 +138,7 @@ CONTINUOUS
 0
 LAYER
 2
-A-ZONES
+${lZones}
 70
 0
 62
@@ -135,7 +148,7 @@ CONTINUOUS
 0
 LAYER
 2
-A-LABELS
+${lLabels}
 70
 0
 62
@@ -145,11 +158,21 @@ CONTINUOUS
 0
 LAYER
 2
-A-ANNO
+${lAnno}
 70
 0
 62
 1
+6
+CONTINUOUS
+0
+LAYER
+2
+${lGrid}
+70
+0
+62
+9
 6
 CONTINUOUS
 0
@@ -162,7 +185,33 @@ SECTION
 ENTITIES
 `;
 
-  // 1. Export A-ZONES layer (Convex Hulls for zones)
+  // 1. Export Grid layer if enabled
+  if (exportGrid !== false && visibleRooms.length > 0) {
+    const gridGap = 20; // 1 meter = 20px
+    let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+    
+    visibleRooms.forEach(r => {
+      gMinX = Math.min(gMinX, r.x);
+      gMinY = Math.min(gMinY, r.y);
+      gMaxX = Math.max(gMaxX, r.x + r.width);
+      gMaxY = Math.max(gMaxY, r.y + r.height);
+    });
+
+    const pad = 100;
+    gMinX = Math.floor((gMinX - pad) / gridGap) * gridGap;
+    gMinY = Math.floor((gMinY - pad) / gridGap) * gridGap;
+    gMaxX = Math.ceil((gMaxX + pad) / gridGap) * gridGap;
+    gMaxY = Math.ceil((gMaxY + pad) / gridGap) * gridGap;
+
+    for (let gx = gMinX; gx <= gMaxX; gx += gridGap) {
+      dxf += `0\nLINE\n8\n${lGrid}\n62\n9\n10\n${gx + offsetX}\n20\n${-(gMinY + offsetY)}\n11\n${gx + offsetX}\n21\n${-(gMaxY + offsetY)}\n`;
+    }
+    for (let gy = gMinY; gy <= gMaxY; gy += gridGap) {
+      dxf += `0\nLINE\n8\n${lGrid}\n62\n9\n10\n${gMinX + offsetX}\n20\n${-(gy + offsetY)}\n11\n${gMaxX + offsetX}\n21\n${-(gy + offsetY)}\n`;
+    }
+  }
+
+  // 2. Export Zones layer (Convex Hulls for zones)
   const zones: Record<string, Point[]> = {};
   visibleRooms.forEach(r => {
     if (!zones[r.zone]) zones[r.zone] = [];
@@ -184,7 +233,7 @@ ENTITIES
       const hull = getConvexHull(points);
       const aciColor = getDxfColorForZone(zoneName);
 
-      dxf += `0\nLWPOLYLINE\n8\nA-ZONES\n62\n${aciColor}\n90\n${hull.length}\n70\n1\n`;
+      dxf += `0\nLWPOLYLINE\n8\n${lZones}\n62\n${aciColor}\n90\n${hull.length}\n70\n1\n`;
       hull.forEach(p => {
         dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
       });
@@ -193,15 +242,15 @@ ENTITIES
     }
   });
 
-  // 2. Export A-WALLS (Room boundaries) and A-LABELS (Text)
+  // 3. Export Walls (Room boundaries) and Labels (Text)
   visibleRooms.forEach(room => {
     const color = getDxfColorForZone(room.zone);
 
-    // Draw Boundary Polyline on A-WALLS
+    // Draw Boundary Polyline on lWalls
     if (room.shape === 'bubble' && room.polygon) {
       const sampled = sampleBubblePoints(room.polygon, room.x, room.y);
       if (sampled.length > 0) {
-        dxf += `0\nLWPOLYLINE\n8\nA-WALLS\n62\n${color}\n90\n${sampled.length}\n70\n1\n`;
+        dxf += `0\nLWPOLYLINE\n8\n${lWalls}\n62\n${color}\n90\n${sampled.length}\n70\n1\n`;
         sampled.forEach(p => {
           dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
         });
@@ -213,38 +262,41 @@ ENTITIES
         { x: room.width, y: room.height },
         { x: 0, y: room.height }
       ];
-      dxf += `0\nLWPOLYLINE\n8\nA-WALLS\n62\n${color}\n90\n${pts.length}\n70\n1\n`;
+      dxf += `0\nLWPOLYLINE\n8\n${lWalls}\n62\n${color}\n90\n${pts.length}\n70\n1\n`;
       pts.forEach(p => {
         dxf += `10\n${room.x + p.x + offsetX}\n20\n${-(room.y + p.y + offsetY)}\n`;
       });
     }
 
-    // Draw Labels on A-LABELS
+    // Draw Labels on lLabels
     const cx = (room.polygon ? 0 : room.width / 2) + (room.polygon ? calculateCentroid(room.polygon).x : 0);
     const cy = (room.polygon ? 0 : room.height / 2) + (room.polygon ? calculateCentroid(room.polygon).y : 0);
     const absX = room.x + cx + offsetX;
     const absY = -(room.y + cy + offsetY);
 
     // Main Space Name Label
-    dxf += `0\nTEXT\n8\nA-LABELS\n62\n7\n10\n${absX}\n20\n${absY + 3}\n40\n2.5\n1\n${room.name}\n72\n4\n11\n${absX}\n21\n${absY + 3}\n`;
+    dxf += `0\nTEXT\n8\n${lLabels}\n62\n7\n10\n${absX}\n20\n${absY + 3}\n40\n2.5\n1\n${room.name}\n72\n4\n11\n${absX}\n21\n${absY + 3}\n`;
     
-    // Area Label
-    dxf += `0\nTEXT\n8\nA-LABELS\n62\n9\n10\n${absX}\n20\n${absY - 3}\n40\n1.8\n1\n${room.area.toFixed(1)} m2\n72\n4\n11\n${absX}\n21\n${absY - 3}\n`;
+    // Dynamic Area Label (Metric/Imperial)
+    const areaText = unitSystem === 'imperial'
+      ? `${(room.area * 10.7639).toFixed(1)} sq ft`
+      : `${room.area.toFixed(1)} m2`;
+    dxf += `0\nTEXT\n8\n${lLabels}\n62\n9\n10\n${absX}\n20\n${absY - 3}\n40\n1.8\n1\n${areaText}\n72\n4\n11\n${absX}\n21\n${absY - 3}\n`;
   });
 
-  // 3. Export A-ANNO (Canvas Annotations & Sketch Drafting)
+  // 4. Export Annotations (Canvas Annotations & Sketch Drafting)
   visibleAnnotations.forEach(ann => {
     const color = 1; // Default to Red for annotations
 
     if (ann.type === 'text' && ann.style.text) {
       const p = ann.points[0];
       const size = ann.style.fontSize ? ann.style.fontSize / 4 : 2.0; // scale standard px font sizes to DXF units
-      dxf += `0\nTEXT\n8\nA-ANNO\n62\n${color}\n10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n40\n${size}\n1\n${ann.style.text}\n72\n4\n11\n${p.x + offsetX}\n21\n${-(p.y + offsetY)}\n`;
+      dxf += `0\nTEXT\n8\n${lAnno}\n62\n${color}\n10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n40\n${size}\n1\n${ann.style.text}\n72\n4\n11\n${p.x + offsetX}\n21\n${-(p.y + offsetY)}\n`;
     } 
     else if ((ann.type === 'line' || ann.type === 'arrow') && ann.points.length >= 2) {
       const p1 = ann.points[0];
       const p2 = ann.points[1];
-      dxf += `0\nLINE\n8\nA-ANNO\n62\n${color}\n10\n${p1.x + offsetX}\n20\n${-(p1.y + offsetY)}\n11\n${p2.x + offsetX}\n21\n${-(p2.y + offsetY)}\n`;
+      dxf += `0\nLINE\n8\n${lAnno}\n62\n${color}\n10\n${p1.x + offsetX}\n20\n${-(p1.y + offsetY)}\n11\n${p2.x + offsetX}\n21\n${-(p2.y + offsetY)}\n`;
       
       // If arrow, draw a simple visual arrowhead represented by two small line segments
       if (ann.type === 'arrow') {
@@ -269,8 +321,8 @@ ENTITIES
           const rX = headX + arrowSize * Math.cos(rightAngle);
           const rY = headY + arrowSize * Math.sin(rightAngle);
 
-          dxf += `0\nLINE\n8\nA-ANNO\n62\n${color}\n10\n${headX}\n20\n${headY}\n11\n${lX}\n21\n${lY}\n`;
-          dxf += `0\nLINE\n8\nA-ANNO\n62\n${color}\n10\n${headX}\n20\n${headY}\n11\n${rX}\n21\n${rY}\n`;
+          dxf += `0\nLINE\n8\n${lAnno}\n62\n${color}\n10\n${headX}\n20\n${headY}\n11\n${lX}\n21\n${lY}\n`;
+          dxf += `0\nLINE\n8\n${lAnno}\n62\n${color}\n10\n${headX}\n20\n${headY}\n11\n${rX}\n21\n${rY}\n`;
         }
       }
     } 
@@ -278,7 +330,7 @@ ENTITIES
       const p1 = ann.points[0];
       const p2 = ann.points[1];
       const radius = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      dxf += `0\nCIRCLE\n8\nA-ANNO\n62\n${color}\n10\n${p1.x + offsetX}\n20\n${-(p1.y + offsetY)}\n40\n${radius}\n`;
+      dxf += `0\nCIRCLE\n8\n${lAnno}\n62\n${color}\n10\n${p1.x + offsetX}\n20\n${-(p1.y + offsetY)}\n40\n${radius}\n`;
     } 
     else if (ann.type === 'rect' && ann.points.length >= 2) {
       const p1 = ann.points[0];
@@ -289,14 +341,14 @@ ENTITIES
         { x: p2.x, y: p2.y },
         { x: p1.x, y: p2.y }
       ];
-      dxf += `0\nLWPOLYLINE\n8\nA-ANNO\n62\n${color}\n90\n4\n70\n1\n`;
+      dxf += `0\nLWPOLYLINE\n8\n${lAnno}\n62\n${color}\n90\n4\n70\n1\n`;
       pts.forEach(p => {
         dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
       });
     } 
     else if (ann.points.length > 1) {
       // polyline, bezier, arc, etc. fallback to polyline
-      dxf += `0\nLWPOLYLINE\n8\nA-ANNO\n62\n${color}\n90\n${ann.points.length}\n70\n0\n`;
+      dxf += `0\nLWPOLYLINE\n8\n${lAnno}\n62\n${color}\n90\n${ann.points.length}\n70\n0\n`;
       ann.points.forEach(p => {
         dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
       });
@@ -314,9 +366,11 @@ export const downloadDXF = (
   projectName: string,
   rooms: Room[],
   annotations: Annotation[] = [],
-  currentFloor: number
+  currentFloor: number,
+  unitSystem?: 'metric' | 'imperial',
+  layerPrefix?: string,
+  exportGrid?: boolean
 ) => {
-  // Center drawing mathematically or default coordinate bounds
   let minX = Infinity, minY = Infinity;
   const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
   
@@ -333,12 +387,23 @@ export const downloadDXF = (
   const offsetX = -minX + 50;
   const offsetY = -minY + 50;
 
-  const dxfContent = generateDXF(projectName, rooms, annotations, currentFloor, offsetX, offsetY);
+  const dxfContent = generateDXF(
+    projectName,
+    rooms,
+    annotations,
+    currentFloor,
+    offsetX,
+    offsetY,
+    unitSystem,
+    layerPrefix,
+    exportGrid
+  );
+
   const blob = new Blob([dxfContent], { type: 'application/dxf' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = url;
   link.download = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-floor-${currentFloor}.dxf`;
+  link.href = url;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

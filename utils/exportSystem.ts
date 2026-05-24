@@ -293,7 +293,17 @@ export const handleExport = async (
 
     // --- DXF Export ---
     if (format === 'dxf') {
-        const dxfContent = generateDXF(projectName, rooms, annotations || [], currentFloor, offsetX, offsetY);
+        const dxfContent = generateDXF(
+            projectName,
+            rooms,
+            annotations || [],
+            currentFloor,
+            offsetX,
+            offsetY,
+            appSettings.unitSystem,
+            appSettings.layerPrefix,
+            appSettings.exportGrid
+        );
         const blob = new Blob([dxfContent], { type: 'application/dxf' });
         const url = URL.createObjectURL(blob);
         triggerDownload(url, `${projectName}-floor-${currentFloor}.dxf`);
@@ -359,6 +369,21 @@ export const handleExport = async (
     if (format === 'jpeg' || (format === 'png' && !options?.transparentBackground)) {
         const bgColor = darkMode ? '#1a1a1a' : '#f0f2f5';
         svgContent += `<rect x="${-offsetX}" y="${-offsetY}" width="${width}" height="${height}" fill="${bgColor}" />`;
+    }
+
+    // Render Canvas Grid if enabled
+    if (appSettings.exportGrid !== false) {
+        const gridGap = 1 * PIXELS_PER_METER;
+        const gridColor = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)";
+        svgContent += `
+        <!-- Export Canvas Grid -->
+        <defs>
+          <pattern id="grid-pattern" width="${gridGap}" height="${gridGap}" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1" fill="${gridColor}" />
+          </pattern>
+        </defs>
+        <rect x="${-offsetX}" y="${-offsetY}" width="${width}" height="${height}" fill="url(#grid-pattern)" pointer-events="none" />
+        `;
     }
 
     // Reference Images (Bottom Layer)
@@ -462,6 +487,10 @@ export const handleExport = async (
             hatchPath = `<path d="${d}" fill="url(#hatch-${r.id}-${r.style.hatchPattern})" pointer-events="none" />`;
         }
 
+        const areaText = appSettings.unitSystem === 'imperial'
+            ? `${Number((r.area * 10.7639).toFixed(1))} sq ft`
+            : `${r.area.toFixed(1)} m²`;
+
         svgContent += `
         <g transform="translate(${r.x}, ${r.y})">
             <path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" fill-opacity="${opacity}" stroke-dasharray="${isSketchy ? '5,5' : 'none'}" />
@@ -469,7 +498,7 @@ export const handleExport = async (
             <text x="${cx}" y="${startY}" class="text title" fill="${currentStyle?.colorMode === 'monochrome' ? '#000000' : '#1e293b'}" font-family="${currentStyle?.fontFamily || 'sans-serif'}">
                 ${lines.map((line, i) => `<tspan x="${cx}" dy="${i === 0 ? 0 : lineHeight}">${line}</tspan>`).join('')}
             </text>
-            <text x="${cx}" y="${cy + 8 + (lines.length > 1 ? (lines.length * lineHeight) / 2 : 0)}" class="text subtitle">${r.area} m²</text>
+            <text x="${cx}" y="${cy + 8 + (lines.length > 1 ? (lines.length * lineHeight) / 2 : 0)}" class="text subtitle">${areaText}</text>
         </g>`;
     });
 
@@ -501,14 +530,18 @@ export const handleExport = async (
     // For SVG export, we probably want it in the SVG.
 
     if (format !== 'pdf') {
-        const scaleBarLength = 10 * PIXELS_PER_METER; // 10 meters
+        const isImperial = appSettings.unitSystem === 'imperial';
+        const scaleBarLength = isImperial 
+            ? (30 * 0.3048) * PIXELS_PER_METER
+            : 10 * PIXELS_PER_METER;
+        const scaleBarLabel = isImperial ? "30 feet" : "10 meters";
         const scaleBarX = maxX - 50 - scaleBarLength;
         const scaleBarY = maxY - 50;
         const textColor = (format === 'jpeg' && darkMode) ? '#94a3b8' : '#64748b';
         const strokeColor = (format === 'jpeg' && darkMode) ? '#94a3b8' : '#64748b';
 
         svgContent += `<g transform="translate(${scaleBarX}, ${scaleBarY})">
-             <text x="${scaleBarLength / 2}" y="-8" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="bold" fill="${textColor}">10 meters</text>
+             <text x="${scaleBarLength / 2}" y="-8" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="bold" fill="${textColor}">${scaleBarLabel}</text>
              <line x1="0" y1="0" x2="${scaleBarLength}" y2="0" stroke="${strokeColor}" stroke-width="2" />
              <line x1="0" y1="-4" x2="0" y2="4" stroke="${strokeColor}" stroke-width="2" />
              <line x1="${scaleBarLength}" y1="-4" x2="${scaleBarLength}" y2="4" stroke="${strokeColor}" stroke-width="2" />
@@ -594,20 +627,16 @@ export const handleExport = async (
         // If scale is 1:100. 10m = 10000mm. On paper it is 100mm.
         // We want a bar representing 10m.
 
+        const isImperial = appSettings.unitSystem === 'imperial';
         let barWidthMm = 0;
-        let label = "10m";
+        let label = isImperial ? "30 ft" : "10m";
 
         if (options?.pdfScale) {
-            // 1:Scale. 10m -> 10000mm / Scale.
-            barWidthMm = 10000 / options.pdfScale;
+            const targetMm = isImperial ? 9144 : 10000;
+            barWidthMm = targetMm / options.pdfScale;
         } else {
-            // "Fit to Page". We don't know the exact scale easily unless we back-calculate.
-            // targetW is the width of the SVG on the PDF in mm.
-            // width is the width of the SVG in pixels.
-            // visualScale = targetW / width.  (mm per pixel)
-            // 10m in pixels = 10 * PIXELS_PER_METER.
-            // barWidthMm = (10 * PIXELS_PER_METER) * (targetW / width);
-            barWidthMm = (10 * PIXELS_PER_METER) * (targetW / width);
+            const scaleBarLengthPx = isImperial ? (30 * 0.3048) * PIXELS_PER_METER : 10 * PIXELS_PER_METER;
+            barWidthMm = scaleBarLengthPx * (targetW / width);
         }
 
         const margin = 10;

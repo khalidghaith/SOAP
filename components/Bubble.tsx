@@ -33,6 +33,17 @@ interface BubbleProps {
 }
 
 
+const hexToRgba = (hex: string, opacity: number): string => {
+    if (!hex) return 'transparent';
+    if (hex.startsWith('rgba') || hex === 'transparent') return hex;
+    const cleanHex = hex.replace('#', '');
+    if (cleanHex.length !== 6) return hex;
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+};
+
 // area utility
 const calculatePolygonArea = (points: Point[]): number => {
     let area = 0;
@@ -210,17 +221,39 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     };
     const visualStyle = getZoneStyle(room.zone);
 
+    const getZoneOpacity = (zone: string) => {
+        const isDark = darkMode;
+        const zoneKey = Object.keys(zoneColors || {}).find(
+            (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
+        );
+        if (zoneKey && zoneColors[zoneKey]) {
+            const classString = zoneColors[zoneKey].bg;
+            const classes = classString.split(' ');
+            let activeClass = classes.find(c => !c.includes(':')) || '';
+            if (isDark) {
+                const darkClass = classes.find(c => c.startsWith('dark:'));
+                if (darkClass) activeClass = darkClass.replace('dark:', '');
+            }
+            const opacityMatch = activeClass.match(/\/(\d+)$/);
+            if (opacityMatch) {
+                return parseInt(opacityMatch[1], 10) / 100;
+            }
+        }
+        return 1.0;
+    };
+
     const themeStyles = useMemo(() => {
         const id = diagramStyle.id;
         const baseBorderColor = getHexBorderForZone(room.zone, zoneColors);
         const baseFillColor = getHexColorForZone(room.zone, zoneColors);
+        const zoneOpacity = getZoneOpacity(room.zone);
 
         // Common default fallback values
         let fill = room.style?.fill || baseFillColor;
         let stroke = room.style?.stroke || baseBorderColor;
         let strokeWidth = (room.style?.strokeWidth ?? appSettings.strokeWidth);
         let strokeDasharray = room.style?.strokeDasharray ?? (diagramStyle.sketchy ? `${10 / zoomScale},${10 / zoomScale}` : "none");
-        let fillOpacity = room.style?.opacity ?? diagramStyle.opacity;
+        let fillOpacity = room.style?.opacity ?? (diagramStyle.opacity * zoneOpacity);
         
         let shadowFilter = 'none';
         if (diagramStyle.shadow === 'shadow-md') {
@@ -264,7 +297,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             stroke = room.style?.stroke || baseBorderColor;
             shadowFilter = 'drop-shadow(0 12px 16px rgba(0, 0, 0, 0.15))';
             boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.15)';
-            textClass = `font-serif tracking-normal font-semibold ${darkMode ? 'text-stone-200' : 'text-stone-900'}`;
+            textClass = `font-sans tracking-normal font-semibold ${darkMode ? 'text-stone-200' : 'text-stone-900'}`;
         }
 
         return {
@@ -316,8 +349,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             // This is purely visual and doesn't affect the data model
             return createBubblePath(activePoints);
         }
-        return createRoundedPath(activePoints, room.style?.cornerRadius ?? appSettings.cornerRadius);
-    }, [activePoints, appSettings.cornerRadius, room.style?.cornerRadius, room.shape]);
+        return createRoundedPath(activePoints, themeStyles.borderRadius);
+    }, [activePoints, themeStyles.borderRadius, room.shape]);
 
     // Keyboard Listener for Deletion
     useEffect(() => {
@@ -1232,11 +1265,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         <svg className="overflow-visible pointer-events-none">
                             <path
                                 d={polygonPath}
-                                className={`pointer-events-auto ${
-                                    ['blueprint', 'clay'].includes(diagramStyle.id)
-                                        ? ''
-                                        : `${!room.style?.fill ? visualStyle.bg.replace(/bg-/g, 'fill-') : ''} ${!room.style?.stroke ? visualStyle.border.replace(/border-/g, 'stroke-') : ''}`
-                                }`}
+                                className="pointer-events-auto"
                                 strokeWidth={themeStyles.strokeWidth}
                                 strokeDasharray={themeStyles.strokeDasharray}
                                 fillOpacity={themeStyles.fillOpacity}
@@ -1323,29 +1352,42 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         ))}
                     </div>
                 ) : (
-                    <div
-                        className={`absolute top-0 left-0 overflow-hidden ${
-                            ['blueprint', 'clay'].includes(diagramStyle.id)
-                                ? ''
-                                : `${diagramStyle.shadow} ${!room.style?.fill ? visualStyle.bg : ''} ${!room.style?.stroke ? visualStyle.border : ''}`
-                        }`}
-                        style={{
-                            width: room.width, height: room.height,
-                            backgroundColor: themeStyles.fill,
-                            borderColor: themeStyles.stroke,
-                            borderStyle: 'solid',
-                            borderWidth: themeStyles.strokeWidth,
-                            opacity: themeStyles.fillOpacity,
-                            borderRadius: themeStyles.borderRadius,
-                            boxShadow: themeStyles.boxShadow
-                        }}
-                    >
-                        {room.style?.hatchPattern && room.style.hatchPattern !== 'none' && (
-                            <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
-                                {renderHatchDefs('hatch-' + room.id, room.style.hatchColor || getHexBorderForZone(room.zone, zoneColors), room.style.hatchScale ?? 1)}
-                                <rect width="100%" height="100%" fill={`url(#hatch-${room.id}-${room.style.hatchPattern})`} />
-                            </svg>
-                        )}
+                    <div className="overflow-visible absolute top-0 left-0 pointer-events-none">
+                        <svg className="overflow-visible pointer-events-none" style={{ width: room.width, height: room.height }}>
+                            <rect
+                                x={0}
+                                y={0}
+                                width={room.width}
+                                height={room.height}
+                                rx={themeStyles.borderRadius}
+                                ry={themeStyles.borderRadius}
+                                className="pointer-events-auto"
+                                strokeWidth={themeStyles.strokeWidth}
+                                strokeDasharray={themeStyles.strokeDasharray}
+                                fillOpacity={themeStyles.fillOpacity}
+                                fill={themeStyles.fill}
+                                stroke={themeStyles.stroke}
+                                style={{
+                                    filter: themeStyles.shadowFilter,
+                                    transition: 'none'
+                                }}
+                            />
+                            {room.style?.hatchPattern && room.style.hatchPattern !== 'none' && (
+                                <>
+                                    {renderHatchDefs('hatch-' + room.id, room.style.hatchColor || getHexBorderForZone(room.zone, zoneColors), room.style.hatchScale ?? 1)}
+                                    <rect
+                                        x={0}
+                                        y={0}
+                                        width={room.width}
+                                        height={room.height}
+                                        rx={themeStyles.borderRadius}
+                                        ry={themeStyles.borderRadius}
+                                        fill={`url(#hatch-${room.id}-${room.style.hatchPattern})`}
+                                        pointerEvents="none"
+                                    />
+                                </>
+                            )}
+                        </svg>
                     </div>
                 )}
 
@@ -1458,6 +1500,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         transition: 'none'
                     }}
                     onPointerDown={handleTextMouseDown}
+                    onMouseDown={(e) => {
+                        if (room.isTextUnlocked) {
+                            e.stopPropagation();
+                        }
+                    }}
                 >
                     <div className="relative flex flex-col items-center w-full">
 
@@ -1470,14 +1517,19 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 MozHyphens: 'auto',
                                 msHyphens: 'auto'
                             }}
-                            className={`flex flex-col items-center w-full px-2 text-center ${themeStyles.textClass} leading-tight select-none ${room.isTextUnlocked ? 'pointer-events-auto cursor-move' : 'pointer-events-auto'}`}
+                            className={`flex flex-col items-center w-full px-2 text-center ${themeStyles.textClass} leading-tight select-none ${room.isTextUnlocked ? 'pointer-events-auto cursor-move' : 'pointer-events-none'}`}
                         >
                             <div className="font-bold w-full">
                                 {wrappedNameLines.map((line, i) => (
                                     <div key={i}>{line}</div>
                                 ))}
                             </div>
-                            <span className="text-[0.8em] opacity-70 font-sans whitespace-nowrap">{Number(room.area.toFixed(2))}m²</span>
+                            <span className="text-[0.8em] opacity-70 font-sans whitespace-nowrap">
+                                {appSettings.unitSystem === 'imperial' 
+                                    ? `${Number((room.area * 10.7639).toFixed(1))} sq ft` 
+                                    : `${Number(room.area.toFixed(2))}m²`
+                                }
+                            </span>
                         </div>
                     </div>
                 </div>

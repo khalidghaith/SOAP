@@ -45,6 +45,7 @@ interface PropertiesPanelProps {
     viewMode: 'EDITOR' | 'CANVAS' | 'VOLUMES';
     allRooms: Room[];
     handleUpdateFloor: (id: number, updates: Partial<Floor>) => void;
+    appSettings: AppSettings;
 }
 
 export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -53,7 +54,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     selectedZone, setSelectedZone, zoneColors, updateRoom, deleteRoom,
     toggleLink, connectionSourceId, renameZone, handleAddZone,
     floors, currentFloor, connections, setConnections, handleConvertShape,
-    zoneArea, selectedZoneRooms, viewMode, allRooms, handleUpdateFloor
+    zoneArea, selectedZoneRooms, viewMode, allRooms, handleUpdateFloor,
+    appSettings
 }) => {
     if (!isOpen) {
         return (
@@ -184,12 +186,12 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                             <input
                                                 type="number"
                                                 className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200 bg-transparent border-b border-transparent focus:border-orange-500 outline-none w-full"
-                                                value={Number(selectedRoom!.area.toFixed(2))}
+                                                value={appSettings.unitSystem === 'imperial' ? Number((selectedRoom!.area * 10.7639).toFixed(1)) : Number(selectedRoom!.area.toFixed(2))}
                                                 onChange={(e) => {
                                                     const val = parseFloat(e.target.value);
-                                                    if (!isNaN(val)) updateRoom(selectedRoom!.id, { area: val });
+                                                    if (!isNaN(val)) updateRoom(selectedRoom!.id, { area: appSettings.unitSystem === 'imperial' ? val / 10.7639 : val });
                                                 }} />
-                                            <small className="text-xs opacity-60">m²</small>
+                                            <small className="text-xs opacity-60 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</small>
                                         </div>
                                     </div>
                                     <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border flex justify-between items-center">
@@ -340,7 +342,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Area</span>
                                     </div>
                                     <div className="text-2xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                        {Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">m²</span>
+                                        {appSettings.unitSystem === 'imperial' ? Number((multiSelectionStats?.totalArea * 10.7639).toFixed(1)) : Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</span>
                                     </div>
                                 </div>
                                 <div className="p-4 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl">
@@ -386,7 +388,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 <div>
                                     <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">
                                         <span>Total Area</span>
-                                        <span className="text-slate-800 dark:text-white">{Number(zoneArea.toFixed(2))} m²</span>
+                                        <span className="text-slate-800 dark:text-white">{appSettings.unitSystem === 'imperial' ? `${Number((zoneArea * 10.7639).toFixed(1))} sq ft` : `${Number(zoneArea.toFixed(2))} m²`}</span>
                                     </div>
                                     <div className="h-1.5 w-full bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
                                         <div className="h-full bg-orange-500 rounded-full" style={{ width: '100%' }} />
@@ -405,7 +407,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         className="p-3 rounded-xl border border-slate-100 dark:border-dark-border hover:border-orange-200 hover:bg-orange-50/30 dark:hover:bg-orange-900/5 cursor-pointer flex justify-between items-center group transition-all"
                                     >
                                         <span className="text-xs font-bold text-slate-700 dark:text-gray-300">{r.name}</span>
-                                        <span className="text-[10px] font-black text-slate-400">{r.area} m²</span>
+                                        <span className="text-[10px] font-black text-slate-400">{appSettings.unitSystem === 'imperial' ? `${Number((r.area * 10.7639).toFixed(1))} sq ft` : `${r.area} m²`}</span>
                                     </div>
                                 ))}
                             </div>

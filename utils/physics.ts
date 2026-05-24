@@ -1,11 +1,19 @@
 import { Room } from '../types';
 
-export const applyMagneticPhysics = (rooms: Room[]): Room[] => {
+export const applyMagneticPhysics = (
+    rooms: Room[],
+    strengthParam?: number,
+    paddingParam?: number
+): Room[] => {
     // Clone rooms to avoid mutation
     const nextRooms = rooms.map(r => ({ ...r }));
-    const strength = 0.5; // Attraction strength
+    
+    // strengthParam goes from 10 to 100, architectural default is 50 -> maps to original 0.5 force
+    const strength = (strengthParam ?? 50) / 100;
     const repulsion = 2.0; // Repulsion to prevent overlap
-    const minDistance = 5; // Pixel buffer
+    
+    // paddingParam goes from 0 to 40 pixels, architectural default is 10
+    const padding = paddingParam ?? 10;
 
     let moved = false;
 
@@ -36,23 +44,18 @@ export const applyMagneticPhysics = (rooms: Room[]): Room[] => {
 
             // Attraction (same zone)
             if (a.zone === b.zone) {
-                // Ideally they should touch, so target distance is sum of half-sizes? 
-                // Approximating bubbles as circles for physics or simple box physics.
-                // Let's use simple center attraction but clamp it so they don't overlap too much.
-                // Or better: Box collision response.
-
                 // Force proportional to distance (spring)
-                // We want them to group.
                 fx += dirX * strength;
                 fy += dirY * strength;
             }
 
-            // Repulsion (all nodes, to avoid overlap)
-            // Calculate overlap
-            const overlapX = (a.width / 2 + b.width / 2) - Math.abs(dx);
-            const overlapY = (a.height / 2 + b.height / 2) - Math.abs(dy);
+            // Repulsion (all nodes, to avoid overlap, keeping safety cushion equal to padding)
+            const targetWidth = (a.width + b.width) / 2 + padding;
+            const targetHeight = (a.height + b.height) / 2 + padding;
+            const overlapX = targetWidth - Math.abs(dx);
+            const overlapY = targetHeight - Math.abs(dy);
 
-            if (Math.abs(dx) < (a.width + b.width) / 2 && Math.abs(dy) < (a.height + b.height) / 2) {
+            if (Math.abs(dx) < targetWidth && Math.abs(dy) < targetHeight) {
                 // Determine smallest overlap axis for resolution
                 if (overlapX < overlapY) {
                     fx -= Math.sign(dx) * repulsion * overlapX;

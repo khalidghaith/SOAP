@@ -21,6 +21,7 @@ import {
     MoreHorizontal
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType } from '../types';
+import polylineSvgRaw from '../lib/symbols/polyline.svg?raw';
 
 interface SketchToolbarProps {
     isActive: boolean;
@@ -83,9 +84,7 @@ export const SketchPanel: React.FC<Omit<SketchToolbarProps, 'onToggle'>> = ({
                             <ToolButton active={activeType === 'select'} onClick={() => onTypeChange('select')} icon={<MousePointer2 size={14} />} title="Select / Edit" />
                             <ToolButton active={activeType === 'line'} onClick={() => onTypeChange('line')} icon={<Slash size={14} />} title="Line" />
                             <ToolButton active={activeType === 'polyline'} onClick={() => onTypeChange('polyline')} icon={
-                                <svg viewBox="0 0 100 100" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="8.33" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M8.096,87.798l14.393,-75.041l38.142,-0.262l31.534,38.927l-30.945,33.039l-29.964,-37.594" />
-                                </svg>
+                                <div className="w-3.5 h-3.5 flex items-center justify-center polyline-icon-container" dangerouslySetInnerHTML={{ __html: polylineSvgRaw }} />
                             } title="Polyline" />
                             <ToolButton active={activeType === 'arc'} onClick={() => onTypeChange('arc')} icon={<Spline size={14} />} title="Arc" />
                             <ToolButton active={activeType === 'bezier'} onClick={() => onTypeChange('bezier')} icon={<Tangent size={14} />} title="Bezier" />
