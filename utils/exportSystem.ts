@@ -1,4 +1,4 @@
-import { Room, Connection, Point, ZoneColor, AppSettings, Annotation, DiagramStyle, ReferenceImage } from '../types';
+import { Room, Connection, Point, ZoneColor, AppSettings, Annotation, DiagramStyle, ReferenceImage, SiteProperties } from '../types';
 import { getConvexHull, createRoundedPath } from './geometry';
 import { SketchManager } from '../SketchManager';
 import { jsPDF } from "jspdf";
@@ -214,7 +214,8 @@ export const handleExport = async (
     annotations?: Annotation[],
     options?: any,
     currentStyle?: DiagramStyle,
-    referenceImages?: ReferenceImage[]
+    referenceImages?: ReferenceImage[],
+    siteProperties?: SiteProperties
 ) => {
     // --- JSON Export ---
     if (format === 'json') {
@@ -242,6 +243,13 @@ export const handleExport = async (
         if (r.spaceType === 'multistory') {
             const from = r.msFromFloor ?? r.floor;
             const to = r.msToFloor ?? r.floor;
+            const minF = Math.min(from, to);
+            const maxF = Math.max(from, to);
+            return currentFloor >= minF && currentFloor <= maxF;
+        }
+        if (r.spaceType === 'verticalConnection') {
+            const from = r.vcFromFloor ?? r.floor;
+            const to = r.vcToFloor ?? r.floor;
             const minF = Math.min(from, to);
             const maxF = Math.max(from, to);
             return currentFloor >= minF && currentFloor <= maxF;
@@ -450,7 +458,7 @@ export const handleExport = async (
 
     // Rooms
     visibleRooms.forEach(r => {
-        const isGrayedOut = r.floor !== currentFloor;
+        const isGrayedOut = r.spaceType === 'multistory' && r.floor !== currentFloor;
         const fill = isGrayedOut ? (darkMode ? '#1e293b' : '#e2e8f0') : (r.style?.fill || getFillColor(r.zone, currentStyle));
         const stroke = isGrayedOut ? (darkMode ? '#475569' : '#94a3b8') : (r.style?.stroke || getStrokeColor(r.zone, currentStyle));
         const strokeWidth = r.style?.strokeWidth ?? getStrokeWidth(currentStyle);
@@ -558,6 +566,25 @@ export const handleExport = async (
              <line x1="0" y1="0" x2="${scaleBarLength}" y2="0" stroke="${strokeColor}" stroke-width="2" />
              <line x1="0" y1="-4" x2="0" y2="4" stroke="${strokeColor}" stroke-width="2" />
              <line x1="${scaleBarLength}" y1="-4" x2="${scaleBarLength}" y2="4" stroke="${strokeColor}" stroke-width="2" />
+         </g>`;
+
+        // Render Compass next to scale bar in SVG
+        const compassSize = 36;
+        const compassX = scaleBarX - compassSize - 20;
+        const compassY = scaleBarY - (compassSize / 2) + 2;
+
+        svgContent += `
+         <!-- Export Compass -->
+         <g transform="translate(${compassX}, ${compassY}) scale(${compassSize / 100})">
+             <g transform="rotate(${siteProperties?.northAngle || 0}, 50, 50)" stroke="${strokeColor}" fill="none">
+                 <g transform="matrix(1.299396,0,0,1.299396,-26.793032,-6.527396)">
+                     <circle cx="59.099" cy="43.503" r="34.463" stroke-width="1.8" />
+                 </g>
+                 <path d="M5.219,50L94.781,50" stroke-width="0.8" />
+                 <path d="M50,94.781L50,5.219" stroke-width="0.8" />
+                 <path d="M50,5.219L50,50" stroke-width="6.5" stroke-linecap="round" />
+             </g>
+             <text x="50" y="-12" text-anchor="middle" font-family="sans-serif" font-size="20" font-weight="black" fill="${strokeColor}">N</text>
          </g>`;
     }
 
@@ -667,6 +694,51 @@ export const handleExport = async (
         doc.line(barX + barWidthMm, barY - 1, barX + barWidthMm, barY + 1);
         // Text
         doc.text(label, barX + (barWidthMm / 2), barY - 2, { align: 'center' });
+
+        // Add Compass next to scale bar in PDF
+        const pdfCompassRadius = 4.5; // mm
+        const pdfCompassX = barX - pdfCompassRadius - 6; // 6mm gap
+        const pdfCompassY = barY;
+
+        doc.setLineWidth(0.15);
+        doc.circle(pdfCompassX, pdfCompassY, pdfCompassRadius, 'S');
+
+        const angleRad = ((siteProperties?.northAngle || 0) - 90) * Math.PI / 180;
+        const cosA = Math.cos(angleRad);
+        const sinA = Math.sin(angleRad);
+        const cosPerp = Math.cos(angleRad + Math.PI / 2);
+        const sinPerp = Math.sin(angleRad + Math.PI / 2);
+
+        // Draw crosshairs
+        doc.line(
+            pdfCompassX - pdfCompassRadius * cosPerp,
+            pdfCompassY - pdfCompassRadius * sinPerp,
+            pdfCompassX + pdfCompassRadius * cosPerp,
+            pdfCompassY + pdfCompassRadius * sinPerp
+        );
+        // North-South line (thin for south)
+        doc.line(
+            pdfCompassX,
+            pdfCompassY,
+            pdfCompassX - pdfCompassRadius * cosA,
+            pdfCompassY - pdfCompassRadius * sinA
+        );
+        // Thick North pointer line
+        doc.setLineWidth(0.6);
+        doc.line(
+            pdfCompassX,
+            pdfCompassY,
+            pdfCompassX + pdfCompassRadius * cosA,
+            pdfCompassY + pdfCompassRadius * sinA
+        );
+
+        // Reset line width
+        doc.setLineWidth(0.2);
+
+        // Draw 'N' text slightly above the compass
+        doc.setFontSize(6);
+        const textDist = pdfCompassRadius + 2.2;
+        doc.text("N", pdfCompassX + textDist * cosA, pdfCompassY + textDist * sinA + 0.7, { align: 'center' });
 
         return doc.output('blob');
     }

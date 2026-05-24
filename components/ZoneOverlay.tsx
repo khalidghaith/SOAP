@@ -56,7 +56,25 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
         const cornerRadius = appSettings.cornerRadius;
 
         // Group points by zone
-        rooms.filter(r => r.isPlaced && r.floor === currentFloor).forEach(r => {
+        rooms.filter(r => {
+            if (!r.isPlaced) return false;
+            if (r.floor === currentFloor) return true;
+            if (r.spaceType === 'multistory') {
+                const from = r.msFromFloor ?? r.floor;
+                const to = r.msToFloor ?? r.floor;
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
+                return currentFloor >= minF && currentFloor <= maxF;
+            }
+            if (r.spaceType === 'verticalConnection') {
+                const from = r.vcFromFloor ?? r.floor;
+                const to = r.vcToFloor ?? r.floor;
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
+                return currentFloor >= minF && currentFloor <= maxF;
+            }
+            return false;
+        }).forEach(r => {
             if (!zones[r.zone]) zones[r.zone] = [];
             const angle = r.rotation || 0;
             const rad = (angle * Math.PI) / 180;

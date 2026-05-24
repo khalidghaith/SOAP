@@ -244,3 +244,9 @@ export interface ReferenceScaleState {
 
 export type ZoningTypology = 'residential' | 'commercial' | 'medical' | 'educational';
 
+export interface SiteProperties {
+  locationName: string;
+  latitude: number;
+  longitude: number;
+  northAngle: number;
+}

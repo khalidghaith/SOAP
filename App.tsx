@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection, SpaceType, VCType, StairConfig, DEFAULT_STAIR_PARAMS, ZoningTypology } from './types';
+import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection, SpaceType, VCType, StairConfig, DEFAULT_STAIR_PARAMS, ZoningTypology, SiteProperties } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { HelpModal } from './components/HelpModal';
@@ -8,6 +8,7 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 import { ZoneOverlay } from './components/ZoneOverlay'; // Newly added
 import { ExportModal } from './components/ExportModal';
 import { SettingsModal } from './components/SettingsModal';
+import { SitePropertiesModal } from './components/SitePropertiesModal';
 import { VolumesView, VolumesViewHandle } from './components/VolumesView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AILayoutModal } from './components/AILayoutModal';
@@ -253,6 +254,15 @@ export default function App() {
     const [showAboutModal, setShowAboutModal] = useState(false);
     const [showSnapPanel, setShowSnapPanel] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [siteProperties, setSiteProperties] = useState<SiteProperties>(() => {
+        return initialData?.siteProperties || {
+            locationName: 'Cairo, Egypt',
+            latitude: 30.0444,
+            longitude: 31.2357,
+            northAngle: 0,
+        };
+    });
+    const [showSitePropertiesModal, setShowSitePropertiesModal] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);
     const [isAiLayoutLoading, setIsAiLayoutLoading] = useState(false);
@@ -423,8 +433,25 @@ export default function App() {
 
         const isCrossing = start.x > end.x; // Right-to-left
 
-        // --- Select Rooms ---
-        const visibleRooms = roomsRef.current.filter(r => r.isPlaced && r.floor === currentFloor);
+        const visibleRooms = roomsRef.current.filter(r => {
+            if (!r.isPlaced) return false;
+            if (r.floor === currentFloor) return true;
+            if (r.spaceType === 'multistory') {
+                const from = r.msFromFloor ?? r.floor;
+                const to = r.msToFloor ?? r.floor;
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
+                return currentFloor >= minF && currentFloor <= maxF;
+            }
+            if (r.spaceType === 'verticalConnection') {
+                const from = r.vcFromFloor ?? r.floor;
+                const to = r.vcToFloor ?? r.floor;
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
+                return currentFloor >= minF && currentFloor <= maxF;
+            }
+            return false;
+        });
         const newlySelectedRooms = new Set<string>();
 
         visibleRooms.forEach(room => {
@@ -615,14 +642,15 @@ export default function App() {
                 currentFloor,
                 annotations,
                 referenceImages,
-                floorOverlays
+                floorOverlays,
+                siteProperties
             };
             localStorage.setItem('SOAP_PROJECT_AUTOSAVE', JSON.stringify(saveData));
             console.log("Project auto-saved (debounced)");
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages, floorOverlays]);
+    }, [projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages, floorOverlays, siteProperties]);
 
     // --- 3D / Volumes View Computations ---
     const verticalConnections = useMemo(() => {
@@ -753,10 +781,32 @@ export default function App() {
         let snappedY = room.y;
         let activeGuideX: number | undefined;
         let activeGuideY: number | undefined;
-
         const currentRooms = roomsRef.current || [];
         const overlayId = floorOverlays[currentFloor] ?? null;
-        const otherRooms = currentRooms.filter(r => r.isPlaced && r.id !== excludeId && (r.floor === currentFloor || (overlayId !== null && r.floor === overlayId)));
+        const otherRooms = currentRooms.filter(r => {
+            if (!r.isPlaced || r.id === excludeId) return false;
+            
+            const isVisibleOnFloor = (floorId: number) => {
+                if (r.floor === floorId) return true;
+                if (r.spaceType === 'multistory') {
+                    const from = r.msFromFloor ?? r.floor;
+                    const to = r.msToFloor ?? r.floor;
+                    const minF = Math.min(from, to);
+                    const maxF = Math.max(from, to);
+                    return floorId >= minF && floorId <= maxF;
+                }
+                if (r.spaceType === 'verticalConnection') {
+                    const from = r.vcFromFloor ?? r.floor;
+                    const to = r.vcToFloor ?? r.floor;
+                    const minF = Math.min(from, to);
+                    const maxF = Math.max(from, to);
+                    return floorId >= minF && floorId <= maxF;
+                }
+                return false;
+            };
+
+            return isVisibleOnFloor(currentFloor) || (overlayId !== null && isVisibleOnFloor(overlayId));
+        });
 
         if (appSettings.snapToObjects) {
             for (const other of otherRooms) {
@@ -1061,7 +1111,25 @@ export default function App() {
             return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
         };
 
-        const currentFloorRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+        const currentFloorRooms = rooms.filter(r => {
+            if (!r.isPlaced) return false;
+            if (r.floor === currentFloor) return true;
+            if (r.spaceType === 'multistory') {
+                const from = r.msFromFloor ?? r.floor;
+                const to = r.msToFloor ?? r.floor;
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
+                return currentFloor >= minF && currentFloor <= maxF;
+            }
+            if (r.spaceType === 'verticalConnection') {
+                const from = r.vcFromFloor ?? r.floor;
+                const to = r.vcToFloor ?? r.floor;
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
+                return currentFloor >= minF && currentFloor <= maxF;
+            }
+            return false;
+        });
         const currentFloorAnnotations = annotations.filter(a =>
             a.floor === currentFloor &&
             a.points && a.points.length > 0 // Ensure annotation has points
@@ -1504,6 +1572,7 @@ export default function App() {
                     if (data.appSettings) setAppSettings(data.appSettings);
                     if (data.referenceImages) setReferenceImages(data.referenceImages);
                     if (data.floorOverlays) setFloorOverlays(data.floorOverlays);
+                    if (data.siteProperties) setSiteProperties(data.siteProperties);
 
                     setHasInitialZoomed(false);
                     setViewMode('CANVAS');
@@ -1554,8 +1623,13 @@ export default function App() {
 
             if (selectedRoomIds.has(id) && selectedRoomIds.size > 1) {
                 return prev.map(r => {
-                    if (selectedRoomIds.has(r.id) && r.floor === currentFloor && r.isPlaced) {
-                        return { ...r, x: r.x + dx, y: r.y + dy };
+                    if (selectedRoomIds.has(r.id) && r.isPlaced) {
+                        const isVisible = r.floor === currentFloor ||
+                            (r.spaceType === 'multistory' && currentFloor >= Math.min(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor) && currentFloor <= Math.max(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor)) ||
+                            (r.spaceType === 'verticalConnection' && currentFloor >= Math.min(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor) && currentFloor <= Math.max(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor));
+                        if (isVisible) {
+                            return { ...r, x: r.x + dx, y: r.y + dy };
+                        }
                     }
                     return r;
                 });
@@ -1754,8 +1828,13 @@ export default function App() {
     // --- Zone Handlers ---
     const handleZoneDrag = useCallback((zone: string, dx: number, dy: number) => {
         setRooms(prev => prev.map(r => {
-            if (r.zone === zone && r.floor === currentFloor && r.isPlaced) {
-                return { ...r, x: r.x + dx, y: r.y + dy };
+            if (r.zone === zone && r.isPlaced) {
+                const isVisible = r.floor === currentFloor ||
+                    (r.spaceType === 'multistory' && currentFloor >= Math.min(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor) && currentFloor <= Math.max(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor)) ||
+                    (r.spaceType === 'verticalConnection' && currentFloor >= Math.min(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor) && currentFloor <= Math.max(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor));
+                if (isVisible) {
+                    return { ...r, x: r.x + dx, y: r.y + dy };
+                }
             }
             return r;
         }));
@@ -1809,8 +1888,13 @@ export default function App() {
                 // Return zone to inventory
                 addToHistory();
                 setRooms(prev => prev.map(r => {
-                    if (r.zone === selectedZone && r.floor === currentFloor) {
-                        return { ...r, isPlaced: false };
+                    if (r.zone === selectedZone) {
+                        const isVisible = r.floor === currentFloor ||
+                            (r.spaceType === 'multistory' && currentFloor >= Math.min(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor) && currentFloor <= Math.max(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor)) ||
+                            (r.spaceType === 'verticalConnection' && currentFloor >= Math.min(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor) && currentFloor <= Math.max(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor));
+                        if (isVisible) {
+                            return { ...r, isPlaced: false };
+                        }
                     }
                     return r;
                 }));
@@ -2079,7 +2163,8 @@ export default function App() {
                 appSettings,
                 referenceImages,
                 floorOverlays,
-                annotations
+                annotations,
+                siteProperties
             };
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             await saveFile(blob, finalName, 'json');
@@ -2130,10 +2215,10 @@ export default function App() {
                 alert("Failed to export image.");
             }
         } else if (format === 'pdf') {
-            const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, canvasStyle, referenceImages);
+            const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, canvasStyle, referenceImages, siteProperties);
             if (blob) await saveFile(blob, finalName, 'pdf');
         } else if (format === 'dxf') {
-            await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, canvasStyle, referenceImages);
+            await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, canvasStyle, referenceImages, siteProperties);
         }
     };
 
@@ -2171,7 +2256,25 @@ export default function App() {
                             ctx.drawImage(img, 0, 0);
 
                             // Calculate Content Bounds
-                            const placedRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+                            const placedRooms = rooms.filter(r => {
+                                if (!r.isPlaced) return false;
+                                if (r.floor === currentFloor) return true;
+                                if (r.spaceType === 'multistory') {
+                                    const from = r.msFromFloor ?? r.floor;
+                                    const to = r.msToFloor ?? r.floor;
+                                    const minF = Math.min(from, to);
+                                    const maxF = Math.max(from, to);
+                                    return currentFloor >= minF && currentFloor <= maxF;
+                                }
+                                if (r.spaceType === 'verticalConnection') {
+                                    const from = r.vcFromFloor ?? r.floor;
+                                    const to = r.vcToFloor ?? r.floor;
+                                    const minF = Math.min(from, to);
+                                    const maxF = Math.max(from, to);
+                                    return currentFloor >= minF && currentFloor <= maxF;
+                                }
+                                return false;
+                            });
                             if (placedRooms.length > 0) {
                                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                                 placedRooms.forEach(r => {
@@ -2694,7 +2797,17 @@ export default function App() {
                                     {connections.map(conn => {
                                         const fromRoom = rooms.find(r => r.id === conn.fromId);
                                         const toRoom = rooms.find(r => r.id === conn.toId);
-                                        if (!fromRoom || !toRoom || !fromRoom.isPlaced || !toRoom.isPlaced || fromRoom.floor !== currentFloor || toRoom.floor !== currentFloor) return null;
+                                        if (!fromRoom || !toRoom || !fromRoom.isPlaced || !toRoom.isPlaced) return null;
+
+                                        const isFromVisible = fromRoom.floor === currentFloor ||
+                                            (fromRoom.spaceType === 'multistory' && currentFloor >= Math.min(fromRoom.msFromFloor ?? fromRoom.floor, fromRoom.msToFloor ?? fromRoom.floor) && currentFloor <= Math.max(fromRoom.msFromFloor ?? fromRoom.floor, fromRoom.msToFloor ?? fromRoom.floor)) ||
+                                            (fromRoom.spaceType === 'verticalConnection' && currentFloor >= Math.min(fromRoom.vcFromFloor ?? fromRoom.floor, fromRoom.vcToFloor ?? fromRoom.floor) && currentFloor <= Math.max(fromRoom.vcFromFloor ?? fromRoom.floor, fromRoom.vcToFloor ?? fromRoom.floor));
+                                        
+                                        const isToVisible = toRoom.floor === currentFloor ||
+                                            (toRoom.spaceType === 'multistory' && currentFloor >= Math.min(toRoom.msFromFloor ?? toRoom.floor, toRoom.msToFloor ?? toRoom.floor) && currentFloor <= Math.max(toRoom.msFromFloor ?? toRoom.floor, toRoom.msToFloor ?? toRoom.floor)) ||
+                                            (toRoom.spaceType === 'verticalConnection' && currentFloor >= Math.min(toRoom.vcFromFloor ?? toRoom.floor, toRoom.vcToFloor ?? toRoom.floor) && currentFloor <= Math.max(toRoom.vcFromFloor ?? toRoom.floor, toRoom.vcToFloor ?? toRoom.floor));
+
+                                        if (!isFromVisible || !isToVisible) return null;
 
                                         const x1 = fromRoom.x + fromRoom.width / 2;
                                         const y1 = fromRoom.y + fromRoom.height / 2;
@@ -2790,6 +2903,13 @@ export default function App() {
                                             const maxF = Math.max(from, to);
                                             return currentFloor >= minF && currentFloor <= maxF;
                                         }
+                                        if (r.spaceType === 'verticalConnection') {
+                                            const from = r.vcFromFloor ?? r.floor;
+                                            const to = r.vcToFloor ?? r.floor;
+                                            const minF = Math.min(from, to);
+                                            const maxF = Math.max(from, to);
+                                            return currentFloor >= minF && currentFloor <= maxF;
+                                        }
                                         return false;
                                     });
                                     const overlayRooms = activeOverlayFloorId !== null
@@ -2802,7 +2922,7 @@ export default function App() {
                                             room={room}
                                             zoomScale={scale}
                                             updateRoom={updateRoom}
-                                            isGrayedOut={room.floor !== currentFloor}
+                                            isGrayedOut={room.spaceType === 'multistory' && room.floor !== currentFloor}
                                             onMove={(x, y) => handleMoveRoom(room.id, x, y)}
                                             isSelected={selectedRoomIds.has(room.id)}
                                             isLinkingSource={connectionSourceId === room.id}
@@ -2891,12 +3011,40 @@ export default function App() {
                                 </div>
                             </div>
 
-                            {/* Scale Bar on Canvas - Dynamic */}
-                            <div className="absolute bottom-12 right-6 flex flex-col items-end gap-1 pointer-events-none">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-bold text-slate-400 text-shadow-sm">10 meters</span>
-                                    <div className="h-2 border-x border-b border-slate-400/80 bg-white/20 backdrop-blur-sm"
-                                        style={{ width: 10 * PIXELS_PER_METER * scale }} />
+                            {/* Scale and Compass Group on Canvas */}
+                            <div className="absolute bottom-12 right-6 flex items-center gap-4 pointer-events-none z-[150]">
+                                {/* Clickable Compass */}
+                                <button
+                                    onClick={() => setShowSitePropertiesModal(true)}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    className="w-12 h-12 rounded-full glass-card hover:bg-slate-50 dark:hover:bg-white/10 flex items-center justify-center pointer-events-auto cursor-pointer shadow-lg transition-all duration-300 hover:scale-105 active:scale-95 group relative border border-slate-200/50 dark:border-white/10"
+                                    title="Adjust Site Location & True North"
+                                >
+                                    <div
+                                        className="w-10 h-10 transition-transform duration-100 ease-out"
+                                        style={{ transform: `rotate(${siteProperties.northAngle || 0}deg)` }}
+                                    >
+                                        <svg width="100%" height="100%" viewBox="0 0 100 100" className="stroke-slate-700 dark:stroke-slate-300 fill-none">
+                                            <g transform="matrix(1.299396,0,0,1.299396,-26.793032,-6.527396)">
+                                                <circle cx="59.099" cy="43.503" r="34.463" className="stroke-slate-400 dark:stroke-slate-500" strokeWidth="1.2" />
+                                            </g>
+                                            <path d="M5.219,50L94.781,50" strokeWidth="0.6" className="stroke-slate-300 dark:stroke-slate-600" />
+                                            <path d="M50,94.781L50,5.219" strokeWidth="0.6" className="stroke-slate-300 dark:stroke-slate-600" />
+                                            <path d="M50,5.219L50,50" strokeWidth="6" className="stroke-orange-600 dark:stroke-orange-500" strokeLinecap="round" />
+                                        </svg>
+                                    </div>
+                                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] font-black text-orange-600 dark:text-orange-500 bg-white/85 dark:bg-slate-900/85 px-1.5 py-0.5 rounded shadow-sm select-none opacity-0 group-hover:opacity-100 transition-opacity">N</span>
+                                </button>
+
+                                {/* Dynamic Scale Bar */}
+                                <div className="flex flex-col items-end gap-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-bold text-slate-400 text-shadow-sm select-none">
+                                            {appSettings.unitSystem === 'imperial' ? '30 feet' : '10 meters'}
+                                        </span>
+                                        <div className="h-2 border-x border-b border-slate-400/80 bg-white/20 backdrop-blur-sm"
+                                            style={{ width: (appSettings.unitSystem === 'imperial' ? (30 * 0.3048) : 10) * PIXELS_PER_METER * scale }} />
+                                    </div>
                                 </div>
                             </div>
 
@@ -4057,6 +4205,16 @@ export default function App() {
                     onGenerate={handleAiSpatialLayout}
                     isLoading={isAiLayoutLoading}
                 />
+
+                {
+                    showSitePropertiesModal && (
+                        <SitePropertiesModal
+                            properties={siteProperties}
+                            onUpdate={setSiteProperties}
+                            onClose={() => setShowSitePropertiesModal(false)}
+                        />
+                    )
+                }
             </div>
         </div >
     );

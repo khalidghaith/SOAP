@@ -81,6 +81,13 @@ export const generateDXF = (
       const maxF = Math.max(from, to);
       return currentFloor >= minF && currentFloor <= maxF;
     }
+    if (r.spaceType === 'verticalConnection') {
+      const from = r.vcFromFloor ?? r.floor;
+      const to = r.vcToFloor ?? r.floor;
+      const minF = Math.min(from, to);
+      const maxF = Math.max(from, to);
+      return currentFloor >= minF && currentFloor <= maxF;
+    }
     return false;
   });
   const visibleAnnotations = annotations.filter(a => a.floor === currentFloor);
@@ -389,6 +396,13 @@ export const downloadDXF = (
     if (r.spaceType === 'multistory') {
       const from = r.msFromFloor ?? r.floor;
       const to = r.msToFloor ?? r.floor;
+      const minF = Math.min(from, to);
+      const maxF = Math.max(from, to);
+      return currentFloor >= minF && currentFloor <= maxF;
+    }
+    if (r.spaceType === 'verticalConnection') {
+      const from = r.vcFromFloor ?? r.floor;
+      const to = r.vcToFloor ?? r.floor;
       const minF = Math.min(from, to);
       const maxF = Math.max(from, to);
       return currentFloor >= minF && currentFloor <= maxF;
