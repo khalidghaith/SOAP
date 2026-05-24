@@ -236,7 +236,18 @@ export const handleExport = async (
         return;
     }
 
-    const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+    const visibleRooms = rooms.filter(r => {
+        if (!r.isPlaced) return false;
+        if (r.floor === currentFloor) return true;
+        if (r.spaceType === 'multistory') {
+            const from = r.msFromFloor ?? r.floor;
+            const to = r.msToFloor ?? r.floor;
+            const minF = Math.min(from, to);
+            const maxF = Math.max(from, to);
+            return currentFloor >= minF && currentFloor <= maxF;
+        }
+        return false;
+    });
     if (visibleRooms.length === 0) {
         alert("No visible rooms to export.");
         return;
@@ -439,10 +450,12 @@ export const handleExport = async (
 
     // Rooms
     visibleRooms.forEach(r => {
-        const fill = r.style?.fill || getFillColor(r.zone, currentStyle);
-        const stroke = r.style?.stroke || getStrokeColor(r.zone, currentStyle);
+        const isGrayedOut = r.floor !== currentFloor;
+        const fill = isGrayedOut ? (darkMode ? '#1e293b' : '#e2e8f0') : (r.style?.fill || getFillColor(r.zone, currentStyle));
+        const stroke = isGrayedOut ? (darkMode ? '#475569' : '#94a3b8') : (r.style?.stroke || getStrokeColor(r.zone, currentStyle));
         const strokeWidth = r.style?.strokeWidth ?? getStrokeWidth(currentStyle);
-        const opacity = r.style?.opacity ?? getOpacity(currentStyle);
+        const opacity = isGrayedOut ? 0.2 : (r.style?.opacity ?? getOpacity(currentStyle));
+        const strokeDasharray = isGrayedOut ? '4,4' : (isSketchy ? '5,5' : 'none');
         let d = "";
 
         if (r.shape === 'bubble' && r.polygon) {
@@ -493,7 +506,7 @@ export const handleExport = async (
 
         svgContent += `
         <g transform="translate(${r.x}, ${r.y})">
-            <path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" fill-opacity="${opacity}" stroke-dasharray="${isSketchy ? '5,5' : 'none'}" />
+            <path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" fill-opacity="${opacity}" stroke-dasharray="${strokeDasharray}" />
             ${hatchPath}
             <text x="${cx}" y="${startY}" class="text title" fill="${currentStyle?.colorMode === 'monochrome' ? '#000000' : '#1e293b'}" font-family="${currentStyle?.fontFamily || 'sans-serif'}">
                 ${lines.map((line, i) => `<tspan x="${cx}" dy="${i === 0 ? 0 : lineHeight}">${line}</tspan>`).join('')}

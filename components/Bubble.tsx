@@ -32,6 +32,7 @@ interface BubbleProps {
     isSketchMode?: boolean;
     isOverlay?: boolean;
     darkMode?: boolean;
+    isGrayedOut?: boolean;
 }
 
 
@@ -186,7 +187,7 @@ const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.or
 
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false
+    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false, isGrayedOut = false
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isRotating, setIsRotating] = useState(false);
@@ -312,6 +313,13 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             fillOpacity = Math.min(fillOpacity, 0.35);
         }
 
+        if (isGrayedOut) {
+            fill = darkMode ? '#1e293b' : '#e2e8f0';
+            stroke = darkMode ? '#475569' : '#94a3b8';
+            fillOpacity = 0.2;
+            strokeDasharray = `${4 / zoomScale},${4 / zoomScale}`;
+        }
+
         return {
             fill,
             stroke,
@@ -323,7 +331,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             boxShadow,
             textClass
         };
-    }, [diagramStyle, room.zone, room.style, room.spaceType, zoneColors, appSettings, zoomScale, darkMode, visualStyle]);
+    }, [diagramStyle, room.zone, room.style, room.spaceType, zoneColors, appSettings, zoomScale, darkMode, visualStyle, isGrayedOut]);
 
 
     const activePoints = useMemo(() => (room.polygon && room.polygon.length > 0) ? room.polygon : [
@@ -1260,15 +1268,16 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     return (
         <div
             ref={bubbleRef}
-            className={`absolute ${isSketchMode || isOverlay ? 'pointer-events-none' : (isPolygon ? 'pointer-events-none' : 'pointer-events-auto')} ${isSelected ? 'z-20' : (isOverlay ? 'z-0 opacity-20 grayscale' : 'z-10')} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
+            className={`absolute ${isSketchMode || isOverlay || isGrayedOut ? 'pointer-events-none' : (isPolygon ? 'pointer-events-none' : 'pointer-events-auto')} ${isSelected ? 'z-20' : (isOverlay ? 'z-0 opacity-20 grayscale' : 'z-10')} ${isLinkingSource ? 'ring-4 ring-yellow-400 ring-offset-2 rounded-xl' : ''}`}
             style={{
                 transform: `translate3d(${room.x}px, ${room.y}px, 0) rotate(${room.rotation || 0}deg)`,
                 width: (room.polygon || room.shape === 'bubble') ? 0 : room.width,
                 height: (room.polygon || room.shape === 'bubble') ? 0 : room.height,
-                cursor: isSketchMode ? 'default' : (isDragging ? 'grabbing' : 'pointer'),
-                touchAction: 'none'
+                cursor: isSketchMode ? 'default' : (isGrayedOut ? 'default' : (isDragging ? 'grabbing' : 'pointer')),
+                touchAction: 'none',
+                pointerEvents: isGrayedOut ? 'none' : undefined
             }}
-            onPointerDown={isSketchMode || isOverlay ? undefined : handleMouseDown}
+            onPointerDown={isSketchMode || isOverlay || isGrayedOut ? undefined : handleMouseDown}
         >
             {/* Visual Surface */}
             <div className="relative group w-full h-full">

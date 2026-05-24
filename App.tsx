@@ -2780,7 +2780,18 @@ export default function App() {
                                 style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
                             >
                                 {(() => {
-                                    const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+                                    const visibleRooms = rooms.filter(r => {
+                                        if (!r.isPlaced) return false;
+                                        if (r.floor === currentFloor) return true;
+                                        if (r.spaceType === 'multistory') {
+                                            const from = r.msFromFloor ?? r.floor;
+                                            const to = r.msToFloor ?? r.floor;
+                                            const minF = Math.min(from, to);
+                                            const maxF = Math.max(from, to);
+                                            return currentFloor >= minF && currentFloor <= maxF;
+                                        }
+                                        return false;
+                                    });
                                     const overlayRooms = activeOverlayFloorId !== null
                                         ? rooms.filter(r => r.isPlaced && r.floor === activeOverlayFloorId)
                                         : [];
@@ -2791,6 +2802,7 @@ export default function App() {
                                             room={room}
                                             zoomScale={scale}
                                             updateRoom={updateRoom}
+                                            isGrayedOut={room.floor !== currentFloor}
                                             onMove={(x, y) => handleMoveRoom(room.id, x, y)}
                                             isSelected={selectedRoomIds.has(room.id)}
                                             isLinkingSource={connectionSourceId === room.id}
@@ -3338,7 +3350,10 @@ export default function App() {
                                                                         stairParams: { ...DEFAULT_STAIR_PARAMS },
                                                                         zone: 'Circulation',
                                                                     } : {}),
-                                                                    ...(item.type === 'multistory' && !selectedRoom!.spanFloors ? { spanFloors: 2 } : {}),
+                                                                    ...(item.type === 'multistory' && !selectedRoom!.msFromFloor ? {
+                                                                        msFromFloor: selectedRoom!.floor,
+                                                                        msToFloor: Math.min(Math.max(...floors.map(f => f.id)), selectedRoom!.floor + 1),
+                                                                    } : {}),
                                                                 })}
                                                                 className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9px] font-bold transition-all ${
                                                                     (selectedRoom?.spaceType || 'standard') === item.type
@@ -3353,29 +3368,40 @@ export default function App() {
                                                         ))}
                                                     </div>
 
-                                                    {/* Multistory: spanFloors input */}
-                                                    {(selectedRoom?.spaceType === 'multistory') && (
-                                                        <div className="mt-3 bg-slate-50/50 dark:bg-white/5 rounded-xl p-3 border border-slate-100/30 dark:border-dark-border/30">
-                                                            <div className="flex justify-between items-center">
-                                                                <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Spans Floors</span>
-                                                                <div className="flex items-center gap-2">
-                                                                    <button
-                                                                        onClick={() => updateRoom(selectedRoom!.id, { spanFloors: Math.max(2, (selectedRoom!.spanFloors || 2) - 1) })}
-                                                                        className="w-6 h-6 rounded-md bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 flex items-center justify-center text-slate-400 hover:text-orange-600 hover:border-orange-500"
-                                                                    >
-                                                                        <ChevronDown size={12} />
-                                                                    </button>
-                                                                    <span className="text-lg font-black text-slate-700 dark:text-gray-200 w-6 text-center">{selectedRoom!.spanFloors || 2}</span>
-                                                                    <button
-                                                                        onClick={() => updateRoom(selectedRoom!.id, { spanFloors: Math.min(floors.length, (selectedRoom!.spanFloors || 2) + 1) })}
-                                                                        className="w-6 h-6 rounded-md bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 flex items-center justify-center text-slate-400 hover:text-orange-600 hover:border-orange-500"
-                                                                    >
-                                                                        <ChevronUp size={12} />
-                                                                    </button>
+                                                    {/* Multistory: floor range input */}
+                                                    {(selectedRoom?.spaceType === 'multistory') && (() => {
+                                                        const msFrom = selectedRoom.msFromFloor ?? selectedRoom.floor;
+                                                        const msTo = selectedRoom.msToFloor ?? selectedRoom.floor;
+
+                                                        return (
+                                                            <div className="mt-3 bg-slate-50/50 dark:bg-white/5 rounded-xl p-3 border border-slate-100/30 dark:border-dark-border/30">
+                                                                <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Floor Range</span>
+                                                                <div className="flex gap-2 items-center">
+                                                                    <div className="flex-1">
+                                                                        <label className="text-[8px] font-bold text-slate-400 uppercase">From</label>
+                                                                        <select
+                                                                            value={msFrom}
+                                                                            onChange={(e) => updateRoom(selectedRoom!.id, { msFromFloor: parseInt(e.target.value) })}
+                                                                            className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
+                                                                        >
+                                                                            {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                                                                        </select>
+                                                                    </div>
+                                                                    <ArrowUpDown size={14} className="text-slate-300 mt-3" />
+                                                                    <div className="flex-1">
+                                                                        <label className="text-[8px] font-bold text-slate-400 uppercase">To</label>
+                                                                        <select
+                                                                            value={msTo}
+                                                                            onChange={(e) => updateRoom(selectedRoom!.id, { msToFloor: parseInt(e.target.value) })}
+                                                                            className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
+                                                                        >
+                                                                            {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                                                                        </select>
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                        </div>
-                                                    )}
+                                                        );
+                                                    })()}
 
                                                     {/* Vertical Connection sub-panel */}
                                                     {(selectedRoom?.spaceType === 'verticalConnection') && (() => {

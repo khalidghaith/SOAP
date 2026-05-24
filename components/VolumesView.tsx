@@ -77,11 +77,13 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             case 'terrace':
                 return baseHeight * 0.15; // Thin slab
             case 'multistory': {
-                const span = room.spanFloors || 2;
-                const startIdx = sortedFloors.findIndex(f => f.id === room.floor);
+                const from = room.msFromFloor ?? room.floor;
+                const to = room.msToFloor ?? room.floor;
+                const minF = Math.min(from, to);
+                const maxF = Math.max(from, to);
                 let total = 0;
-                for (let i = startIdx; i < Math.min(startIdx + span, sortedFloors.length); i++) {
-                    total += sortedFloors[i]?.height || 3;
+                for (const f of sortedFloors) {
+                    if (f.id >= minF && f.id <= maxF) total += f.height;
                 }
                 return total || baseHeight;
             }
@@ -99,12 +101,16 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             default:
                 return baseHeight;
         }
-    }, [spaceType, room.depth, room.spanFloors, room.vcFromFloor, room.vcToFloor, floor, floors]);
+    }, [spaceType, room.depth, room.vcFromFloor, room.vcToFloor, room.msFromFloor, room.msToFloor, floor, floors]);
 
     const heightIn3D = useMemo(() => {
-        if (spaceType === 'verticalConnection') {
-            const from = room.vcFromFloor ?? Math.min(...floors.map(f => f.id));
-            const to = room.vcToFloor ?? Math.max(...floors.map(f => f.id));
+        if (spaceType === 'verticalConnection' || spaceType === 'multistory') {
+            const from = spaceType === 'verticalConnection'
+                ? (room.vcFromFloor ?? Math.min(...floors.map(f => f.id)))
+                : (room.msFromFloor ?? room.floor);
+            const to = spaceType === 'verticalConnection'
+                ? (room.vcToFloor ?? Math.max(...floors.map(f => f.id)))
+                : (room.msToFloor ?? room.floor);
             const minF = Math.min(from, to);
             const maxF = Math.max(from, to);
             const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
@@ -121,16 +127,18 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             return total + numGaps * floorGap;
         }
         return heightInMeters * HEIGHT_SCALE;
-    }, [spaceType, heightInMeters, room.vcFromFloor, room.vcToFloor, floors, floorGap]);
+    }, [spaceType, heightInMeters, room.vcFromFloor, room.vcToFloor, room.msFromFloor, room.msToFloor, floors, floorGap]);
 
     // Calculate cumulative floor Y position
     const yFloor = useMemo(() => {
         let y = 0;
         const sortedFloors = [...floors].sort((a, b) => a.id - b.id);
 
-        // For vertical connections, start from their fromFloor
+        // For vertical connections and multistory, start from their fromFloor
         const startFloor = spaceType === 'verticalConnection'
             ? Math.min(room.vcFromFloor ?? room.floor, room.vcToFloor ?? room.floor)
+            : spaceType === 'multistory'
+            ? Math.min(room.msFromFloor ?? room.floor, room.msToFloor ?? room.floor)
             : room.floor;
 
         for (const f of sortedFloors) {
@@ -139,7 +147,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             }
         }
         return y;
-    }, [floors, room.floor, room.vcFromFloor, room.vcToFloor, spaceType, floorGap]);
+    }, [floors, room.floor, room.vcFromFloor, room.vcToFloor, room.msFromFloor, room.msToFloor, spaceType, floorGap]);
 
     // Calculate centroid for label positioning
     const centroid = useMemo(() => {

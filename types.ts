@@ -60,6 +60,8 @@ export interface Room {
   // Space Type
   spaceType?: SpaceType;       // default 'standard'
   spanFloors?: number;         // for 'multistory' — how many floors it spans (default 2)
+  msFromFloor?: number;        // for 'multistory' — starting floor (defaults to lowest floor)
+  msToFloor?: number;          // for 'multistory' — ending floor (defaults to highest floor)
   vcType?: VCType;             // for 'verticalConnection'
   vcFromFloor?: number;        // for VC — starting floor (defaults to lowest floor)
   vcToFloor?: number;          // for VC — ending floor (defaults to highest floor)

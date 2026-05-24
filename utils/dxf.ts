@@ -71,7 +71,18 @@ export const generateDXF = (
   layerPrefix?: string,
   exportGrid?: boolean
 ): string => {
-  const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+  const visibleRooms = rooms.filter(r => {
+    if (!r.isPlaced) return false;
+    if (r.floor === currentFloor) return true;
+    if (r.spaceType === 'multistory') {
+      const from = r.msFromFloor ?? r.floor;
+      const to = r.msToFloor ?? r.floor;
+      const minF = Math.min(from, to);
+      const maxF = Math.max(from, to);
+      return currentFloor >= minF && currentFloor <= maxF;
+    }
+    return false;
+  });
   const visibleAnnotations = annotations.filter(a => a.floor === currentFloor);
 
   // Setup dynamic Layer names
@@ -372,7 +383,18 @@ export const downloadDXF = (
   exportGrid?: boolean
 ) => {
   let minX = Infinity, minY = Infinity;
-  const visibleRooms = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+  const visibleRooms = rooms.filter(r => {
+    if (!r.isPlaced) return false;
+    if (r.floor === currentFloor) return true;
+    if (r.spaceType === 'multistory') {
+      const from = r.msFromFloor ?? r.floor;
+      const to = r.msToFloor ?? r.floor;
+      const minF = Math.min(from, to);
+      const maxF = Math.max(from, to);
+      return currentFloor >= minF && currentFloor <= maxF;
+    }
+    return false;
+  });
   
   if (visibleRooms.length > 0) {
     visibleRooms.forEach(r => {
