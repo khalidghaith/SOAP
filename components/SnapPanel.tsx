@@ -129,6 +129,24 @@ export function SnapPanel({
                     </label>
                 </div>
 
+                {/* Snap to Guides */}
+                <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-700 dark:text-gray-300">Snap to Guides</span>
+                        <span className="text-[9px] text-slate-400 dark:text-gray-500">Align room boundaries directly to drafting guides</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            checked={settings.snapToGuides !== false} 
+                            onChange={(e) => handleSettingChange('snapToGuides', e.target.checked)}
+                            disabled={!snapEnabled}
+                            className="sr-only peer"
+                        />
+                        <div className="w-7 h-4 bg-slate-200 dark:bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                </div>
+
                 {/* Snap While Scaling */}
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col">
@@ -146,6 +164,58 @@ export function SnapPanel({
                         <div className="w-7 h-4 bg-slate-200 dark:bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-orange-500"></div>
                     </label>
                 </div>
+
+                {/* Incremental Scaling Toggle */}
+                <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-700 dark:text-gray-300">Incremental Width Scaling</span>
+                        <span className="text-[9px] text-slate-400 dark:text-gray-500">Snap rectangle width to clean increments</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            checked={settings.incrementalScalingEnabled || false} 
+                            onChange={(e) => handleSettingChange('incrementalScalingEnabled', e.target.checked)}
+                            disabled={!snapEnabled}
+                            className="sr-only peer"
+                        />
+                        <div className="w-7 h-4 bg-slate-200 dark:bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                </div>
+
+                {/* Incremental Scale Amount Selection (Nested) */}
+                {settings.incrementalScalingEnabled && (
+                    <div className={`space-y-1.5 pl-3 border-l-2 border-slate-200 dark:border-white/10 transition-all duration-300 ${!snapEnabled ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-gray-400">Width Increment</span>
+                        <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl gap-1 border border-slate-200/50 dark:border-white/5 overflow-x-auto custom-scrollbar">
+                            {((settings.unitSystem || 'metric') === 'metric' ? [0.05, 0.1, 0.25, 0.5, 1.0] : [0.0254, 0.0508, 0.1524, 0.3048]).map((amount) => {
+                                const label = (settings.unitSystem || 'metric') === 'metric'
+                                    ? amount < 1 ? `${Math.round(amount * 100)}cm` : `${amount}m`
+                                    : amount === 0.0254 ? '1"'
+                                    : amount === 0.0508 ? '2"'
+                                    : amount === 0.1524 ? '6"'
+                                    : '12" (1ft)';
+                                const isSelected = settings.incrementalScaleAmount === amount || 
+                                    (!settings.incrementalScaleAmount && 
+                                     (((settings.unitSystem || 'metric') === 'metric' && amount === 0.05) || 
+                                      ((settings.unitSystem || 'metric') === 'imperial' && amount === 0.0254)));
+                                return (
+                                    <button
+                                        key={amount}
+                                        onClick={() => handleSettingChange('incrementalScaleAmount', amount)}
+                                        className={`flex-1 py-1 px-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                                            isSelected
+                                                ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600'
+                                                : 'text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300'
+                                        }`}
+                                    >
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 <div className="h-px bg-slate-200/55 dark:bg-white/10 my-0.5" />
 

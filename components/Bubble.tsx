@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Room, Point, DiagramStyle, AppSettings, ZoneColor, SpaceType } from '../types';
+import { Room, Point, DiagramStyle, AppSettings, ZoneColor, SpaceType, CanvasGuide } from '../types';
 import { Link as LinkIcon } from 'lucide-react';
 import { createRoundedPath } from '../utils/geometry';
 import { wrapText, getHexColorForZone, getHexBorderForZone } from '../utils/exportSystem';
@@ -33,6 +33,7 @@ interface BubbleProps {
     isOverlay?: boolean;
     darkMode?: boolean;
     isGrayedOut?: boolean;
+    guides?: CanvasGuide[];
 }
 
 
@@ -187,7 +188,7 @@ const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.or
 
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false, isGrayedOut = false
+    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false, isGrayedOut = false, guides
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isRotating, setIsRotating] = useState(false);
@@ -435,6 +436,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             const dyWorld = dyScreen / zoomScale;
 
             const shouldSnap = snapEnabled ? !e.shiftKey : e.shiftKey;
+            const isIncremental = appSettings.incrementalScalingEnabled ? !e.shiftKey : !!e.shiftKey;
 
             let currentSnapLines: { x?: number, y?: number }[] = [];
 
@@ -442,7 +444,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 hasMoved.current = true;
             }
 
-            // Helper to get snap targets from other rooms
+            // Helper to get snap targets from other rooms and guides
             const getSnapTargets = () => {
                 const targetsX: number[] = [];
                 const targetsY: number[] = [];
@@ -453,6 +455,16 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         } else {
                             targetsX.push(r.x, r.x + r.width);
                             targetsY.push(r.y, r.y + r.height);
+                        }
+                    });
+                }
+                // Snapping to Drafting Guides!
+                if (guides && appSettings.snapToGuides !== false) {
+                    guides.forEach(g => {
+                        if (g.type === 'v') {
+                            targetsX.push(g.position * pixelsPerMeter);
+                        } else if (g.type === 'h') {
+                            targetsY.push(g.position * pixelsPerMeter);
                         }
                     });
                 }
@@ -489,6 +501,17 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 const ratio = rawW / rawH;
                 let tW = Math.sqrt(areaPx * ratio);
                 let tH = areaPx / tW;
+
+                // Apply Incremental Scaling Baseline
+                if (isIncremental) {
+                    let incrementMeters = appSettings.incrementalScaleAmount;
+                    if (!incrementMeters) {
+                        incrementMeters = appSettings.unitSystem === 'imperial' ? 0.0254 : 0.05;
+                    }
+                    const incrementPx = incrementMeters * pixelsPerMeter;
+                    tW = Math.max(minSize, Math.round(tW / incrementPx) * incrementPx);
+                    tH = areaPx / tW;
+                }
 
                 // 4. Identify Moving Edges candidates (Theoretical in unrotated world space for snapping)
                 const movingEdgeX = resizeHandle.includes('w') ? anchorLocalX - tW : anchorLocalX + tW;
@@ -547,12 +570,30 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                 // 6. Apply Snap
                 if (snappedAxis === 'x') {
-                    tW = Math.max(minSize, Math.abs(snapValue - anchorLocalX));
+                    let snappedW = Math.max(minSize, Math.abs(snapValue - anchorLocalX));
+                    if (isIncremental) {
+                        let incrementMeters = appSettings.incrementalScaleAmount;
+                        if (!incrementMeters) {
+                            incrementMeters = appSettings.unitSystem === 'imperial' ? 0.0254 : 0.05;
+                        }
+                        const incrementPx = incrementMeters * pixelsPerMeter;
+                        snappedW = Math.max(minSize, Math.round(snappedW / incrementPx) * incrementPx);
+                    }
+                    tW = snappedW;
                     tH = areaPx / tW;
                     currentSnapLines = [{ x: resizeHandle.includes('w') ? 0 : tW }];
                 } else if (snappedAxis === 'y') {
                     tH = Math.max(minSize, Math.abs(snapValue - anchorLocalY));
                     tW = areaPx / tH;
+                    if (isIncremental) {
+                        let incrementMeters = appSettings.incrementalScaleAmount;
+                        if (!incrementMeters) {
+                            incrementMeters = appSettings.unitSystem === 'imperial' ? 0.0254 : 0.05;
+                        }
+                        const incrementPx = incrementMeters * pixelsPerMeter;
+                        tW = Math.max(minSize, Math.round(tW / incrementPx) * incrementPx);
+                        tH = areaPx / tW;
+                    }
                     currentSnapLines = [{ y: resizeHandle.includes('n') ? 0 : tH }];
                 }
 
@@ -1016,7 +1057,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             window.removeEventListener('pointerup', handlePointerUp);
             window.removeEventListener('pointercancel', handlePointerUp);
         };
-    }, [isDragging, isRotating, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, isTextDragging, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd, onMove, isSelected, onSelect, otherRooms, appSettings.snapToObjects, appSettings.snapTolerance, appSettings.snapToGrid, room.x, room.y, room.shape, room.area, pixelsPerMeter]);
+    }, [isDragging, isRotating, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, isTextDragging, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd, onMove, isSelected, onSelect, otherRooms, appSettings.snapToObjects, appSettings.snapTolerance, appSettings.snapToGrid, room.x, room.y, room.shape, room.area, pixelsPerMeter, appSettings.incrementalScalingEnabled, appSettings.incrementalScaleAmount, appSettings.unitSystem, guides, appSettings.snapToGuides]);
 
     const handleResizeStart = (e: React.PointerEvent, handle: string) => {
         e.stopPropagation();
@@ -1308,7 +1349,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 </>
                             )}
                             {/* Polygon Edges (Hit Areas for Editing) */}
-                            {isSelected && activePoints.map((p, i) => {
+                            {isSelected && !isSketchMode && activePoints.map((p, i) => {
                                 const next = activePoints[(i + 1) % activePoints.length];
 
                                 if (room.shape === 'bubble') {
@@ -1354,7 +1395,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                             })}
                         </svg>
                         {/* Vertices */}
-                        {isSelected && activePoints.map((p, i) => (
+                        {isSelected && !isSketchMode && activePoints.map((p, i) => (
                             <div
                                 key={`v-${i}`}
                                 className={`absolute border rounded-full z-[80] hover:scale-150 cursor-crosshair pointer-events-auto ${selectedVertices.has(i) ? 'bg-orange-600 border-white scale-125' : 'bg-white border-orange-600'}`}
@@ -1435,7 +1476,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 </svg>
 
                 {/* Handles - RESIZE ALL CORNERS (NW, NE, SW, SE) */}
-                {!room.polygon && room.shape !== 'bubble' && isSelected && !isDragging && (
+                {!room.polygon && room.shape !== 'bubble' && isSelected && !isDragging && !isSketchMode && (
                     <>
                         <RenderCorner
                             cursor="nw-resize"
@@ -1465,7 +1506,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 )}
 
                 {/* Rotation Handle */}
-                {isSelected && !isDragging && (
+                {isSelected && !isDragging && !isSketchMode && (
                     <div
                         className="absolute -translate-x-1/2 pointer-events-auto"
                         style={{

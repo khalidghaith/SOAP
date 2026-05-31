@@ -190,6 +190,17 @@ export interface AppSettings {
   exportGrid?: boolean;
   terraceAreaFactor?: number;    // default 0.5
   includeTerraceInGFA?: boolean; // default false
+  incrementalScalingEnabled?: boolean;
+  incrementalScaleAmount?: number;
+  snapToGuides?: boolean;
+}
+
+export interface CanvasGuide {
+  id: string;
+  type: 'h' | 'v'; // 'h' for horizontal, 'v' for vertical
+  position: number; // in world meters (Y for 'h', X for 'v')
+  angle: number; // in degrees, default 0
+  locked: boolean;
 }
 
 export type AnnotationType = 'line' | 'polyline' | 'arc' | 'bezier' | 'text' | 'rect' | 'circle' | 'arrow';

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection, SpaceType, VCType, StairConfig, DEFAULT_STAIR_PARAMS, ZoningTypology, SiteProperties } from './types';
+import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection, SpaceType, VCType, StairConfig, DEFAULT_STAIR_PARAMS, ZoningTypology, SiteProperties, CanvasGuide } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { HelpModal } from './components/HelpModal';
@@ -18,7 +18,7 @@ import { arrangeRooms } from './utils/layout';
 import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
-    PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock,
+    PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, Ruler, Copy,
     Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
     Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, Shapes,
     TreePine, Building2, Home, ArrowUpDown
@@ -30,6 +30,7 @@ import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
 import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
+import { Rulers } from './components/Rulers';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
 import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
@@ -245,6 +246,10 @@ export default function App() {
     const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>(initialData?.referenceImages || []);
     const [referenceScaleState, setReferenceScaleState] = useState<ReferenceScaleState | null>(null);
     const [selectedReferenceImageId, setSelectedReferenceImageId] = useState<string | null>(null);
+    const [guides, setGuides] = useState<CanvasGuide[]>(initialData?.guides || []);
+    const [isGuidesMode, setIsGuidesMode] = useState(false);
+    const [selectedGuideId, setSelectedGuideId] = useState<string | null>(null);
+    const [draggedGuideId, setDraggedGuideId] = useState<string | null>(null);
 
     // API Key State
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('SOAP_GEMINI_KEY') || import.meta.env.VITE_GEMINI_API_KEY || "");
@@ -305,7 +310,10 @@ export default function App() {
         colorSaturation: 1.0,
         unitSystem: 'metric',
         magnetStrength: 50,
-        magnetPadding: 10
+        magnetPadding: 10,
+        incrementalScalingEnabled: false,
+        incrementalScaleAmount: 0.05,
+        snapToGuides: true
     });
 
     // View State
@@ -643,14 +651,15 @@ export default function App() {
                 annotations,
                 referenceImages,
                 floorOverlays,
-                siteProperties
+                siteProperties,
+                guides
             };
             localStorage.setItem('SOAP_PROJECT_AUTOSAVE', JSON.stringify(saveData));
             console.log("Project auto-saved (debounced)");
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages, floorOverlays, siteProperties]);
+    }, [projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages, floorOverlays, siteProperties, guides]);
 
     // --- 3D / Volumes View Computations ---
     const verticalConnections = useMemo(() => {
@@ -680,6 +689,7 @@ export default function App() {
         projectName: string;
         annotations: Annotation[];
         referenceImages: ReferenceImage[];
+        guides: CanvasGuide[];
     }[]>([]);
     const [future, setFuture] = useState<{
         rooms: Room[];
@@ -689,23 +699,24 @@ export default function App() {
         projectName: string;
         annotations: Annotation[];
         referenceImages: ReferenceImage[];
+        guides: CanvasGuide[];
     }[]>([]);
 
     const addToHistory = useCallback(() => {
         setHistory(prev => {
-            const newHistory = [...prev, { rooms, connections, floors, zoneColors, projectName, annotations, referenceImages }];
+            const newHistory = [...prev, { rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides }];
             if (newHistory.length > 50) newHistory.shift();
             return newHistory;
         });
         setFuture([]);
-    }, [rooms, connections, floors, zoneColors, projectName, annotations, referenceImages]);
+    }, [rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
 
     const undo = useCallback(() => {
         if (history.length === 0) return;
         const previous = history[history.length - 1];
         const newHistory = history.slice(0, -1);
 
-        setFuture(prev => [{ rooms, connections, floors, zoneColors, projectName, annotations, referenceImages }, ...prev]);
+        setFuture(prev => [{ rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides }, ...prev]);
 
         setRooms(previous.rooms);
         setConnections(previous.connections);
@@ -714,15 +725,16 @@ export default function App() {
         setProjectName(previous.projectName);
         setAnnotations(previous.annotations || []);
         setReferenceImages(previous.referenceImages || []);
+        setGuides(previous.guides || []);
         setHistory(newHistory);
-    }, [history, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages]);
+    }, [history, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
 
     const redo = useCallback(() => {
         if (future.length === 0) return;
         const next = future[0];
         const newFuture = future.slice(1);
 
-        setHistory(prev => [...prev, { rooms, connections, floors, zoneColors, projectName, annotations, referenceImages }]);
+        setHistory(prev => [...prev, { rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides }]);
 
         setRooms(next.rooms);
         setConnections(next.connections);
@@ -731,8 +743,9 @@ export default function App() {
         setProjectName(next.projectName);
         setAnnotations(next.annotations || []);
         setReferenceImages(next.referenceImages || []);
+        setGuides(next.guides || []);
         setFuture(newFuture);
-    }, [future, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages]);
+    }, [future, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
 
     // Clear selection when exiting reference mode
     useEffect(() => {
@@ -748,6 +761,16 @@ export default function App() {
         }
     }, [isSketchMode]);
 
+    // Clear selection when entering/exiting guides mode
+    useEffect(() => {
+        setSelectedRoomIds(new Set());
+        setSelectedZone(null);
+        setSelectedAnnotationId(null);
+        if (!isGuidesMode) {
+            setSelectedGuideId(null);
+        }
+    }, [isGuidesMode]);
+
     const handleResetProject = () => {
         if (window.confirm("Are you sure you want to reset the project? This will clear all data and cannot be undone.")) {
             localStorage.removeItem('SOAP_PROJECT_AUTOSAVE');
@@ -761,6 +784,7 @@ export default function App() {
             setFuture([]);
             setAnnotations([]);
             setReferenceImages([]);
+            setGuides([]);
         }
     };
 
@@ -911,6 +935,35 @@ export default function App() {
         return () => window.removeEventListener('pointermove', handleGlobalPointerMove);
     }, [isZoneDragging, isBubbleDragging]);
 
+    // Handle guide dragging globally
+    useEffect(() => {
+        if (!draggedGuideId) return;
+
+        const handlePointerMove = (e: PointerEvent) => {
+            const worldPos = toWorld(e.clientX, e.clientY);
+            setGuides(prev => prev.map(g => {
+                if (g.id !== draggedGuideId) return g;
+                
+                let newPos = (g.type === 'h' ? worldPos.y : worldPos.x) / PIXELS_PER_METER;
+                if (e.shiftKey) {
+                    newPos = Math.round(newPos / gridSize) * gridSize;
+                }
+                return { ...g, position: newPos };
+            }));
+        };
+
+        const handlePointerUp = () => {
+            setDraggedGuideId(null);
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+        return () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+        };
+    }, [draggedGuideId, toWorld, gridSize]);
+
     // --- Core Handlers ---
     useEffect(() => {
         const element = mainRef.current;
@@ -955,12 +1008,17 @@ export default function App() {
         }
         // Left Click (0) on Background -> Start Selection Box
         else if (e.button === 0 && !isSketchMode && !isReferenceMode) {
+            if (isGuidesMode) {
+                setSelectedGuideId(null);
+                return;
+            }
             if (selectionBox) {
                 return;
             }
             setSelectedRoomIds(new Set());
             setSelectedZone(null);
             setSelectedAnnotationId(null);
+            setSelectedGuideId(null);
             if (connectionSourceId) setConnectionSourceId(null);
             // Auto-lock all text when clicking empty space
             setRooms(prev => prev.map(r => r.isTextUnlocked ? { ...r, isTextUnlocked: false } : r));
@@ -1236,7 +1294,10 @@ export default function App() {
                 e.preventDefault();
                 handleZoomToFit();
             } else if (e.key === 'Escape') {
-                if (selectionBox) {
+                if (selectedGuideId) {
+                    setSelectedGuideId(null);
+                    e.preventDefault();
+                } else if (selectionBox) {
                     setSelectionBox(null);
                     e.preventDefault();
                 }
@@ -1257,7 +1318,7 @@ export default function App() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [undo, redo, handleZoomToFit, selectionBox]);
+    }, [undo, redo, handleZoomToFit, selectionBox, selectedGuideId, setSelectedGuideId]);
 
     // Global Event Listener to finalize Selection Box on release (pointerup)
     useEffect(() => {
@@ -1573,6 +1634,7 @@ export default function App() {
                     if (data.referenceImages) setReferenceImages(data.referenceImages);
                     if (data.floorOverlays) setFloorOverlays(data.floorOverlays);
                     if (data.siteProperties) setSiteProperties(data.siteProperties);
+                    if (data.guides) setGuides(data.guides);
 
                     setHasInitialZoomed(false);
                     setViewMode('CANVAS');
@@ -1587,6 +1649,65 @@ export default function App() {
         reader.readAsText(file);
         e.target.value = '';
     };
+
+    // --- Guide Interaction Handlers ---
+    const handleDragNewGuide = useCallback((type: 'h' | 'v', clientX: number, clientY: number) => {
+        addToHistory();
+        const worldPos = toWorld(clientX, clientY);
+        const newId = `guide-${Date.now()}`;
+        const newGuide: CanvasGuide = {
+            id: newId,
+            type,
+            position: (type === 'h' ? worldPos.y : worldPos.x) / PIXELS_PER_METER,
+            angle: 0,
+            locked: false
+        };
+        setGuides(prev => [...prev, newGuide]);
+        setSelectedGuideId(newId);
+        setDraggedGuideId(newId);
+    }, [toWorld, addToHistory]);
+
+    const handleStartDragExistingGuide = useCallback((id: string, e: React.PointerEvent) => {
+        setSelectedGuideId(id);
+        const guide = guides.find(g => g.id === id);
+        if (guide && !guide.locked) {
+            addToHistory();
+            setDraggedGuideId(id);
+        }
+    }, [guides, addToHistory]);
+
+    const toggleLockGuide = useCallback((id: string) => {
+        addToHistory();
+        setGuides(prev => prev.map(g => g.id === id ? { ...g, locked: !g.locked } : g));
+    }, [addToHistory]);
+
+    const duplicateGuide = useCallback((id: string) => {
+        const guide = guides.find(g => g.id === id);
+        if (!guide) return;
+        addToHistory();
+        const newId = `guide-${Date.now()}`;
+        const duplicate: CanvasGuide = {
+            ...guide,
+            id: newId,
+            position: guide.position + 1.0, // Offset parallel guide by 1m
+            locked: false
+        };
+        setGuides(prev => [...prev, duplicate]);
+        setSelectedGuideId(newId);
+    }, [guides, addToHistory]);
+
+    const rotateGuide = useCallback((id: string, angleDelta: number) => {
+        addToHistory();
+        setGuides(prev => prev.map(g => g.id === id ? { ...g, angle: ((g.angle || 0) + angleDelta) % 360 } : g));
+    }, [addToHistory]);
+
+    const deleteGuide = useCallback((id: string) => {
+        addToHistory();
+        setGuides(prev => prev.filter(g => g.id !== id));
+        if (selectedGuideId === id) {
+            setSelectedGuideId(null);
+        }
+    }, [selectedGuideId, addToHistory]);
 
     // --- Room Handlers ---
     const updateRoom = useCallback((id: string, updates: Partial<Room>) => {
@@ -2655,11 +2776,11 @@ export default function App() {
                         onMouseMove={viewMode === 'VOLUMES' ? undefined : handleMouseMove}
                         onMouseUp={viewMode === 'VOLUMES' ? undefined : handleMouseUp}
                         onContextMenu={(e) => e.preventDefault()}
-                        onTouchStart={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleTouchStart}
-                        onTouchMove={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleTouchMove}
-                        onTouchEnd={isSketchMode || viewMode === 'VOLUMES' ? undefined : handleTouchEnd}
-                        onDragOver={viewMode === 'VOLUMES' ? undefined : handleDragOver}
-                        onDrop={viewMode === 'VOLUMES' ? undefined : handleDrop}
+                        onTouchStart={isSketchMode || isReferenceMode || isGuidesMode || viewMode === 'VOLUMES' ? undefined : handleTouchStart}
+                        onTouchMove={isSketchMode || isReferenceMode || isGuidesMode || viewMode === 'VOLUMES' ? undefined : handleTouchMove}
+                        onTouchEnd={isSketchMode || isReferenceMode || isGuidesMode || viewMode === 'VOLUMES' ? undefined : handleTouchEnd}
+                        onDragOver={viewMode === 'VOLUMES' || isSketchMode || isReferenceMode || isGuidesMode ? undefined : handleDragOver}
+                        onDrop={viewMode === 'VOLUMES' || isSketchMode || isReferenceMode || isGuidesMode ? undefined : handleDrop}
                         style={{
                             touchAction: 'none',
                             cursor: viewMode === 'VOLUMES' ? 'default' : (isSketchMode ? 'crosshair' : (isPanning ? 'grabbing' : 'default'))
@@ -2739,7 +2860,7 @@ export default function App() {
                                     pointerEvents: isReferenceMode ? 'auto' : 'none'
                                 }}
                             >
-                                <svg className="absolute inset-0 overflow-visible" style={{ pointerEvents: 'none' }}>
+                                <svg className="absolute inset-0 w-full h-full overflow-visible" style={{ pointerEvents: 'none' }}>
                                     <ReferenceLayer
                                         images={referenceImages}
                                         currentFloor={currentFloor}
@@ -2760,7 +2881,7 @@ export default function App() {
                             {/* Zone Overlay Layer - Behind everything */}
                             {showZones && (
                                 <div
-                                    className={`absolute inset-0 origin-top-left pointer-events-none ${isReferenceMode || isSketchMode ? '[&_*]:pointer-events-none' : ''}`}
+                                    className={`absolute inset-0 origin-top-left pointer-events-none ${isReferenceMode || isSketchMode || isGuidesMode ? '[&_*]:pointer-events-none' : ''}`}
                                     style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
                                 >
                                     <ZoneOverlay
@@ -2778,8 +2899,8 @@ export default function App() {
                                 </div>
                             )}
 
-                            {/* Yellow Filter for Sketch Mode */}
-                            {isSketchMode && (
+                            {/* Yellow Filter for Sketch Mode or Guides Mode */}
+                            {(isSketchMode || isGuidesMode) && (
                                 <div className="absolute inset-0 bg-yellow-400/5 dark:bg-yellow-500/10 pointer-events-none z-30" />
                             )}
 
@@ -2788,12 +2909,27 @@ export default function App() {
                                 className="absolute inset-0 origin-top-left pointer-events-none"
                                 style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
                             >
-                                <svg className="absolute inset-0 overflow-visible pointer-events-none">
+                                <svg className="absolute inset-0 w-full h-full overflow-visible pointer-events-none">
                                     <defs>
                                         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
                                             <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
                                         </marker>
                                     </defs>
+                                    
+                                    {/* World Origin Axes (0,0) */}
+                                    <line
+                                        x1="0" y1="-100000" x2="0" y2="100000"
+                                        stroke={darkMode ? "#475569" : "#94a3b8"}
+                                        strokeWidth={1.5 / scale}
+                                        className="opacity-70 pointer-events-none"
+                                    />
+                                    <line
+                                        x1="-100000" y1="0" x2="100000" y2="0"
+                                        stroke={darkMode ? "#475569" : "#94a3b8"}
+                                        strokeWidth={1.5 / scale}
+                                        className="opacity-70 pointer-events-none"
+                                    />
+
                                     {connections.map(conn => {
                                         const fromRoom = rooms.find(r => r.id === conn.fromId);
                                         const toRoom = rooms.find(r => r.id === conn.toId);
@@ -2849,6 +2985,53 @@ export default function App() {
                                             )}
                                         </>
                                     )}
+
+                                    {/* Guides Layer */}
+                                    {guides.map(guide => {
+                                        const isSelected = selectedGuideId === guide.id;
+                                        const posPx = guide.position * PIXELS_PER_METER;
+                                        const isVertical = guide.type === 'v';
+                                        const angle = guide.angle || 0;
+                                        
+                                        return (
+                                            <g 
+                                                key={guide.id}
+                                                transform={isVertical ? `translate(${posPx}, 0) rotate(${angle})` : `translate(0, ${posPx}) rotate(${angle})`}
+                                            >
+                                                {/* Visual Guide Line */}
+                                                <line
+                                                    x1={isVertical ? 0 : -100000}
+                                                    y1={isVertical ? -100000 : 0}
+                                                    x2={isVertical ? 0 : 100000}
+                                                    y2={isVertical ? 100000 : 0}
+                                                    stroke={isSelected ? "#f97316" : (darkMode ? "#06b6d4" : "#0891b2")}
+                                                    strokeWidth={(isSelected ? 2 : 1.2) / scale}
+                                                    strokeDasharray="4,4"
+                                                    className="pointer-events-none transition-colors duration-200"
+                                                />
+                                                
+                                                {/* Interactive Wide Click-strip (Only when isGuidesMode is active) */}
+                                                {isGuidesMode && (
+                                                    <line
+                                                        x1={isVertical ? 0 : -100000}
+                                                        y1={isVertical ? -100000 : 0}
+                                                        x2={isVertical ? 0 : 100000}
+                                                        y2={isVertical ? 100000 : 0}
+                                                        stroke="transparent"
+                                                        strokeWidth={16 / scale}
+                                                        className={`cursor-grab active:cursor-grabbing pointer-events-auto ${guide.locked ? 'cursor-not-allowed' : ''}`}
+                                                        onPointerDown={(e) => {
+                                                            e.stopPropagation();
+                                                            handleStartDragExistingGuide(guide.id, e);
+                                                        }}
+                                                        onMouseDown={(e) => {
+                                                            e.stopPropagation();
+                                                        }}
+                                                    />
+                                                )}
+                                            </g>
+                                        );
+                                    })}
                                 </svg>
                             </div>
 
@@ -2956,8 +3139,9 @@ export default function App() {
                                             onDragStart={() => { setIsBubbleDragging(true); addToHistory(); }}
                                             isAnyDragging={isBubbleDragging}
                                             otherRooms={selectedRoomIds.has(room.id) ? [...visibleRooms.filter(r => r.id !== room.id), ...overlayRooms] : undefined}
-                                            isSketchMode={isSketchMode || isReferenceMode}
+                                            isSketchMode={isSketchMode || isReferenceMode || isGuidesMode}
                                             darkMode={darkMode}
+                                            guides={guides}
                                         />
                                     ));
                                 })()}
@@ -3279,6 +3463,23 @@ export default function App() {
                                                         <ImageIcon size={16} />
                                                     </button>
 
+                                                    <button
+                                                        onClick={() => {
+                                                            const newValue = !isGuidesMode;
+                                                            setIsGuidesMode(newValue);
+                                                            if (newValue) {
+                                                                setIsSketchMode(false);
+                                                                setIsReferenceMode(false);
+                                                                setShowStylePanel(false);
+                                                                setShowSnapPanel(false);
+                                                            }
+                                                        }}
+                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isGuidesMode ? 'bg-orange-500 text-white shadow-lg scale-105 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
+                                                        title="Drafting Guides & Rulers Mode"
+                                                    >
+                                                        <Ruler size={16} />
+                                                    </button>
+
                                                     <SketchToolbar
                                                         isActive={isSketchMode}
                                                         onToggle={() => {
@@ -3436,6 +3637,77 @@ export default function App() {
                                         />
                                     </div>
                                 )}
+
+                                {/* Photoshop-style synchronized rulers */}
+                                {viewMode === 'CANVAS' && isGuidesMode && (
+                                    <Rulers
+                                        scale={scale}
+                                        offset={offset}
+                                        unitSystem={appSettings.unitSystem}
+                                        gridSize={gridSize}
+                                        pixelsPerMeter={PIXELS_PER_METER}
+                                        width={mainRef.current?.getBoundingClientRect().width || window.innerWidth}
+                                        height={mainRef.current?.getBoundingClientRect().height || window.innerHeight}
+                                        onDragNewGuide={handleDragNewGuide}
+                                    />
+                                )}
+
+                                {/* Floating glassmorphic guide actions panel */}
+                                {(() => {
+                                    const selectedGuide = guides.find(g => g.id === selectedGuideId);
+                                    if (!selectedGuide || !isGuidesMode || viewMode !== 'CANVAS') return null;
+                                    
+                                    const isVertical = selectedGuide.type === 'v';
+                                    const posPx = selectedGuide.position * PIXELS_PER_METER;
+                                    const screenX = isVertical 
+                                        ? Math.max(80, Math.min(window.innerWidth - 180, posPx * scale + offset.x))
+                                        : 80;
+                                    const screenY = isVertical
+                                        ? 80
+                                        : Math.max(80, Math.min(window.innerHeight - 180, posPx * scale + offset.y));
+                                        
+                                    return (
+                                        <div 
+                                            className="absolute z-[150] flex items-center gap-1.5 p-1.5 bg-slate-900/90 dark:bg-slate-950/95 backdrop-blur-md border border-white/10 dark:border-white/5 rounded-full shadow-2xl text-white pointer-events-auto transition-all duration-300"
+                                            style={{
+                                                left: `${screenX}px`,
+                                                top: `${screenY}px`,
+                                                transform: isVertical ? 'translate(-50%, 0)' : 'translate(0, -50%)'
+                                            }}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                        >
+                                            <div className="px-2.5 py-0.5 text-[10px] font-black tracking-wider text-slate-400 border-r border-white/10 select-none uppercase font-sans">
+                                                Guide {isVertical ? 'V' : 'H'}
+                                            </div>
+
+                                            <button
+                                                onClick={() => toggleLockGuide(selectedGuide.id)}
+                                                className={`p-1.5 rounded-full transition-colors ${selectedGuide.locked ? 'text-red-400 hover:bg-red-500/10' : 'text-slate-300 hover:bg-white/10'}`}
+                                                title={selectedGuide.locked ? "Unlock Guide" : "Lock Guide"}
+                                            >
+                                                {selectedGuide.locked ? <Lock size={13} /> : <Unlock size={13} />}
+                                            </button>
+
+                                            <button
+                                                onClick={() => rotateGuide(selectedGuide.id, 90)}
+                                                className="p-1.5 rounded-full text-slate-300 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-1"
+                                                title="Rotate 90°"
+                                            >
+                                                <RotateCcw size={13} />
+                                                <span className="text-[9px] font-bold">90°</span>
+                                            </button>
+
+                                            <button
+                                                onClick={() => deleteGuide(selectedGuide.id)}
+                                                className="p-1.5 rounded-full text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
+                                                title="Delete Guide"
+                                            >
+                                                <Trash2 size={13} />
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
                             </>
                         )}
                     </main>
