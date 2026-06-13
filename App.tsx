@@ -2315,31 +2315,17 @@ export default function App() {
                 if (viewMode === 'VOLUMES' && volumesViewRef.current) {
                     const blob = await volumesViewRef.current.captureScreenshot();
                     if (blob) await saveFile(blob, finalName, 'png');
-                } else if ((viewMode === 'CANVAS' || viewMode === 'EDITOR') && mainRef.current) {
-                    const scale = options?.scale || 2;
-                    const blob = await htmlToImage.toBlob(mainRef.current, {
-                        pixelRatio: scale,
-                        filter: (node) => {
-                            // Exclude UI elements
-                            if (node.classList && node.classList.contains('export-exclude')) return false;
-                            // Exclude Grid if transparent background is requested
-                            if (options?.transparentBackground && node.classList && node.classList.contains('grid-layer')) return false;
-                            return true;
-                        },
-                        backgroundColor: options?.transparentBackground ? null : (darkMode ? '#020617' : '#f0f2f5'),
-                        style: options?.transparentBackground ? { backgroundColor: 'rgba(0,0,0,0)' } : undefined
-                    });
+                } else if (viewMode === 'CANVAS' || viewMode === 'EDITOR') {
+                    const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, canvasStyle, referenceImages, siteProperties);
                     if (blob) await saveFile(blob, finalName, 'png');
                 }
             } catch (err) {
                 console.error("Image export failed", err);
                 alert("Failed to export image.");
             }
-        } else if (format === 'pdf') {
+        } else if (format === 'pdf' || format === 'dxf') {
             const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, canvasStyle, referenceImages, siteProperties);
-            if (blob) await saveFile(blob, finalName, 'pdf');
-        } else if (format === 'dxf') {
-            await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, options, canvasStyle, referenceImages, siteProperties);
+            if (blob) await saveFile(blob, finalName, format);
         }
     };
 

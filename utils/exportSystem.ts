@@ -323,14 +323,12 @@ export const handleExport = async (
             appSettings.layerPrefix,
             appSettings.exportGrid
         );
-        const blob = new Blob([dxfContent], { type: 'application/dxf' });
-        const url = URL.createObjectURL(blob);
-        triggerDownload(url, `${projectName}-floor-${currentFloor}.dxf`);
-        return;
+        return new Blob([dxfContent], { type: 'application/dxf' });
     }
 
     // --- SVG Generation (Used for SVG, PNG, JPEG, PDF) ---
-    let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${-offsetX} ${-offsetY} ${width} ${height}">
+    // Shift all viewBox content to start at 0 0, and translate components using a group.
+    let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <style>
             .text { font-family: 'Inter', sans-serif; text-anchor: middle; dominant-baseline: middle; }
             .title { font-weight: bold; font-size: ${appSettings.fontSize}px; }
@@ -387,7 +385,7 @@ export const handleExport = async (
     // Background
     if (format === 'jpeg' || (format === 'png' && !options?.transparentBackground)) {
         const bgColor = darkMode ? '#1a1a1a' : '#f0f2f5';
-        svgContent += `<rect x="${-offsetX}" y="${-offsetY}" width="${width}" height="${height}" fill="${bgColor}" />`;
+        svgContent += `<rect x="0" y="0" width="${width}" height="${height}" fill="${bgColor}" />`;
     }
 
     // Render Canvas Grid if enabled
@@ -401,16 +399,16 @@ export const handleExport = async (
             <circle cx="1" cy="1" r="1" fill="${gridColor}" />
           </pattern>
         </defs>
-        <rect x="${-offsetX}" y="${-offsetY}" width="${width}" height="${height}" fill="url(#grid-pattern)" pointer-events="none" />
+        <rect x="0" y="0" width="${width}" height="${height}" fill="url(#grid-pattern)" pointer-events="none" />
         `;
     }
+
+    // Wrap drawing elements in a translated group so that coordinate rendering is 0 0 based.
+    svgContent += `<g transform="translate(${offsetX}, ${offsetY})">`;
 
     // Reference Images (Bottom Layer)
     if (referenceImages) {
         referenceImages.filter(img => img.floor === currentFloor).forEach(img => {
-            // SVG image uses href (or xlink:href for older compat, but href works in most modern contexts)
-            // We need to handle rotation if it exists, roughly. ReferenceImage has rotation? No, just x, y, width, height, scale, opacity?
-            // Checking types.ts would be ideal, but assuming standard props.
             const w = img.width * img.scale;
             const h = img.height * img.scale;
             svgContent += `<image href="${img.url}" x="${img.x}" y="${img.y}" width="${w}" height="${h}" opacity="${img.opacity}" preserveAspectRatio="none" />`;
@@ -476,9 +474,7 @@ export const handleExport = async (
         } else if (r.polygon) {
             d = `M ${r.polygon[0].x} ${r.polygon[0].y} ` + r.polygon.slice(1).map(p => `L ${p.x} ${p.y}`).join(" ") + " Z";
         } else {
-            // Check for corner radius from style or settings
             let radius = r.style?.cornerRadius || appSettings.cornerRadius || 0;
-            // Map Tailwind classes to numbers if needed (simplified)
             if (currentStyle?.cornerRadius === 'rounded-none') radius = 0;
             else if (currentStyle?.cornerRadius === 'rounded-sm') radius = 2;
             else if (currentStyle?.cornerRadius === 'rounded-lg') radius = 8;
@@ -539,27 +535,19 @@ export const handleExport = async (
         });
     }
 
-    // Scale Bar removed from SVG content for PDF (drawn natively). 
-    // For PNG/SVG/JPEG export, we still want it in the image content?
-    // User requested: "The scale bar should always be there in all exports."
-    // If I remove it here, it won't be in SVG/PNG export generated from this function.
-    // However, App.tsx PNG export uses htmlToImage which captures the DOM scale bar.
-    // Only 'svg' and 'pdf' use this function.
-    // IF format is 'svg' or 'pdf', we need the scale bar.
+    svgContent += `</g>`; // End drawing group
 
-    // For PDF, user wants it at bottom right of PAGE.
-    // For SVG export, we probably want it in the SVG.
-
-    if (format !== 'pdf') {
+    // Scale Bar & Compass (SVG only)
+    if (format === 'svg') {
         const isImperial = appSettings.unitSystem === 'imperial';
         const scaleBarLength = isImperial 
             ? (30 * 0.3048) * PIXELS_PER_METER
             : 10 * PIXELS_PER_METER;
         const scaleBarLabel = isImperial ? "30 feet" : "10 meters";
-        const scaleBarX = maxX - 50 - scaleBarLength;
-        const scaleBarY = maxY - 50;
-        const textColor = (format === 'jpeg' && darkMode) ? '#94a3b8' : '#64748b';
-        const strokeColor = (format === 'jpeg' && darkMode) ? '#94a3b8' : '#64748b';
+        const scaleBarX = width - 50 - scaleBarLength;
+        const scaleBarY = height - 50;
+        const textColor = darkMode ? '#94a3b8' : '#64748b';
+        const strokeColor = darkMode ? '#94a3b8' : '#64748b';
 
         svgContent += `<g transform="translate(${scaleBarX}, ${scaleBarY})">
              <text x="${scaleBarLength / 2}" y="-8" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="bold" fill="${textColor}">${scaleBarLabel}</text>
@@ -568,7 +556,6 @@ export const handleExport = async (
              <line x1="${scaleBarLength}" y1="-4" x2="${scaleBarLength}" y2="4" stroke="${strokeColor}" stroke-width="2" />
          </g>`;
 
-        // Render Compass next to scale bar in SVG
         const compassSize = 36;
         const compassX = scaleBarX - compassSize - 20;
         const compassY = scaleBarY - (compassSize / 2) + 2;
@@ -592,9 +579,7 @@ export const handleExport = async (
 
     if (format === 'svg') {
         const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        triggerDownload(url, `${projectName}-floor-${currentFloor}.svg`);
-        return;
+        return blob;
     }
 
     if (format === 'pdf') {
@@ -623,7 +608,7 @@ export const handleExport = async (
             const scaleX = pageWidth / svgWidthMm;
             const scaleY = pageHeight / svgHeightMm;
             const fitScale = Math.min(scaleX, scaleY) * 0.8;
-            scaleFactor = fitScale * 0.264; // Convert back factor relative to pixel unit?
+            scaleFactor = fitScale * 0.264;
         }
 
         let targetW = width * scaleFactor;
@@ -657,16 +642,6 @@ export const handleExport = async (
         });
 
         // Add Scale Bar to PDF (Bottom Right of Page)
-        const scaleBarLenMm = (10 * PIXELS_PER_METER) * scaleFactor * 0.264; // This might be wrong.
-        // We need 10 meters in PAGE units (mm).
-        // 1 meter = PIXELS_PER_METER pixels in SVG space.
-        // scaleFactor converts SVG pixels to "document units" in jsPDF-svg?
-        // Wait, scaleFactor was calculated: (1000 / scale) / PIXELS_PER_METER is "mm per pixel"? No.
-
-        // Let's recalculate logical scale.
-        // If scale is 1:100. 10m = 10000mm. On paper it is 100mm.
-        // We want a bar representing 10m.
-
         const isImperial = appSettings.unitSystem === 'imperial';
         let barWidthMm = 0;
         let label = isImperial ? "30 ft" : "10m";
@@ -743,34 +718,155 @@ export const handleExport = async (
         return doc.output('blob');
     }
 
-    // --- PNG / JPEG Export ---
-    const img = new Image();
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgContent)));
+    if (format === 'png' || format === 'jpeg') {
+        const img = new Image();
+        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgContent)));
 
-    await new Promise((resolve) => { img.onload = resolve; });
+        await new Promise((resolve) => { img.onload = resolve; });
 
-    // High Resolution Export (approx 300 DPI relative to screen 72 DPI -> 4.16x)
-    const scaleFactor = 4;
+        // Calculate page dimension in mm
+        const pageSizes: Record<string, { w: number, h: number }> = {
+            a4: { w: 210, h: 297 },
+            a3: { w: 297, h: 420 },
+            letter: { w: 215.9, h: 279.4 }
+        };
+        const size = pageSizes[(options?.pageSize || 'A3').toLowerCase()] || pageSizes.a3;
+        const isPortrait = options?.orientation === 'portrait';
+        const pageWidth = isPortrait ? Math.min(size.w, size.h) : Math.max(size.w, size.h);
+        const pageHeight = isPortrait ? Math.max(size.w, size.h) : Math.min(size.w, size.h);
 
-    const canvas = document.createElement('canvas');
-    canvas.width = width * scaleFactor;
-    canvas.height = height * scaleFactor;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+        const scale = options?.scale || 2;
+        // 4 pixels per mm at scale=1, 8 pixels per mm at scale=2, etc. (high resolution)
+        const mmToPx = 4 * scale;
+        const canvasW = pageWidth * mmToPx;
+        const canvasH = pageHeight * mmToPx;
 
-    ctx.scale(scaleFactor, scaleFactor);
-    ctx.translate(offsetX, offsetY); // Adjust for negative coordinates in SVG viewBox
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasW;
+        canvas.height = canvasH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
 
-    if (format === 'jpeg') {
-        // Background already in SVG for JPEG, but ensure canvas is opaque if needed
-        ctx.fillStyle = darkMode ? '#1a1a1a' : '#f0f2f5';
-        ctx.fillRect(-offsetX, -offsetY, width, height);
+        // Fill background
+        if (format === 'jpeg' || !options?.transparentBackground) {
+            ctx.fillStyle = darkMode ? '#1a1a1a' : '#f0f2f5';
+            ctx.fillRect(0, 0, canvasW, canvasH);
+        }
+
+        // Fit SVG into the page canvas with margin (20mm)
+        const marginPx = 20 * mmToPx;
+        const availableW = canvasW - 2 * marginPx;
+        const availableH = canvasH - 2 * marginPx;
+
+        let scaleFactor = 1;
+        if (options?.pdfScale) {
+            const pdfScale = options.pdfScale;
+            scaleFactor = ((1000 / pdfScale) * mmToPx) / PIXELS_PER_METER;
+        } else {
+            const aspectSvg = width / height;
+            const aspectCanvas = availableW / availableH;
+            if (aspectSvg > aspectCanvas) {
+                scaleFactor = availableW / width;
+            } else {
+                scaleFactor = availableH / height;
+            }
+        }
+
+        const targetW = width * scaleFactor;
+        const targetH = height * scaleFactor;
+
+        // Center on canvas
+        const drawX = (canvasW - targetW) / 2;
+        const drawY = (canvasH - targetH) / 2;
+
+        ctx.drawImage(img, drawX, drawY, targetW, targetH);
+
+        // Draw Scale Bar and Compass natively on Canvas at high-res
+        const isImperial = appSettings.unitSystem === 'imperial';
+        let barWidthPx = 0;
+        let label = isImperial ? "30 ft" : "10m";
+
+        if (options?.pdfScale) {
+            const targetMm = isImperial ? 9144 : 10000;
+            barWidthPx = (targetMm / options.pdfScale) * mmToPx;
+        } else {
+            const scaleBarLengthPx = isImperial ? (30 * 0.3048) * PIXELS_PER_METER : 10 * PIXELS_PER_METER;
+            barWidthPx = scaleBarLengthPx * scaleFactor;
+        }
+
+        const marginPxBottom = 10 * mmToPx;
+        const barX = canvasW - marginPxBottom - barWidthPx;
+        const barY = canvasH - marginPxBottom;
+
+        const textColor = darkMode ? '#94a3b8' : '#64748b';
+        const strokeColor = darkMode ? '#94a3b8' : '#64748b';
+
+        ctx.strokeStyle = strokeColor;
+        ctx.fillStyle = textColor;
+        ctx.lineWidth = 1 * scale;
+
+        // Draw scale bar line
+        ctx.beginPath();
+        ctx.moveTo(barX, barY);
+        ctx.lineTo(barX + barWidthPx, barY);
+        // Ends
+        ctx.moveTo(barX, barY - 3 * scale);
+        ctx.lineTo(barX, barY + 3 * scale);
+        ctx.moveTo(barX + barWidthPx, barY - 3 * scale);
+        ctx.lineTo(barX + barWidthPx, barY + 3 * scale);
+        ctx.stroke();
+
+        // Draw text
+        ctx.font = `bold ${8 * scale}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(label, barX + barWidthPx / 2, barY - 5 * scale);
+
+        // Compass
+        const compassRadius = 4.5 * mmToPx;
+        const compassX = barX - compassRadius - 6 * mmToPx;
+        const compassY = barY;
+
+        ctx.beginPath();
+        ctx.arc(compassX, compassY, compassRadius, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        const angleRad = ((siteProperties?.northAngle || 0) - 90) * Math.PI / 180;
+        const cosA = Math.cos(angleRad);
+        const sinA = Math.sin(angleRad);
+        const cosPerp = Math.cos(angleRad + Math.PI / 2);
+        const sinPerp = Math.sin(angleRad + Math.PI / 2);
+
+        // Crosshairs
+        ctx.lineWidth = 0.5 * scale;
+        ctx.beginPath();
+        ctx.moveTo(compassX - compassRadius * cosPerp, compassY - compassRadius * sinPerp);
+        ctx.lineTo(compassX + compassRadius * cosPerp, compassY + compassRadius * sinPerp);
+        ctx.stroke();
+
+        // North-South line (thin for south)
+        ctx.beginPath();
+        ctx.moveTo(compassX, compassY);
+        ctx.lineTo(compassX - compassRadius * cosA, compassY - compassRadius * sinA);
+        ctx.stroke();
+
+        // Thick North pointer
+        ctx.lineWidth = 2 * scale;
+        ctx.beginPath();
+        ctx.moveTo(compassX, compassY);
+        ctx.lineTo(compassX + compassRadius * cosA, compassY + compassRadius * sinA);
+        ctx.stroke();
+
+        // Draw N label
+        ctx.font = `bold ${7 * scale}px sans-serif`;
+        const textDist = compassRadius + 2.5 * mmToPx;
+        ctx.fillText("N", compassX + textDist * cosA, compassY + textDist * sinA + 2.5 * scale);
+
+        return new Promise<Blob | null>((resolve) => {
+            canvas.toBlob((blob) => {
+                resolve(blob);
+            }, `image/${format}`);
+        });
     }
-
-    ctx.drawImage(img, -offsetX, -offsetY, width, height);
-
-    const dataUrl = canvas.toDataURL(`image/${format}`);
-    triggerDownload(dataUrl, `${projectName}-floor-${currentFloor}.${format}`);
 };
 
 export const getHexColorForZone = (zone: string, zoneColors: Record<string, ZoneColor>) => {

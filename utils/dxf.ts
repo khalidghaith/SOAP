@@ -58,6 +58,33 @@ const sampleBubblePoints = (polygon: Point[], roomX: number, roomY: number): Poi
 };
 
 /**
+ * Formats values to standard decimal float representation for DXF coordinates/measures.
+ */
+const formatVal = (code: number, val: any): string => {
+  if (typeof val === 'number') {
+    const floatCodes = [
+      10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 33,
+      38, 39, 40, 41, 42, 43, 44, 45, 50, 51
+    ];
+    if (floatCodes.includes(code)) {
+      return val.toFixed(6);
+    }
+    return val.toString();
+  }
+  return val.toString();
+};
+
+/**
+ * Formats a DXF group code and value line.
+ * Group codes are right-aligned to a 3-character field (with leading space padding)
+ * and all lines must end with Windows-style CRLF (\r\n) for AutoCAD compatibility.
+ */
+const formatLine = (code: number, value: any): string => {
+  const codeStr = code.toString().padStart(3, ' ');
+  return `${codeStr}\r\n${formatVal(code, value)}\r\n`;
+};
+
+/**
  * Generates a high-fidelity, multi-layered DXF string.
  */
 export const generateDXF = (
@@ -100,114 +127,65 @@ export const generateDXF = (
   const lAnno = `${prefix}ANNO`;
   const lGrid = `${prefix}GRID`;
 
-  // DXF structure header and tables
-  let dxf = `0
-SECTION
-2
-HEADER
-9
-$ACADVER
-1
-AC1015
-0
-ENDSEC
-0
-SECTION
-2
-TABLES
-0
-TABLE
-2
-LTYPE
-70
-64
-0
-LTYPE
-2
-CONTINUOUS
-70
-64
-3
-Solid line
-72
-65
-73
-0
-40
-0.0
-0
-ENDTAB
-0
-TABLE
-2
-LAYER
-70
-5
-0
-LAYER
-2
-${lWalls}
-70
-0
-62
-7
-6
-CONTINUOUS
-0
-LAYER
-2
-${lZones}
-70
-0
-62
-8
-6
-CONTINUOUS
-0
-LAYER
-2
-${lLabels}
-70
-0
-62
-7
-6
-CONTINUOUS
-0
-LAYER
-2
-${lAnno}
-70
-0
-62
-1
-6
-CONTINUOUS
-0
-LAYER
-2
-${lGrid}
-70
-0
-62
-9
-6
-CONTINUOUS
-0
-ENDTAB
-0
-ENDSEC
-0
-SECTION
-2
-ENTITIES
-`;
+  let dxf = "";
 
-  // 1. Export Grid layer if enabled
+  // 1. HEADER SECTION
+  dxf += formatLine(0, 'SECTION');
+  dxf += formatLine(2, 'HEADER');
+  dxf += formatLine(9, '$ACADVER');
+  dxf += formatLine(1, 'AC1015'); // AutoCAD 2000 compatibility
+  dxf += formatLine(0, 'ENDSEC');
+
+  // 2. TABLES SECTION
+  dxf += formatLine(0, 'SECTION');
+  dxf += formatLine(2, 'TABLES');
+
+  // LTYPE Table
+  dxf += formatLine(0, 'TABLE');
+  dxf += formatLine(2, 'LTYPE');
+  dxf += formatLine(70, 1);
+  dxf += formatLine(0, 'LTYPE');
+  dxf += formatLine(2, 'CONTINUOUS');
+  dxf += formatLine(70, 0);
+  dxf += formatLine(3, 'Solid line');
+  dxf += formatLine(72, 65);
+  dxf += formatLine(73, 0);
+  dxf += formatLine(40, 0.0);
+  dxf += formatLine(0, 'ENDTAB');
+
+  // LAYER Table
+  dxf += formatLine(0, 'TABLE');
+  dxf += formatLine(2, 'LAYER');
+  dxf += formatLine(70, 5); // Number of layers
+
+  const layers = [
+    { name: lWalls, color: 7 },
+    { name: lZones, color: 8 },
+    { name: lLabels, color: 7 },
+    { name: lAnno, color: 1 },
+    { name: lGrid, color: 9 }
+  ];
+
+  layers.forEach(l => {
+    dxf += formatLine(0, 'LAYER');
+    dxf += formatLine(2, l.name);
+    dxf += formatLine(70, 0);
+    dxf += formatLine(62, l.color);
+    dxf += formatLine(6, 'CONTINUOUS');
+  });
+
+  dxf += formatLine(0, 'ENDTAB');
+  dxf += formatLine(0, 'ENDSEC');
+
+  // 3. ENTITIES SECTION
+  dxf += formatLine(0, 'SECTION');
+  dxf += formatLine(2, 'ENTITIES');
+
+  // A. Export Grid layer if enabled
   if (exportGrid !== false && visibleRooms.length > 0) {
     const gridGap = 20; // 1 meter = 20px
     let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
-    
+
     visibleRooms.forEach(r => {
       gMinX = Math.min(gMinX, r.x);
       gMinY = Math.min(gMinY, r.y);
@@ -222,14 +200,34 @@ ENTITIES
     gMaxY = Math.ceil((gMaxY + pad) / gridGap) * gridGap;
 
     for (let gx = gMinX; gx <= gMaxX; gx += gridGap) {
-      dxf += `0\nLINE\n8\n${lGrid}\n62\n9\n10\n${gx + offsetX}\n20\n${-(gMinY + offsetY)}\n11\n${gx + offsetX}\n21\n${-(gMaxY + offsetY)}\n`;
+      dxf += formatLine(0, 'LINE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lGrid);
+      dxf += formatLine(62, 9);
+      dxf += formatLine(100, 'AcDbLine');
+      dxf += formatLine(10, gx + offsetX);
+      dxf += formatLine(20, -(gMinY + offsetY));
+      dxf += formatLine(30, 0.0);
+      dxf += formatLine(11, gx + offsetX);
+      dxf += formatLine(21, -(gMaxY + offsetY));
+      dxf += formatLine(31, 0.0);
     }
     for (let gy = gMinY; gy <= gMaxY; gy += gridGap) {
-      dxf += `0\nLINE\n8\n${lGrid}\n62\n9\n10\n${gMinX + offsetX}\n20\n${-(gy + offsetY)}\n11\n${gMaxX + offsetX}\n21\n${-(gy + offsetY)}\n`;
+      dxf += formatLine(0, 'LINE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lGrid);
+      dxf += formatLine(62, 9);
+      dxf += formatLine(100, 'AcDbLine');
+      dxf += formatLine(10, gMinX + offsetX);
+      dxf += formatLine(20, -(gy + offsetY));
+      dxf += formatLine(30, 0.0);
+      dxf += formatLine(11, gMaxX + offsetX);
+      dxf += formatLine(21, -(gy + offsetY));
+      dxf += formatLine(31, 0.0);
     }
   }
 
-  // 2. Export Zones layer (Convex Hulls for zones)
+  // B. Export Zones layer (Convex Hulls for zones)
   const zones: Record<string, Point[]> = {};
   visibleRooms.forEach(r => {
     if (!zones[r.zone]) zones[r.zone] = [];
@@ -251,16 +249,23 @@ ENTITIES
       const hull = getConvexHull(points);
       const aciColor = getDxfColorForZone(zoneName);
 
-      dxf += `0\nLWPOLYLINE\n8\n${lZones}\n62\n${aciColor}\n90\n${hull.length}\n70\n1\n`;
+      dxf += formatLine(0, 'LWPOLYLINE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lZones);
+      dxf += formatLine(62, aciColor);
+      dxf += formatLine(100, 'AcDbPolyline');
+      dxf += formatLine(90, hull.length);
+      dxf += formatLine(70, 1); // Closed polyline
       hull.forEach(p => {
-        dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
+        dxf += formatLine(10, p.x + offsetX);
+        dxf += formatLine(20, -(p.y + offsetY));
       });
     } catch (e) {
       console.warn("Could not calculate convex hull for zone " + zoneName, e);
     }
   });
 
-  // 3. Export Walls (Room boundaries) and Labels (Text)
+  // C. Export Walls (Room boundaries) and Labels (Text)
   visibleRooms.forEach(room => {
     const color = getDxfColorForZone(room.zone);
 
@@ -268,9 +273,16 @@ ENTITIES
     if (room.shape === 'bubble' && room.polygon) {
       const sampled = sampleBubblePoints(room.polygon, room.x, room.y);
       if (sampled.length > 0) {
-        dxf += `0\nLWPOLYLINE\n8\n${lWalls}\n62\n${color}\n90\n${sampled.length}\n70\n1\n`;
+        dxf += formatLine(0, 'LWPOLYLINE');
+        dxf += formatLine(100, 'AcDbEntity');
+        dxf += formatLine(8, lWalls);
+        dxf += formatLine(62, color);
+        dxf += formatLine(100, 'AcDbPolyline');
+        dxf += formatLine(90, sampled.length);
+        dxf += formatLine(70, 1); // Closed polyline
         sampled.forEach(p => {
-          dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
+          dxf += formatLine(10, p.x + offsetX);
+          dxf += formatLine(20, -(p.y + offsetY));
         });
       }
     } else {
@@ -280,9 +292,16 @@ ENTITIES
         { x: room.width, y: room.height },
         { x: 0, y: room.height }
       ];
-      dxf += `0\nLWPOLYLINE\n8\n${lWalls}\n62\n${color}\n90\n${pts.length}\n70\n1\n`;
+      dxf += formatLine(0, 'LWPOLYLINE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lWalls);
+      dxf += formatLine(62, color);
+      dxf += formatLine(100, 'AcDbPolyline');
+      dxf += formatLine(90, pts.length);
+      dxf += formatLine(70, 1); // Closed polyline
       pts.forEach(p => {
-        dxf += `10\n${room.x + p.x + offsetX}\n20\n${-(room.y + p.y + offsetY)}\n`;
+        dxf += formatLine(10, room.x + p.x + offsetX);
+        dxf += formatLine(20, -(room.y + p.y + offsetY));
       });
     }
 
@@ -293,29 +312,84 @@ ENTITIES
     const absY = -(room.y + cy + offsetY);
 
     // Main Space Name Label
-    dxf += `0\nTEXT\n8\n${lLabels}\n62\n7\n10\n${absX}\n20\n${absY + 3}\n40\n2.5\n1\n${room.name}\n72\n4\n11\n${absX}\n21\n${absY + 3}\n`;
-    
+    dxf += formatLine(0, 'TEXT');
+    dxf += formatLine(100, 'AcDbEntity');
+    dxf += formatLine(8, lLabels);
+    dxf += formatLine(62, 7);
+    dxf += formatLine(100, 'AcDbText');
+    dxf += formatLine(10, absX);
+    dxf += formatLine(20, absY + 3);
+    dxf += formatLine(30, 0.0);
+    dxf += formatLine(40, 2.5);
+    dxf += formatLine(1, room.name);
+    dxf += formatLine(72, 4); // Middle center
+    dxf += formatLine(11, absX);
+    dxf += formatLine(21, absY + 3);
+    dxf += formatLine(31, 0.0);
+    dxf += formatLine(100, 'AcDbText');
+
     // Dynamic Area Label (Metric/Imperial)
     const areaText = unitSystem === 'imperial'
       ? `${(room.area * 10.7639).toFixed(1)} sq ft`
       : `${room.area.toFixed(1)} m2`;
-    dxf += `0\nTEXT\n8\n${lLabels}\n62\n9\n10\n${absX}\n20\n${absY - 3}\n40\n1.8\n1\n${areaText}\n72\n4\n11\n${absX}\n21\n${absY - 3}\n`;
+
+    dxf += formatLine(0, 'TEXT');
+    dxf += formatLine(100, 'AcDbEntity');
+    dxf += formatLine(8, lLabels);
+    dxf += formatLine(62, 9);
+    dxf += formatLine(100, 'AcDbText');
+    dxf += formatLine(10, absX);
+    dxf += formatLine(20, absY - 3);
+    dxf += formatLine(30, 0.0);
+    dxf += formatLine(40, 1.8);
+    dxf += formatLine(1, areaText);
+    dxf += formatLine(72, 4); // Middle center
+    dxf += formatLine(11, absX);
+    dxf += formatLine(21, absY - 3);
+    dxf += formatLine(31, 0.0);
+    dxf += formatLine(100, 'AcDbText');
   });
 
-  // 4. Export Annotations (Canvas Annotations & Sketch Drafting)
+  // D. Export Annotations (Canvas Annotations & Sketch Drafting)
   visibleAnnotations.forEach(ann => {
     const color = 1; // Default to Red for annotations
 
     if (ann.type === 'text' && ann.style.text) {
       const p = ann.points[0];
-      const size = ann.style.fontSize ? ann.style.fontSize / 4 : 2.0; // scale standard px font sizes to DXF units
-      dxf += `0\nTEXT\n8\n${lAnno}\n62\n${color}\n10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n40\n${size}\n1\n${ann.style.text}\n72\n4\n11\n${p.x + offsetX}\n21\n${-(p.y + offsetY)}\n`;
-    } 
+      const size = ann.style.fontSize ? ann.style.fontSize / 4 : 2.0;
+
+      dxf += formatLine(0, 'TEXT');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lAnno);
+      dxf += formatLine(62, color);
+      dxf += formatLine(100, 'AcDbText');
+      dxf += formatLine(10, p.x + offsetX);
+      dxf += formatLine(20, -(p.y + offsetY));
+      dxf += formatLine(30, 0.0);
+      dxf += formatLine(40, size);
+      dxf += formatLine(1, ann.style.text);
+      dxf += formatLine(72, 4); // Middle center
+      dxf += formatLine(11, p.x + offsetX);
+      dxf += formatLine(21, -(p.y + offsetY));
+      dxf += formatLine(31, 0.0);
+      dxf += formatLine(100, 'AcDbText');
+    }
     else if ((ann.type === 'line' || ann.type === 'arrow') && ann.points.length >= 2) {
       const p1 = ann.points[0];
       const p2 = ann.points[1];
-      dxf += `0\nLINE\n8\n${lAnno}\n62\n${color}\n10\n${p1.x + offsetX}\n20\n${-(p1.y + offsetY)}\n11\n${p2.x + offsetX}\n21\n${-(p2.y + offsetY)}\n`;
-      
+
+      dxf += formatLine(0, 'LINE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lAnno);
+      dxf += formatLine(62, color);
+      dxf += formatLine(100, 'AcDbLine');
+      dxf += formatLine(10, p1.x + offsetX);
+      dxf += formatLine(20, -(p1.y + offsetY));
+      dxf += formatLine(30, 0.0);
+      dxf += formatLine(11, p2.x + offsetX);
+      dxf += formatLine(21, -(p2.y + offsetY));
+      dxf += formatLine(31, 0.0);
+
       // If arrow, draw a simple visual arrowhead represented by two small line segments
       if (ann.type === 'arrow') {
         const dx = p2.x - p1.x;
@@ -324,12 +398,11 @@ ENTITIES
         if (len > 0) {
           const uX = dx / len;
           const uY = dy / len;
-          const arrowSize = 12; // pixels / units
+          const arrowSize = 12;
 
-          // Arrow head points
           const headX = p2.x + offsetX;
           const headY = -(p2.y + offsetY);
-          
+
           const angle = Math.atan2(-dy, dx);
           const leftAngle = angle + Math.PI * 0.85;
           const rightAngle = angle - Math.PI * 0.85;
@@ -339,17 +412,47 @@ ENTITIES
           const rX = headX + arrowSize * Math.cos(rightAngle);
           const rY = headY + arrowSize * Math.sin(rightAngle);
 
-          dxf += `0\nLINE\n8\n${lAnno}\n62\n${color}\n10\n${headX}\n20\n${headY}\n11\n${lX}\n21\n${lY}\n`;
-          dxf += `0\nLINE\n8\n${lAnno}\n62\n${color}\n10\n${headX}\n20\n${headY}\n11\n${rX}\n21\n${rY}\n`;
+          dxf += formatLine(0, 'LINE');
+          dxf += formatLine(100, 'AcDbEntity');
+          dxf += formatLine(8, lAnno);
+          dxf += formatLine(62, color);
+          dxf += formatLine(100, 'AcDbLine');
+          dxf += formatLine(10, headX);
+          dxf += formatLine(20, headY);
+          dxf += formatLine(30, 0.0);
+          dxf += formatLine(11, lX);
+          dxf += formatLine(21, lY);
+          dxf += formatLine(31, 0.0);
+
+          dxf += formatLine(0, 'LINE');
+          dxf += formatLine(100, 'AcDbEntity');
+          dxf += formatLine(8, lAnno);
+          dxf += formatLine(62, color);
+          dxf += formatLine(100, 'AcDbLine');
+          dxf += formatLine(10, headX);
+          dxf += formatLine(20, headY);
+          dxf += formatLine(30, 0.0);
+          dxf += formatLine(11, rX);
+          dxf += formatLine(21, rY);
+          dxf += formatLine(31, 0.0);
         }
       }
-    } 
+    }
     else if (ann.type === 'circle' && ann.points.length >= 2) {
       const p1 = ann.points[0];
       const p2 = ann.points[1];
       const radius = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      dxf += `0\nCIRCLE\n8\n${lAnno}\n62\n${color}\n10\n${p1.x + offsetX}\n20\n${-(p1.y + offsetY)}\n40\n${radius}\n`;
-    } 
+
+      dxf += formatLine(0, 'CIRCLE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lAnno);
+      dxf += formatLine(62, color);
+      dxf += formatLine(100, 'AcDbCircle');
+      dxf += formatLine(10, p1.x + offsetX);
+      dxf += formatLine(20, -(p1.y + offsetY));
+      dxf += formatLine(30, 0.0);
+      dxf += formatLine(40, radius);
+    }
     else if (ann.type === 'rect' && ann.points.length >= 2) {
       const p1 = ann.points[0];
       const p2 = ann.points[1];
@@ -359,21 +462,37 @@ ENTITIES
         { x: p2.x, y: p2.y },
         { x: p1.x, y: p2.y }
       ];
-      dxf += `0\nLWPOLYLINE\n8\n${lAnno}\n62\n${color}\n90\n4\n70\n1\n`;
+
+      dxf += formatLine(0, 'LWPOLYLINE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lAnno);
+      dxf += formatLine(62, color);
+      dxf += formatLine(100, 'AcDbPolyline');
+      dxf += formatLine(90, 4);
+      dxf += formatLine(70, 1); // Closed polyline
       pts.forEach(p => {
-        dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
+        dxf += formatLine(10, p.x + offsetX);
+        dxf += formatLine(20, -(p.y + offsetY));
       });
-    } 
+    }
     else if (ann.points.length > 1) {
-      // polyline, bezier, arc, etc. fallback to polyline
-      dxf += `0\nLWPOLYLINE\n8\n${lAnno}\n62\n${color}\n90\n${ann.points.length}\n70\n0\n`;
+      dxf += formatLine(0, 'LWPOLYLINE');
+      dxf += formatLine(100, 'AcDbEntity');
+      dxf += formatLine(8, lAnno);
+      dxf += formatLine(62, color);
+      dxf += formatLine(100, 'AcDbPolyline');
+      dxf += formatLine(90, ann.points.length);
+      dxf += formatLine(70, 0); // Open polyline
       ann.points.forEach(p => {
-        dxf += `10\n${p.x + offsetX}\n20\n${-(p.y + offsetY)}\n`;
+        dxf += formatLine(10, p.x + offsetX);
+        dxf += formatLine(20, -(p.y + offsetY));
       });
     }
   });
 
-  dxf += `0\nENDSEC\n0\nEOF`;
+  dxf += formatLine(0, 'ENDSEC');
+  dxf += formatLine(0, 'EOF');
+
   return dxf;
 };
 
@@ -409,7 +528,7 @@ export const downloadDXF = (
     }
     return false;
   });
-  
+
   if (visibleRooms.length > 0) {
     visibleRooms.forEach(r => {
       minX = Math.min(minX, r.x);

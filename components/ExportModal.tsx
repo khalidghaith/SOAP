@@ -59,7 +59,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
         setStep('CONFIGURE');
         // Set defaults based on format
         if (format === 'png') {
-            setOptions(prev => ({ ...prev, scale: 4, transparentBackground: true }));
+            setOptions(prev => ({ ...prev, scale: 4, transparentBackground: true, pageSize: 'A3', orientation: 'landscape', pdfScale: 100 }));
         } else if (format === 'pdf') {
             setOptions(prev => ({ ...prev, pageSize: 'A3', orientation: 'landscape', pdfScale: 100 }));
         }
@@ -162,8 +162,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                 <FormatButton
                                     format="dxf"
                                     icon={PencilRuler}
-                                    title="CAD Drawing (.dxf)"
-                                    desc="Standard multi-layered CAD file for AutoCAD"
+                                    title="CAD Drawing (.dxf / DWG compatible)"
+                                    desc="Standard multi-layered CAD file compatible with AutoCAD/DWG editors"
                                     colorClass="text-red-600 dark:text-red-400"
                                     bgClass="bg-red-100 dark:bg-red-900/30"
                                     borderClass="border-red-100 dark:border-red-900/30 hover:border-red-300 dark:hover:border-red-700"
@@ -239,7 +239,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                 </>
                             )}
 
-                            {selectedFormat === 'pdf' && (
+                            {(selectedFormat === 'pdf' || selectedFormat === 'png') && (
                                 <>
                                     <div className="space-y-2">
                                         <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Page Size</label>
@@ -249,8 +249,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                                     key={size}
                                                     onClick={() => setOptions({ ...options, pageSize: size as any })}
                                                     className={`px-3 py-2 rounded-lg text-sm font-bold border transition-all ${options.pageSize === size
-                                                        ? 'bg-orange-500 text-white border-orange-500'
-                                                        : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:border-orange-300'}`}
+                                                        ? (selectedFormat === 'png' ? 'bg-blue-500 text-white border-blue-500' : 'bg-orange-500 text-white border-orange-500')
+                                                        : `bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 ${selectedFormat === 'png' ? 'hover:border-blue-300' : 'hover:border-orange-300'}`}`}
                                                 >
                                                     {size}
                                                 </button>
@@ -265,7 +265,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                                     key={orientation}
                                                     onClick={() => setOptions({ ...options, orientation: orientation as any })}
                                                     className={`flex-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${options.orientation === orientation
-                                                        ? 'bg-white dark:bg-dark-surface shadow text-orange-600'
+                                                        ? `bg-white dark:bg-dark-surface shadow ${selectedFormat === 'png' ? 'text-blue-600' : 'text-orange-600'}`
                                                         : 'text-slate-500 dark:text-gray-400 hover:text-slate-700'}`}
                                                 >
                                                     {orientation}
@@ -281,8 +281,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                                     key={scale}
                                                     onClick={() => setOptions({ ...options, pdfScale: scale })}
                                                     className={`px-3 py-2 rounded-lg text-sm font-bold border transition-all ${options.pdfScale === scale
-                                                        ? 'bg-orange-500 text-white border-orange-500'
-                                                        : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:border-orange-300'}`}
+                                                        ? (selectedFormat === 'png' ? 'bg-blue-500 text-white border-blue-500' : 'bg-orange-500 text-white border-orange-500')
+                                                        : `bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 ${selectedFormat === 'png' ? 'hover:border-blue-300' : 'hover:border-orange-300'}`}`}
                                                 >
                                                     1:{scale}
                                                 </button>
