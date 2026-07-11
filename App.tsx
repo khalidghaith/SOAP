@@ -30,7 +30,7 @@ import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
 import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
-import { Rulers } from './components/Rulers';
+import { Rulers, getRulerTickInterval } from './components/Rulers';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
 import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
@@ -402,6 +402,7 @@ export default function App() {
     const GRID_SIZES = [0.5, 1, 2, 5, 10];
     const [gridSizeIndex, setGridSizeIndex] = useState(2); // Default 2m
     const gridSize = GRID_SIZES[gridSizeIndex];
+    const currentGridSizeMeters = gridSize * (appSettings.unitSystem === 'imperial' ? 0.3048 : 1.0);
 
     // UI State
     const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
@@ -952,7 +953,10 @@ export default function App() {
                     newPos = (worldPos.x * Math.cos(angleRad) + worldPos.y * Math.sin(angleRad)) / PIXELS_PER_METER;
                 }
                 if (e.shiftKey) {
-                    newPos = Math.round(newPos / gridSize) * gridSize;
+                    const isImperial = appSettings.unitSystem === 'imperial';
+                    const { subInterval } = getRulerTickInterval(gridSize, scale, PIXELS_PER_METER, isImperial);
+                    const subIntervalMeters = subInterval * (isImperial ? 0.3048 : 1.0);
+                    newPos = Math.round(newPos / subIntervalMeters) * subIntervalMeters;
                 }
                 return { ...g, position: newPos };
             }));
@@ -968,7 +972,7 @@ export default function App() {
             window.removeEventListener('pointermove', handlePointerMove);
             window.removeEventListener('pointerup', handlePointerUp);
         };
-    }, [draggedGuideId, toWorld, gridSize]);
+    }, [draggedGuideId, toWorld, gridSize, scale, appSettings.unitSystem]);
 
     // --- Core Handlers ---
     useEffect(() => {
@@ -2790,7 +2794,7 @@ export default function App() {
                                             linear-gradient(to right, ${canvasTheme.gridColor} 1px, transparent 1px),
                                             linear-gradient(to bottom, ${canvasTheme.gridColor} 1px, transparent 1px)
                                         `,
-                                    backgroundSize: `${gridSize * PIXELS_PER_METER * scale}px ${gridSize * PIXELS_PER_METER * scale}px`,
+                                    backgroundSize: `${currentGridSizeMeters * PIXELS_PER_METER * scale}px ${currentGridSizeMeters * PIXELS_PER_METER * scale}px`,
                                     backgroundPosition: `${offset.x}px ${offset.y}px`
                                 }}
                             />
@@ -2997,8 +3001,8 @@ export default function App() {
                                                     x2={isVertical ? 0 : 100000}
                                                     y2={isVertical ? 100000 : 0}
                                                     stroke={isSelected ? "#f97316" : (darkMode ? "#06b6d4" : "#0891b2")}
-                                                    strokeWidth={(isSelected ? 2 : 1.2) / scale}
-                                                    strokeDasharray="4,4"
+                                                    strokeWidth={(isSelected ? 1.5 : 0.8) / scale}
+                                                    strokeDasharray={`${2.5 / scale},${2.5 / scale}`}
                                                     className="pointer-events-none transition-colors duration-200"
                                                 />
                                                 
@@ -3124,7 +3128,7 @@ export default function App() {
                                             }}
                                             diagramStyle={canvasStyle}
                                             snapEnabled={snapEnabled}
-                                            snapPixelUnit={appSettings.snapToGrid ? gridSize * PIXELS_PER_METER : 1}
+                                            snapPixelUnit={appSettings.snapToGrid ? currentGridSizeMeters * PIXELS_PER_METER : 1}
                                             pixelsPerMeter={PIXELS_PER_METER}
                                             floors={floors}
                                             appSettings={appSettings}
@@ -3326,7 +3330,7 @@ export default function App() {
                                         <div className={`flex flex-col items-center gap-2 ${!isToolbarExpanded ? 'hidden lg:flex' : 'flex'}`}>
                                             {/* Grid Controller (Vertical Capsule) - Always visible in both 2D and 3D */}
                                             <div className="flex flex-col items-center bg-slate-100/50 dark:bg-white/5 rounded-2xl py-1.5 px-1 border border-slate-200/50 dark:border-dark-border gap-1 w-8">
-                                                <span className="text-[10px] font-black font-sans text-center h-4 flex items-center justify-center leading-none">{gridSize}m</span>
+                                                <span className="text-[10px] font-black font-sans text-center h-4 flex items-center justify-center leading-none">{gridSize}{appSettings.unitSystem === 'imperial' ? 'ft' : 'm'}</span>
                                                 <div className="flex items-center justify-center gap-0.5">
                                                     <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-orange-600 transition-colors" title="Increase Grid"><ChevronUp size={12} /></button>
                                                     <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-orange-600 transition-colors" title="Decrease Grid"><ChevronDown size={12} /></button>

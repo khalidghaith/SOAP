@@ -190,6 +190,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
     getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false, isGrayedOut = false, guides
 }) => {
+    const pointerClass = isSketchMode || isOverlay || isGrayedOut ? 'pointer-events-none' : 'pointer-events-auto';
     const [isDragging, setIsDragging] = useState(false);
     const [isRotating, setIsRotating] = useState(false);
     const [resizeHandle, setResizeHandle] = useState<string | null>(null);
@@ -1327,7 +1328,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         <svg className="overflow-visible pointer-events-none">
                             <path
                                 d={polygonPath}
-                                className="pointer-events-auto"
+                                className={pointerClass}
                                 strokeWidth={themeStyles.strokeWidth}
                                 strokeDasharray={themeStyles.strokeDasharray}
                                 fillOpacity={themeStyles.fillOpacity}
@@ -1423,7 +1424,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 height={room.height}
                                 rx={themeStyles.borderRadius}
                                 ry={themeStyles.borderRadius}
-                                className="pointer-events-auto"
+                                className={pointerClass}
                                 strokeWidth={themeStyles.strokeWidth}
                                 strokeDasharray={themeStyles.strokeDasharray}
                                 fillOpacity={themeStyles.fillOpacity}
@@ -1579,7 +1580,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                 MozHyphens: 'auto',
                                 msHyphens: 'auto'
                             }}
-                            className={`flex flex-col items-center w-full px-2 text-center ${themeStyles.textClass} leading-tight select-none ${room.isTextUnlocked ? 'pointer-events-auto cursor-move' : 'pointer-events-none'}`}
+                            className={`flex flex-col items-center w-full px-2 text-center ${themeStyles.textClass} leading-tight select-none ${room.isTextUnlocked ? `${pointerClass} cursor-move` : 'pointer-events-none'}`}
                         >
                             <div className="font-bold w-full">
                                 {wrappedNameLines.map((line, i) => (

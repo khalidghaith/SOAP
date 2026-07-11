@@ -1,5 +1,53 @@
 import React, { useMemo } from 'react';
 
+export interface TickIntervalResult {
+    tickInterval: number;      // distance between major ticks in units (meters or feet)
+    subTickCount: number;      // number of subdivisions between major ticks
+    subInterval: number;       // distance between sub-ticks in units (meters or feet)
+    unitScale: number;         // conversion factor to meters (0.3048 for imperial, 1.0 for metric)
+}
+
+export function getRulerTickInterval(
+    gridSize: number,
+    scale: number,
+    pixelsPerMeter: number,
+    isImperial: boolean
+): TickIntervalResult {
+    const unitScale = isImperial ? 0.3048 : 1.0;
+    // Spacing of the grid in pixels on screen
+    const gridSpacingPx = gridSize * unitScale * pixelsPerMeter * scale;
+
+    let interval = gridSize;
+    let subs = 5;
+
+    if (gridSpacingPx < 40) {
+        interval = gridSize * 2;
+        subs = 4;
+        if (gridSpacingPx * 2 < 40) {
+            interval = gridSize * 5;
+            subs = 5;
+            if (gridSpacingPx * 5 < 40) {
+                interval = gridSize * 10;
+                subs = 10;
+            }
+        }
+    } else if (gridSpacingPx > 180) {
+        interval = gridSize / 2;
+        subs = 5;
+        if (gridSpacingPx / 2 > 180) {
+            interval = gridSize / 5;
+            subs = 5;
+        }
+    }
+
+    return {
+        tickInterval: interval,
+        subTickCount: subs,
+        subInterval: interval / subs,
+        unitScale
+    };
+}
+
 interface RulersProps {
     scale: number;
     offset: { x: number; y: number };
@@ -24,105 +72,88 @@ export const Rulers: React.FC<RulersProps> = ({
     const isImperial = unitSystem === 'imperial';
     const unitLabel = isImperial ? 'ft' : 'm';
 
-    // Calculate dynamic tick intervals based on zoom scale
-    const { tickInterval, subTickCount } = useMemo(() => {
-        // Spacing between standard gridlines on screen in pixels
-        const gridSpacingPx = gridSize * pixelsPerMeter * scale;
-
-        let interval = gridSize;
-        let subs = 5; // number of divisions between major ticks
-
-        if (gridSpacingPx < 40) {
-            interval = gridSize * 2;
-            subs = 4;
-            if (gridSpacingPx * 2 < 40) {
-                interval = gridSize * 5;
-                subs = 5;
-                if (gridSpacingPx * 5 < 40) {
-                    interval = gridSize * 10;
-                    subs = 10;
-                }
-            }
-        } else if (gridSpacingPx > 180) {
-            interval = gridSize / 2;
-            subs = 5;
-            if (gridSpacingPx / 2 > 180) {
-                interval = gridSize / 5;
-                subs = 5;
-            }
-        }
-
-        return { tickInterval: interval, subTickCount: subs };
-    }, [gridSize, scale, pixelsPerMeter]);
+    const { tickInterval, subTickCount, subInterval, unitScale } = useMemo(() => {
+        return getRulerTickInterval(gridSize, scale, pixelsPerMeter, isImperial);
+    }, [gridSize, scale, pixelsPerMeter, isImperial]);
 
     // Top Ruler graduations
     const topTicks = useMemo(() => {
-        const ticks: { screenX: number; label: string; isMajor: boolean }[] = [];
-        const xMinWorld = (24 - offset.x) / scale / pixelsPerMeter;
-        const xMaxWorld = (width - offset.x) / scale / pixelsPerMeter;
+        const ticks: { screenX: number; label: string; level: 'major' | 'medium' | 'minor' }[] = [];
+        
+        // Boundaries in target units (feet or meters)
+        const xMinUnit = ((24 - offset.x) / scale / pixelsPerMeter) / unitScale;
+        const xMaxUnit = ((width - offset.x) / scale / pixelsPerMeter) / unitScale;
 
-        const startVal = Math.floor(xMinWorld / tickInterval) * tickInterval;
-        const endVal = Math.ceil(xMaxWorld / tickInterval) * tickInterval;
-
-        const subInterval = tickInterval / subTickCount;
+        const startVal = Math.floor(xMinUnit / tickInterval) * tickInterval;
+        const endVal = Math.ceil(xMaxUnit / tickInterval) * tickInterval;
 
         for (let val = startVal; val <= endVal; val += tickInterval) {
             // Draw major ticks
-            const screenX = val * pixelsPerMeter * scale + offset.x;
+            const valMeters = val * unitScale;
+            const screenX = valMeters * pixelsPerMeter * scale + offset.x;
             if (screenX >= 24 && screenX <= width) {
-                // Format label: if imperial, show converted feet; else show meters
-                const displayedVal = isImperial ? val / 0.3048 : val;
-                
                 // Show clean integers if possible, else 1 decimal place
-                const label = Number(displayedVal.toFixed(1)).toString();
-                ticks.push({ screenX, label, isMajor: true });
+                const label = Number(val.toFixed(1)).toString();
+                ticks.push({ screenX, label, level: 'major' });
             }
 
             // Draw sub-ticks
             for (let s = 1; s < subTickCount; s++) {
                 const subVal = val + s * subInterval;
-                const subScreenX = subVal * pixelsPerMeter * scale + offset.x;
+                const subValMeters = subVal * unitScale;
+                const subScreenX = subValMeters * pixelsPerMeter * scale + offset.x;
                 if (subScreenX >= 24 && subScreenX <= width) {
-                    ticks.push({ screenX: subScreenX, label: '', isMajor: false });
+                    const isMedium = subTickCount % 2 === 0 && s === subTickCount / 2;
+                    ticks.push({ 
+                        screenX: subScreenX, 
+                        label: '', 
+                        level: isMedium ? 'medium' : 'minor' 
+                    });
                 }
             }
         }
 
         return ticks;
-    }, [offset.x, scale, pixelsPerMeter, width, tickInterval, subTickCount, isImperial]);
+    }, [offset.x, scale, pixelsPerMeter, width, tickInterval, subTickCount, subInterval, unitScale]);
 
     // Left Ruler graduations
     const leftTicks = useMemo(() => {
-        const ticks: { screenY: number; label: string; isMajor: boolean }[] = [];
-        const yMinWorld = (24 - offset.y) / scale / pixelsPerMeter;
-        const yMaxWorld = (height - offset.y) / scale / pixelsPerMeter;
+        const ticks: { screenY: number; label: string; level: 'major' | 'medium' | 'minor' }[] = [];
+        
+        // Boundaries in target units (feet or meters)
+        const yMinUnit = ((24 - offset.y) / scale / pixelsPerMeter) / unitScale;
+        const yMaxUnit = ((height - offset.y) / scale / pixelsPerMeter) / unitScale;
 
-        const startVal = Math.floor(yMinWorld / tickInterval) * tickInterval;
-        const endVal = Math.ceil(yMaxWorld / tickInterval) * tickInterval;
-
-        const subInterval = tickInterval / subTickCount;
+        const startVal = Math.floor(yMinUnit / tickInterval) * tickInterval;
+        const endVal = Math.ceil(yMaxUnit / tickInterval) * tickInterval;
 
         for (let val = startVal; val <= endVal; val += tickInterval) {
             // Draw major ticks
-            const screenY = val * pixelsPerMeter * scale + offset.y;
+            const valMeters = val * unitScale;
+            const screenY = valMeters * pixelsPerMeter * scale + offset.y;
             if (screenY >= 24 && screenY <= height) {
-                const displayedVal = isImperial ? val / 0.3048 : val;
-                const label = Number(displayedVal.toFixed(1)).toString();
-                ticks.push({ screenY, label, isMajor: true });
+                const label = Number(val.toFixed(1)).toString();
+                ticks.push({ screenY, label, level: 'major' });
             }
 
             // Draw sub-ticks
             for (let s = 1; s < subTickCount; s++) {
                 const subVal = val + s * subInterval;
-                const subScreenY = subVal * pixelsPerMeter * scale + offset.y;
+                const subValMeters = subVal * unitScale;
+                const subScreenY = subValMeters * pixelsPerMeter * scale + offset.y;
                 if (subScreenY >= 24 && subScreenY <= height) {
-                    ticks.push({ screenY: subScreenY, label: '', isMajor: false });
+                    const isMedium = subTickCount % 2 === 0 && s === subTickCount / 2;
+                    ticks.push({ 
+                        screenY: subScreenY, 
+                        label: '', 
+                        level: isMedium ? 'medium' : 'minor' 
+                    });
                 }
             }
         }
 
         return ticks;
-    }, [offset.y, scale, pixelsPerMeter, height, tickInterval, subTickCount, isImperial]);
+    }, [offset.y, scale, pixelsPerMeter, height, tickInterval, subTickCount, subInterval, unitScale]);
 
     return (
         <div 
@@ -148,28 +179,34 @@ export const Rulers: React.FC<RulersProps> = ({
                 }}
             >
                 <svg className="w-full h-full overflow-visible">
-                    {topTicks.map((tick, idx) => (
-                        <g key={`top-t-${idx}`}>
-                            <line
-                                x1={tick.screenX - 24} // Offset by left 24px of TopRuler container
-                                y1={tick.isMajor ? 10 : 17}
-                                x2={tick.screenX - 24}
-                                y2={24}
-                                stroke="currentColor"
-                                className="text-slate-300 dark:text-slate-700"
-                                strokeWidth={1}
-                            />
-                            {tick.isMajor && (
-                                <text
-                                    x={tick.screenX - 24 + 3}
-                                    y={8}
-                                    className="font-mono text-[8px] fill-slate-400 dark:fill-gray-500 font-bold"
-                                >
-                                    {tick.label}
-                                </text>
-                            )}
-                        </g>
-                    ))}
+                    {topTicks.map((tick, idx) => {
+                        let y1 = 10;
+                        if (tick.level === 'medium') y1 = 15;
+                        else if (tick.level === 'minor') y1 = 19;
+
+                        return (
+                            <g key={`top-t-${idx}`}>
+                                <line
+                                    x1={tick.screenX - 24} // Offset by left 24px of TopRuler container
+                                    y1={y1}
+                                    x2={tick.screenX - 24}
+                                    y2={24}
+                                    stroke="currentColor"
+                                    className="text-slate-400 dark:text-slate-600"
+                                    strokeWidth={1}
+                                />
+                                {tick.level === 'major' && (
+                                    <text
+                                        x={tick.screenX - 24 + 3}
+                                        y={8}
+                                        className="font-mono text-[8px] fill-slate-400 dark:fill-gray-500 font-bold"
+                                    >
+                                        {tick.label}
+                                    </text>
+                                )}
+                            </g>
+                        );
+                    })}
                 </svg>
             </div>
 
@@ -187,30 +224,36 @@ export const Rulers: React.FC<RulersProps> = ({
                 }}
             >
                 <svg className="w-full h-full overflow-visible">
-                    {leftTicks.map((tick, idx) => (
-                        <g key={`left-t-${idx}`}>
-                            <line
-                                x1={tick.isMajor ? 10 : 17}
-                                y1={tick.screenY - 24} // Offset by top 24px of LeftRuler container
-                                x2={24}
-                                y2={tick.screenY - 24}
-                                stroke="currentColor"
-                                className="text-slate-300 dark:text-slate-700"
-                                strokeWidth={1}
-                            />
-                            {tick.isMajor && (
-                                <text
-                                    x={10}
-                                    y={tick.screenY - 24 + 3}
-                                    className="font-mono text-[8px] fill-slate-400 dark:fill-gray-500 font-bold"
-                                    transform={`rotate(-90, 10, ${tick.screenY - 24})`}
-                                    textAnchor="middle"
-                                >
-                                    {tick.label}
-                                </text>
-                            )}
-                        </g>
-                    ))}
+                    {leftTicks.map((tick, idx) => {
+                        let x1 = 10;
+                        if (tick.level === 'medium') x1 = 15;
+                        else if (tick.level === 'minor') x1 = 19;
+
+                        return (
+                            <g key={`left-t-${idx}`}>
+                                <line
+                                    x1={x1}
+                                    y1={tick.screenY - 24} // Offset by top 24px of LeftRuler container
+                                    x2={24}
+                                    y2={tick.screenY - 24}
+                                    stroke="currentColor"
+                                    className="text-slate-400 dark:text-slate-600"
+                                    strokeWidth={1}
+                                />
+                                {tick.level === 'major' && (
+                                    <text
+                                        x={10}
+                                        y={tick.screenY - 24 + 3}
+                                        className="font-mono text-[8px] fill-slate-400 dark:fill-gray-500 font-bold"
+                                        transform={`rotate(-90, 10, ${tick.screenY - 24})`}
+                                        textAnchor="middle"
+                                    >
+                                        {tick.label}
+                                    </text>
+                                )}
+                            </g>
+                        );
+                    })}
                 </svg>
             </div>
         </div>
