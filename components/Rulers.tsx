@@ -138,10 +138,12 @@ export const Rulers: React.FC<RulersProps> = ({
             <div 
                 className="absolute top-0 left-6 right-0 h-6 border-b border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-slate-900/70 backdrop-blur-md pointer-events-auto cursor-ns-resize flex items-end"
                 onPointerDown={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     onDragNewGuide('h', e.clientX, e.clientY);
                 }}
                 onMouseDown={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                 }}
             >
@@ -175,10 +177,12 @@ export const Rulers: React.FC<RulersProps> = ({
             <div 
                 className="absolute top-6 left-0 bottom-0 w-6 border-r border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-slate-900/70 backdrop-blur-md pointer-events-auto cursor-ew-resize flex justify-end"
                 onPointerDown={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     onDragNewGuide('v', e.clientX, e.clientY);
                 }}
                 onMouseDown={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                 }}
             >

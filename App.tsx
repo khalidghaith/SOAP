@@ -944,7 +944,13 @@ export default function App() {
             setGuides(prev => prev.map(g => {
                 if (g.id !== draggedGuideId) return g;
                 
-                let newPos = (g.type === 'h' ? worldPos.y : worldPos.x) / PIXELS_PER_METER;
+                const angleRad = ((g.angle || 0) * Math.PI) / 180;
+                let newPos = 0;
+                if (g.type === 'h') {
+                    newPos = (-worldPos.x * Math.sin(angleRad) + worldPos.y * Math.cos(angleRad)) / PIXELS_PER_METER;
+                } else {
+                    newPos = (worldPos.x * Math.cos(angleRad) + worldPos.y * Math.sin(angleRad)) / PIXELS_PER_METER;
+                }
                 if (e.shiftKey) {
                     newPos = Math.round(newPos / gridSize) * gridSize;
                 }
@@ -2982,7 +2988,7 @@ export default function App() {
                                         return (
                                             <g 
                                                 key={guide.id}
-                                                transform={isVertical ? `translate(${posPx}, 0) rotate(${angle})` : `translate(0, ${posPx}) rotate(${angle})`}
+                                                transform={isVertical ? `rotate(${angle}) translate(${posPx}, 0)` : `rotate(${angle}) translate(0, ${posPx})`}
                                             >
                                                 {/* Visual Guide Line */}
                                                 <line
@@ -3007,10 +3013,12 @@ export default function App() {
                                                         strokeWidth={16 / scale}
                                                         className={`cursor-grab active:cursor-grabbing pointer-events-auto ${guide.locked ? 'cursor-not-allowed' : ''}`}
                                                         onPointerDown={(e) => {
+                                                            e.preventDefault();
                                                             e.stopPropagation();
                                                             handleStartDragExistingGuide(guide.id, e);
                                                         }}
                                                         onMouseDown={(e) => {
+                                                            e.preventDefault();
                                                             e.stopPropagation();
                                                         }}
                                                     />
@@ -3645,12 +3653,46 @@ export default function App() {
                                     
                                     const isVertical = selectedGuide.type === 'v';
                                     const posPx = selectedGuide.position * PIXELS_PER_METER;
-                                    const screenX = isVertical 
-                                        ? Math.max(80, Math.min(window.innerWidth - 180, posPx * scale + offset.x))
-                                        : 80;
-                                    const screenY = isVertical
-                                        ? 80
-                                        : Math.max(80, Math.min(window.innerHeight - 180, posPx * scale + offset.y));
+                                    const angleRad = ((selectedGuide.angle || 0) * Math.PI) / 180;
+                                     
+                                    const viewWidth = mainRef.current?.getBoundingClientRect().width || window.innerWidth;
+                                    const viewHeight = mainRef.current?.getBoundingClientRect().height || window.innerHeight;
+                                     
+                                    // If mostly vertical, keep panel near top (y_screen = 100); if mostly horizontal, keep panel near left (x_screen = 100)
+                                    const isMostlyVertical = isVertical 
+                                        ? Math.abs(Math.cos(angleRad)) >= 0.707 
+                                        : Math.abs(Math.sin(angleRad)) < 0.707;
+                                         
+                                    const targetScreenX = isMostlyVertical ? viewWidth / 2 : 120;
+                                    const targetScreenY = isMostlyVertical ? 100 : viewHeight / 2;
+                                     
+                                    const cx = (targetScreenX - offset.x) / scale;
+                                    const cy = (targetScreenY - offset.y) / scale;
+                                     
+                                    let ax = 0, ay = 0, ux = 0, uy = 0;
+                                    if (isVertical) {
+                                        ax = posPx * Math.cos(angleRad);
+                                        ay = posPx * Math.sin(angleRad);
+                                        ux = -Math.sin(angleRad);
+                                        uy = Math.cos(angleRad);
+                                    } else {
+                                        ax = -posPx * Math.sin(angleRad);
+                                        ay = posPx * Math.cos(angleRad);
+                                        ux = Math.cos(angleRad);
+                                        uy = Math.sin(angleRad);
+                                    }
+                                     
+                                    const vx = cx - ax;
+                                    const vy = cy - ay;
+                                    const t = vx * ux + vy * uy;
+                                    const closestWorldX = ax + t * ux;
+                                    const closestWorldY = ay + t * uy;
+                                     
+                                    const rawScreenX = closestWorldX * scale + offset.x;
+                                    const rawScreenY = closestWorldY * scale + offset.y;
+                                     
+                                    const screenX = Math.max(80, Math.min(viewWidth - 180, rawScreenX));
+                                    const screenY = Math.max(80, Math.min(viewHeight - 80, rawScreenY));
                                         
                                     return (
                                         <div 
