@@ -16,7 +16,7 @@ export const AILayoutModal: React.FC<AILayoutModalProps> = ({ isOpen, onClose, o
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-8">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[300] flex items-center justify-center p-8">
             <div className="bg-white dark:bg-dark-surface w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden border border-slate-200 dark:border-dark-border">
                 <div className="p-6 border-b border-slate-100 dark:border-dark-border flex justify-between items-center bg-orange-50/50 dark:bg-orange-900/10">
                     <h2 className="text-orange-900 dark:text-orange-400 font-black text-lg flex items-center gap-2">

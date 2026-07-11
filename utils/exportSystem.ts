@@ -4,8 +4,41 @@ import { SketchManager } from '../SketchManager';
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import { generateDXF } from './dxf';
+import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
+import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
+import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
 
 export type ExportFormat = 'png' | 'jpeg' | 'svg' | 'dxf' | 'json' | 'pdf';
+
+// Generate points along the curve to ensure the hull wraps it tightly
+const getBubbleCurvePoints = (points: Point[], segmentsPerCurve: number = 5): Point[] => {
+    if (points.length < 3) return points;
+    const result: Point[] = [];
+
+    for (let i = 0; i < points.length; i++) {
+        const p0 = points[(i - 1 + points.length) % points.length];
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const p3 = points[(i + 2) % points.length];
+
+        // Catmull-Rom to Bezier control points
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+        // Sample Bezier cubic curve
+        for (let j = 0; j < segmentsPerCurve; j++) {
+            const t = j / segmentsPerCurve;
+            const it = 1 - t;
+            // Cubic Bezier formula
+            const x = it * it * it * p1.x + 3 * it * it * t * cp1x + 3 * it * t * t * cp2x + t * t * t * p2.x;
+            const y = it * it * it * p1.y + 3 * it * it * t * cp1y + 3 * it * t * t * cp2y + t * t * t * p2.y;
+            result.push({ x, y });
+        }
+    }
+    return result;
+};
 const PIXELS_PER_METER = 20;
 
 // Text wrapping helper with literal dash support
@@ -215,8 +248,20 @@ export const handleExport = async (
     options?: any,
     currentStyle?: DiagramStyle,
     referenceImages?: ReferenceImage[],
-    siteProperties?: SiteProperties
+    siteProperties?: SiteProperties,
+    floorOverlays?: Record<number, number | null>
 ) => {
+    // Style Helpers
+    const getStrokeWidth = (style?: DiagramStyle) => style?.borderWidth || appSettings.strokeWidth || 2;
+    const getStrokeColor = (zone: string, style?: DiagramStyle) => {
+        return getHexBorderForZone(zone, zoneColors);
+    };
+    const getFillColor = (zone: string, style?: DiagramStyle) => {
+        return getHexColorForZone(zone, zoneColors);
+    };
+    const getOpacity = (style?: DiagramStyle) => style?.opacity || 0.9;
+    const isSketchy = currentStyle?.sketchy || false;
+
     // --- JSON Export ---
     if (format === 'json') {
         const data = {
@@ -256,23 +301,37 @@ export const handleExport = async (
         }
         return false;
     });
-    if (visibleRooms.length === 0) {
+
+    const activeOverlayFloorId = floorOverlays?.[currentFloor] ?? null;
+    const overlayRooms = activeOverlayFloorId !== null
+        ? rooms.filter(r => r.isPlaced && r.floor === activeOverlayFloorId && !visibleRooms.some(vr => vr.id === r.id))
+        : [];
+
+    if (visibleRooms.length === 0 && overlayRooms.length === 0) {
         alert("No visible rooms to export.");
         return;
     }
 
     // 1. Calculate Bounds
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    visibleRooms.forEach(r => {
+    const allRoomsForBounds = [...visibleRooms, ...overlayRooms];
+    allRoomsForBounds.forEach(r => {
         const pts = r.polygon || [
             { x: 0, y: 0 }, { x: r.width, y: 0 },
             { x: r.width, y: r.height }, { x: 0, y: r.height }
         ];
+        const angle = r.rotation || 0;
+        const rad = (angle * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+
         pts.forEach(p => {
-            minX = Math.min(minX, r.x + p.x);
-            minY = Math.min(minY, r.y + p.y);
-            maxX = Math.max(maxX, r.x + p.x);
-            maxY = Math.max(maxY, r.y + p.y);
+            const rx = p.x * cos - p.y * sin;
+            const ry = p.x * sin + p.y * cos;
+            minX = Math.min(minX, r.x + rx);
+            minY = Math.min(minY, r.y + ry);
+            maxX = Math.max(maxX, r.x + rx);
+            maxY = Math.max(maxY, r.y + ry);
         });
     });
 
@@ -280,8 +339,6 @@ export const handleExport = async (
     if (annotations) {
         annotations.filter(a => a.floor === currentFloor).forEach(a => {
             a.points.forEach(p => {
-                minX = Math.min(minX, a.points[0].x + p.x); // Annotation points are relative or absolute? 
-                // Wait, AnnotationLayer renders at points[i].x. Points are absolute world coordinates.
                 minX = Math.min(minX, p.x);
                 minY = Math.min(minY, p.y);
                 maxX = Math.max(maxX, p.x);
@@ -310,6 +367,320 @@ export const handleExport = async (
     const offsetX = -minX;
     const offsetY = -minY;
 
+    // Determine the scale factor applied to SVG pixels in the final output
+    let finalScaleFactor = 1;
+    const isPdfOutput = format === 'pdf';
+    const isImageOutput = format === 'png' || format === 'jpeg';
+
+    if (isPdfOutput) {
+        const pageSizes: Record<string, { w: number, h: number }> = {
+            a4: { w: 210, h: 297 },
+            a3: { w: 297, h: 420 },
+            letter: { w: 215.9, h: 279.4 }
+        };
+        const size = pageSizes[(options?.pageSize || 'A3').toLowerCase()] || pageSizes.a3;
+        const isPortrait = options?.orientation === 'portrait';
+        const pageWidth = isPortrait ? Math.min(size.w, size.h) : Math.max(size.w, size.h);
+        const pageHeight = isPortrait ? Math.max(size.w, size.h) : Math.min(size.w, size.h);
+
+        let targetW = width;
+        if (options?.pdfScale) {
+            const scaleVal = options.pdfScale;
+            const pxToMm = (1000 / scaleVal) / PIXELS_PER_METER;
+            targetW = width * pxToMm;
+        } else {
+            const margin = 20; // mm
+            const availableW = pageWidth - 2 * margin;
+            const availableH = pageHeight - 2 * margin;
+            const aspectSvg = width / height;
+            const aspectPage = availableW / availableH;
+            if (aspectSvg > aspectPage) {
+                targetW = availableW;
+            } else {
+                const targetH = availableH;
+                targetW = availableH * aspectSvg;
+            }
+        }
+        finalScaleFactor = targetW / width; // mm per SVG pixel
+    } else if (isImageOutput) {
+        const pageSizes: Record<string, { w: number, h: number }> = {
+            a4: { w: 210, h: 297 },
+            a3: { w: 297, h: 420 },
+            letter: { w: 215.9, h: 279.4 }
+        };
+        const size = pageSizes[(options?.pageSize || 'A3').toLowerCase()] || pageSizes.a3;
+        const isPortrait = options?.orientation === 'portrait';
+        const pageWidth = isPortrait ? Math.min(size.w, size.h) : Math.max(size.w, size.h);
+        const pageHeight = isPortrait ? Math.max(size.w, size.h) : Math.min(size.w, size.h);
+
+        const imgScale = options?.scale || 2;
+        const mmToPx = 4 * imgScale;
+        const canvasW = pageWidth * mmToPx;
+        const canvasH = pageHeight * mmToPx;
+        const marginPx = 20 * mmToPx;
+        const availableW = canvasW - 2 * marginPx;
+        const availableH = canvasH - 2 * marginPx;
+
+        let targetW = width;
+        if (options?.pdfScale) {
+            const pdfScale = options.pdfScale;
+            const scaleVal = ((1000 / pdfScale) * mmToPx) / PIXELS_PER_METER;
+            targetW = width * scaleVal;
+        } else {
+            const aspectSvg = width / height;
+            const aspectCanvas = availableW / availableH;
+            if (aspectSvg > aspectCanvas) {
+                targetW = availableW;
+            } else {
+                targetW = availableH * aspectSvg;
+            }
+        }
+        finalScaleFactor = targetW / width; // canvas pixels per SVG pixel
+    }
+
+    const getStrokeWidthForExport = (type: 'wall' | 'zone' | 'connection' | 'annotation' | 'annotation-thick' | 'symbol' | 'thin', customWidth?: number) => {
+        if (isPdfOutput) {
+            let targetMm = 0.25;
+            if (type === 'wall') {
+                const baseWidth = customWidth ?? getStrokeWidth(currentStyle);
+                targetMm = (baseWidth / 2) * 0.45;
+            } else if (type === 'zone') {
+                targetMm = 0.25;
+            } else if (type === 'connection') {
+                targetMm = 0.3;
+            } else if (type === 'annotation-thick') {
+                targetMm = customWidth ? (customWidth * 0.15) : 0.4;
+            } else if (type === 'annotation') {
+                targetMm = customWidth ? (customWidth * 0.15) : 0.25;
+            } else if (type === 'symbol') {
+                targetMm = 0.18;
+            } else if (type === 'thin') {
+                targetMm = 0.13;
+            }
+            return targetMm / finalScaleFactor;
+        } else if (isImageOutput) {
+            const imgScale = options?.scale || 2;
+            let targetPx = 1.5;
+            if (type === 'wall') {
+                const baseWidth = customWidth ?? getStrokeWidth(currentStyle);
+                targetPx = baseWidth * imgScale;
+            } else if (type === 'zone') {
+                targetPx = 1.5 * imgScale;
+            } else if (type === 'connection') {
+                targetPx = 2 * imgScale;
+            } else if (type === 'annotation-thick') {
+                targetPx = (customWidth || 3) * imgScale;
+            } else if (type === 'annotation') {
+                targetPx = (customWidth || 1.5) * imgScale;
+            } else if (type === 'symbol') {
+                targetPx = 1.2 * imgScale;
+            } else if (type === 'thin') {
+                targetPx = 1.0 * imgScale;
+            }
+            return targetPx / finalScaleFactor;
+        } else {
+            if (type === 'wall') {
+                return customWidth ?? getStrokeWidth(currentStyle);
+            } else if (type === 'zone') {
+                return 2;
+            } else if (type === 'connection') {
+                return 2;
+            } else if (type === 'annotation-thick') {
+                return customWidth || 3;
+            } else if (type === 'annotation') {
+                return customWidth || 1.5;
+            } else if (type === 'symbol') {
+                return 1.5;
+            } else if (type === 'thin') {
+                return 0.8;
+            }
+            return 1;
+        }
+    };
+
+    const getRoomCornerRadius = (room: Room) => {
+        if (currentStyle?.id === 'blueprint') return 0;
+        return room.style?.cornerRadius ?? appSettings.cornerRadius ?? 0;
+    };
+
+    const getDashArrayForExport = (type: 'zone' | 'overlay' | 'grayed-out' | 'sketchy' | 'custom', customValue?: string) => {
+        if (isPdfOutput) {
+            let dashMm = 2;
+            let gapMm = 2;
+            if (type === 'zone') {
+                dashMm = 3;
+                gapMm = 3;
+            } else if (type === 'overlay') {
+                dashMm = 1.5;
+                gapMm = 1.5;
+            } else if (type === 'grayed-out') {
+                dashMm = 1.5;
+                gapMm = 1.5;
+            } else if (type === 'sketchy') {
+                dashMm = 2.5;
+                gapMm = 2.5;
+            } else if (type === 'custom' && customValue) {
+                return customValue.split(',').map(v => {
+                    const mm = (parseFloat(v) || 2) * 0.15;
+                    return mm / finalScaleFactor;
+                }).join(',');
+            }
+            return `${dashMm / finalScaleFactor},${gapMm / finalScaleFactor}`;
+        } else if (isImageOutput) {
+            const imgScale = options?.scale || 2;
+            let dashPx = 5 * imgScale;
+            let gapPx = 5 * imgScale;
+            if (type === 'zone') {
+                dashPx = 8 * imgScale;
+                gapPx = 8 * imgScale;
+            } else if (type === 'overlay') {
+                dashPx = 4 * imgScale;
+                gapPx = 4 * imgScale;
+            } else if (type === 'grayed-out') {
+                dashPx = 4 * imgScale;
+                gapPx = 4 * imgScale;
+            } else if (type === 'sketchy') {
+                dashPx = 6 * imgScale;
+                gapPx = 6 * imgScale;
+            } else if (type === 'custom' && customValue) {
+                return customValue.split(',').map(v => {
+                    const px = (parseFloat(v) || 5) * imgScale * 0.5;
+                    return px / finalScaleFactor;
+                }).join(',');
+            }
+            return `${dashPx / finalScaleFactor},${gapPx / finalScaleFactor}`;
+        } else {
+            if (type === 'zone') return '10,10';
+            if (type === 'overlay') return '6,6';
+            if (type === 'grayed-out') return '4,4';
+            if (type === 'sketchy') return '8,8';
+            if (type === 'custom' && customValue) return customValue;
+            return '4,4';
+        }
+    };
+
+    const getStyleTextProps = () => {
+        const id = currentStyle?.id || 'standard';
+        if (id === 'blueprint') {
+            if (isPdfOutput) {
+                return {
+                    fontFamily: 'monospace',
+                    titleColor: '#082f49',
+                    subtitleColor: '#0284c7'
+                };
+            }
+            return {
+                fontFamily: 'monospace',
+                titleColor: darkMode ? '#bae6fd' : '#082f49',
+                subtitleColor: darkMode ? '#7dd3fc' : '#0284c7'
+            };
+        } else if (id === 'clay') {
+            if (isPdfOutput) {
+                return {
+                    fontFamily: currentStyle?.fontFamily || 'sans-serif',
+                    titleColor: '#1c1917',
+                    subtitleColor: '#78716c'
+                };
+            }
+            return {
+                fontFamily: currentStyle?.fontFamily || 'sans-serif',
+                titleColor: darkMode ? '#e7e5e4' : '#1c1917',
+                subtitleColor: darkMode ? '#a8a29e' : '#78716c'
+            };
+        }
+        if (isPdfOutput) {
+            return {
+                fontFamily: currentStyle?.fontFamily || 'sans-serif',
+                titleColor: '#1e293b',
+                subtitleColor: '#64748b'
+            };
+        }
+        return {
+            fontFamily: currentStyle?.fontFamily || 'sans-serif',
+            titleColor: darkMode ? '#f8fafc' : '#1e293b',
+            subtitleColor: darkMode ? '#94a3b8' : '#64748b'
+        };
+    };
+
+    const getRoomDisplayProps = (r: Room) => {
+        const styleId = currentStyle?.id || 'standard';
+        
+        const baseBorderColor = getHexBorderForZone(r.zone, zoneColors);
+        const baseFillColor = getHexColorForZone(r.zone, zoneColors);
+        
+        let fill = r.style?.fill || baseFillColor;
+        let stroke = r.style?.stroke || baseBorderColor;
+        let strokeWidth = r.style?.strokeWidth ?? getStrokeWidth(currentStyle);
+        let strokeDasharray = r.style?.strokeDasharray || 'none';
+        
+        let zoneOpacity = 1.0;
+        const zoneKey = Object.keys(zoneColors || {}).find(
+            (k) => k.toLowerCase() === r.zone.toLowerCase() || r.zone.toLowerCase().includes(k.toLowerCase())
+        );
+        if (zoneKey && zoneColors[zoneKey]) {
+            const classString = zoneColors[zoneKey].bg;
+            const classes = classString.split(' ');
+            let activeClass = classes.find(c => !c.includes(':')) || '';
+            if (darkMode) {
+                const darkClass = classes.find(c => c.startsWith('dark:'));
+                if (darkClass) activeClass = darkClass.replace('dark:', '');
+            }
+            const opacityMatch = activeClass.match(/\/(\d+)$/);
+            if (opacityMatch) {
+                zoneOpacity = parseInt(opacityMatch[1], 10) / 100;
+            }
+        }
+        
+        let fillOpacity = r.style?.opacity ?? ((currentStyle?.opacity || 0.9) * zoneOpacity);
+        
+        if (styleId === 'blueprint') {
+            if (isPdfOutput) {
+                fill = 'rgba(14, 165, 233, 0.1)';
+                fillOpacity = 1.0;
+                strokeWidth = 1.5;
+                stroke = '#0284c7';
+            } else {
+                fill = darkMode ? 'rgba(14, 165, 233, 0.3)' : 'rgba(14, 165, 233, 0.15)';
+                fillOpacity = 1.0;
+                strokeWidth = 1.5;
+                stroke = '#ffffff';
+            }
+        } else if (styleId === 'clay') {
+            if (isPdfOutput) {
+                fill = '#ffffff';
+                fillOpacity = 0.95;
+                stroke = r.style?.stroke || baseBorderColor;
+                strokeWidth = r.style?.strokeWidth ?? getStrokeWidth(currentStyle);
+            } else {
+                fill = darkMode ? '#373d43' : '#ffffff';
+                fillOpacity = 0.95;
+                stroke = r.style?.stroke || baseBorderColor;
+                strokeWidth = r.style?.strokeWidth ?? getStrokeWidth(currentStyle);
+            }
+        }
+        
+        const st = r.spaceType || 'standard';
+        if (st === 'outdoor') {
+            strokeDasharray = getDashArrayForExport('custom', '8,6');
+            fillOpacity = Math.min(fillOpacity, 0.25);
+        } else if (st === 'terrace') {
+            strokeDasharray = getDashArrayForExport('custom', '3,3');
+            fillOpacity = Math.min(fillOpacity, 0.35);
+        }
+        
+        if (currentStyle?.sketchy && styleId !== 'blueprint') {
+            strokeDasharray = getDashArrayForExport('sketchy');
+        }
+        
+        return {
+            fill,
+            stroke,
+            strokeWidth: strokeWidth / 2 * 0.45 / finalScaleFactor,
+            fillOpacity,
+            strokeDasharray
+        };
+    };
+
     // --- DXF Export ---
     if (format === 'dxf') {
         const dxfContent = generateDXF(
@@ -327,7 +698,6 @@ export const handleExport = async (
     }
 
     // --- SVG Generation (Used for SVG, PNG, JPEG, PDF) ---
-    // Shift all viewBox content to start at 0 0, and translate components using a group.
     let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <style>
             .text { font-family: 'Inter', sans-serif; text-anchor: middle; dominant-baseline: middle; }
@@ -355,19 +725,6 @@ export const handleExport = async (
           </marker>
         </defs>`;
 
-    // Style Helpers
-    const getStrokeWidth = (style?: DiagramStyle) => style?.borderWidth || appSettings.strokeWidth || 2;
-    const getStrokeColor = (zone: string, style?: DiagramStyle) => {
-        if (style?.colorMode === 'monochrome') return '#000000';
-        return getHexBorderForZone(zone, zoneColors);
-    };
-    const getFillColor = (zone: string, style?: DiagramStyle) => {
-        if (style?.colorMode === 'monochrome') return '#ffffff';
-        return getHexColorForZone(zone, zoneColors);
-    };
-    const getOpacity = (style?: DiagramStyle) => style?.opacity || 0.9;
-    const isSketchy = currentStyle?.sketchy || false;
-
     // Inject Hatch definitions into SVG defs
     let hatchDefs = "";
     visibleRooms.forEach(r => {
@@ -382,16 +739,44 @@ export const handleExport = async (
         svgContent = svgContent.replace('</defs>', hatchDefs + '</defs>');
     }
 
-    // Background
-    if (format === 'jpeg' || (format === 'png' && !options?.transparentBackground)) {
-        const bgColor = darkMode ? '#1a1a1a' : '#f0f2f5';
+    // Background Color (Matches view style background)
+    let bgColor: string | null = null;
+    const styleId = currentStyle?.id || 'standard';
+    // For PDF, we do NOT export the background of the canvas (it stays white/transparent for printing)
+    if (!isPdfOutput) {
+        if (styleId === 'blueprint') {
+            bgColor = darkMode ? '#0b2b5c' : '#e0f2fe';
+        } else if (styleId === 'clay') {
+            bgColor = darkMode ? '#242729' : '#fcfaf2';
+        } else if (format === 'jpeg' || (format === 'png' && !options?.transparentBackground)) {
+            bgColor = darkMode ? '#1a1a1a' : '#f0f2f5';
+        }
+    }
+
+    if (bgColor) {
         svgContent += `<rect x="0" y="0" width="${width}" height="${height}" fill="${bgColor}" />`;
     }
 
-    // Render Canvas Grid if enabled
+    // Render Canvas Grid if enabled (Matches view style grid color)
     if (appSettings.exportGrid !== false) {
         const gridGap = 1 * PIXELS_PER_METER;
-        const gridColor = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)";
+        const getStyleGridColor = () => {
+            if (isPdfOutput) {
+                if (styleId === 'blueprint') {
+                    return 'rgba(14, 165, 233, 0.15)'; // Printable cyan grid on white paper
+                } else if (styleId === 'clay') {
+                    return 'rgba(0, 0, 0, 0.03)'; // Printable light gray grid on white paper
+                }
+                return 'rgba(0, 0, 0, 0.04)';
+            }
+            if (styleId === 'blueprint') {
+                return darkMode ? 'rgba(34, 211, 238, 0.25)' : 'rgba(14, 165, 233, 0.2)';
+            } else if (styleId === 'clay') {
+                return darkMode ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)';
+            }
+            return darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
+        };
+        const gridColor = getStyleGridColor();
         svgContent += `
         <!-- Export Canvas Grid -->
         <defs>
@@ -415,55 +800,103 @@ export const handleExport = async (
         });
     }
 
-    // Zones (Convex Hulls)
-    const zones: Record<string, Point[]> = {};
+    // Zones (Convex Hulls) - Accurate Zone Outlines with Padding and Rotations
+    if (options?.showZones !== false) {
+        const zones: Record<string, Point[]> = {};
+        const zonePaddingVal = appSettings.zonePadding || 0;
 
-    visibleRooms.forEach(r => {
-        if (!zones[r.zone]) zones[r.zone] = [];
+        visibleRooms.forEach(r => {
+            if (!zones[r.zone]) zones[r.zone] = [];
+            const angle = r.rotation || 0;
+            const rad = (angle * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
 
-        if (r.polygon && r.polygon.length > 0) {
-            r.polygon.forEach(p => {
-                zones[r.zone].push({ x: r.x + p.x, y: r.y + p.y });
-            });
-        } else {
-            zones[r.zone].push({ x: r.x, y: r.y });
-            zones[r.zone].push({ x: r.x + r.width, y: r.y });
-            zones[r.zone].push({ x: r.x + r.width, y: r.y + r.height });
-            zones[r.zone].push({ x: r.x, y: r.y + r.height });
-        }
-    });
+            let pointsToProcess = r.polygon;
 
-    Object.entries(zones).forEach(([zone, points]) => {
-        if (points.length < 3) return;
-        const hull = getConvexHull(points);
-        const d = createRoundedPath(hull, 12);
-        const color = getFillColor(zone, currentStyle);
-        svgContent += `<path d="${d}" fill="${color}" fill-opacity="0.1" stroke="${color}" stroke-width="2" stroke-dasharray="10,10" stroke-opacity="0.6" />`;
-    });
+            if (r.polygon && r.polygon.length > 0) {
+                if (r.shape === 'bubble') {
+                    pointsToProcess = getBubbleCurvePoints(r.polygon);
+                }
+                pointsToProcess!.forEach(p => {
+                    const rx = p.x * cos - p.y * sin;
+                    const ry = p.x * sin + p.y * cos;
+                    const wx = r.x + rx;
+                    const wy = r.y + ry;
 
-    // Connections
+                    zones[r.zone].push({ x: wx - zonePaddingVal, y: wy - zonePaddingVal });
+                    zones[r.zone].push({ x: wx + zonePaddingVal, y: wy - zonePaddingVal });
+                    zones[r.zone].push({ x: wx + zonePaddingVal, y: wy + zonePaddingVal });
+                    zones[r.zone].push({ x: wx - zonePaddingVal, y: wy + zonePaddingVal });
+                });
+            } else {
+                const cx = r.x + r.width / 2;
+                const cy = r.y + r.height / 2;
+
+                const corners = [
+                    { x: r.x - zonePaddingVal, y: r.y - zonePaddingVal },
+                    { x: r.x + r.width + zonePaddingVal, y: r.y - zonePaddingVal },
+                    { x: r.x + r.width + zonePaddingVal, y: r.y + r.height + zonePaddingVal },
+                    { x: r.x - zonePaddingVal, y: r.y + r.height + zonePaddingVal }
+                ];
+
+                corners.forEach(c => {
+                    const dx = c.x - cx;
+                    const dy = c.y - cy;
+                    zones[r.zone].push({
+                        x: cx + dx * cos - dy * sin,
+                        y: cy + dx * sin + dy * cos
+                    });
+                });
+            }
+        });
+
+        Object.entries(zones).forEach(([zone, points]) => {
+            if (points.length < 3) return;
+            const hull = getConvexHull(points);
+            const defaultRoomRadius = currentStyle?.id === 'blueprint' ? 0 : (appSettings.cornerRadius || 0);
+            const d = createRoundedPath(hull, defaultRoomRadius + zonePaddingVal);
+            const color = getFillColor(zone, currentStyle);
+            const strokeColor = getStrokeColor(zone, currentStyle);
+            const zoneStrokeWidth = getStrokeWidthForExport('zone');
+            const zoneDashArray = getDashArrayForExport('zone');
+            svgContent += `<path d="${d}" fill="${color}" fill-opacity="${appSettings.zoneTransparency || 0.1}" stroke="${strokeColor}" stroke-width="${zoneStrokeWidth}" stroke-dasharray="${zoneDashArray}" stroke-opacity="0.6" />`;
+        });
+    }
+
+    // Connections between rooms (with true center coordinates considering rotation)
     connections.forEach(conn => {
         const from = visibleRooms.find(r => r.id === conn.fromId);
         const to = visibleRooms.find(r => r.id === conn.toId);
         if (from && to) {
-            const x1 = from.x + from.width / 2;
-            const y1 = from.y + from.height / 2;
-            const x2 = to.x + to.width / 2;
-            const y2 = to.y + to.height / 2;
-            svgContent += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#94a3b8" stroke-width="2" />`;
+            const getRotatedCenter = (room: Room) => {
+                const isPoly = room.polygon && room.polygon.length > 0;
+                const localCx = isPoly ? calculateCentroid(room.polygon).x : room.width / 2;
+                const localCy = isPoly ? calculateCentroid(room.polygon).y : room.height / 2;
+                const angle = room.rotation || 0;
+                const rad = (angle * Math.PI) / 180;
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+                const rx = localCx * cos - localCy * sin;
+                const ry = localCx * sin + localCy * cos;
+                return { x: room.x + rx, y: room.y + ry };
+            };
+            const p1 = getRotatedCenter(from);
+            const p2 = getRotatedCenter(to);
+            const connStrokeWidth = getStrokeWidthForExport('connection');
+            svgContent += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#94a3b8" stroke-width="${connStrokeWidth}" />`;
         }
     });
 
-    // Rooms
-    visibleRooms.forEach(r => {
-        const isGrayedOut = r.spaceType === 'multistory' && r.floor !== currentFloor;
-        const fill = isGrayedOut ? (darkMode ? '#1e293b' : '#e2e8f0') : (r.style?.fill || getFillColor(r.zone, currentStyle));
-        const stroke = isGrayedOut ? (darkMode ? '#475569' : '#94a3b8') : (r.style?.stroke || getStrokeColor(r.zone, currentStyle));
-        const strokeWidth = r.style?.strokeWidth ?? getStrokeWidth(currentStyle);
-        const opacity = isGrayedOut ? 0.2 : (r.style?.opacity ?? getOpacity(currentStyle));
-        const strokeDasharray = isGrayedOut ? '4,4' : (isSketchy ? '5,5' : 'none');
+    // Overlayed Floors (Ghost/Underlay Layer)
+    overlayRooms.forEach(r => {
+        const fill = darkMode ? '#1e293b' : '#e2e8f0';
+        const stroke = darkMode ? '#475569' : '#94a3b8';
+        const strokeWidth = getStrokeWidthForExport('thin');
+        const opacity = 0.15;
+        const strokeDasharray = getDashArrayForExport('overlay');
+        
         let d = "";
-
         if (r.shape === 'bubble' && r.polygon) {
             const cmds = getBubblePathCommands(r.polygon);
             cmds.forEach(cmd => {
@@ -474,10 +907,7 @@ export const handleExport = async (
         } else if (r.polygon) {
             d = `M ${r.polygon[0].x} ${r.polygon[0].y} ` + r.polygon.slice(1).map(p => `L ${p.x} ${p.y}`).join(" ") + " Z";
         } else {
-            let radius = r.style?.cornerRadius || appSettings.cornerRadius || 0;
-            if (currentStyle?.cornerRadius === 'rounded-none') radius = 0;
-            else if (currentStyle?.cornerRadius === 'rounded-sm') radius = 2;
-            else if (currentStyle?.cornerRadius === 'rounded-lg') radius = 8;
+            let radius = getRoomCornerRadius(r);
 
             if (radius > 0) {
                 const w = r.width;
@@ -492,10 +922,75 @@ export const handleExport = async (
         const cx = (r.polygon ? 0 : r.width / 2) + (r.polygon ? calculateCentroid(r.polygon).x : 0);
         const cy = (r.polygon ? 0 : r.height / 2) + (r.polygon ? calculateCentroid(r.polygon).y : 0);
 
-        const width = (r.polygon && r.polygon.length > 0) ?
+        const widthVal = (r.polygon && r.polygon.length > 0) ?
             (Math.max(...r.polygon.map(p => p.x)) - Math.min(...r.polygon.map(p => p.x))) :
             r.width;
-        const lines = wrapText(r.name, width - 16, appSettings.fontSize);
+        const lines = wrapText(r.name, widthVal - 16, appSettings.fontSize);
+        const lineHeight = appSettings.fontSize * 1.2;
+        const startY = (cy - 6) - ((lines.length - 1) * lineHeight) / 2;
+
+        const rotationStr = r.rotation ? ` rotate(${r.rotation})` : '';
+        const overlayProps = getStyleTextProps();
+        const overlayTitleColor = styleId === 'blueprint'
+            ? (isPdfOutput ? '#0284c7' : (darkMode ? '#38bdf8' : '#0284c7'))
+            : (isPdfOutput ? '#94a3b8' : (darkMode ? '#94a3b8' : '#64748b'));
+
+        let textGroup = `
+            <text x="${cx}" y="${startY}" class="text title" fill="${overlayTitleColor}" font-family="${overlayProps.fontFamily}" opacity="0.25">
+                ${lines.map((line, i) => `<tspan x="${cx}" dy="${i === 0 ? 0 : lineHeight}">${line}</tspan>`).join('')}
+            </text>
+        `;
+        if (r.rotation) {
+            textGroup = `<g transform="rotate(${-r.rotation}, ${cx}, ${cy})">${textGroup}</g>`;
+        }
+
+        svgContent += `
+        <g transform="translate(${r.x}, ${r.y})${rotationStr}">
+            <path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" fill-opacity="${opacity}" stroke-dasharray="${strokeDasharray}" />
+            ${textGroup}
+        </g>`;
+    });
+
+    // Rooms (Main visible floor rooms)
+    visibleRooms.forEach(r => {
+        const isGrayedOut = r.spaceType === 'multistory' && r.floor !== currentFloor;
+        const props = getRoomDisplayProps(r);
+        const fill = isGrayedOut ? (darkMode ? '#1e293b' : '#e2e8f0') : props.fill;
+        const stroke = isGrayedOut ? (darkMode ? '#475569' : '#94a3b8') : props.stroke;
+        const strokeWidth = isGrayedOut ? getStrokeWidthForExport('thin') : props.strokeWidth;
+        const opacity = isGrayedOut ? 0.2 : props.fillOpacity;
+        const strokeDasharray = isGrayedOut ? getDashArrayForExport('grayed-out') : props.strokeDasharray;
+        let d = "";
+
+        if (r.shape === 'bubble' && r.polygon) {
+            const cmds = getBubblePathCommands(r.polygon);
+            cmds.forEach(cmd => {
+                if (cmd.type === 'M') d += `M ${cmd.values[0]} ${cmd.values[1]} `;
+                if (cmd.type === 'C') d += `C ${cmd.values[0]} ${cmd.values[1]}, ${cmd.values[2]} ${cmd.values[3]}, ${cmd.values[4]} ${cmd.values[5]} `;
+            });
+            d += "Z";
+        } else if (r.polygon) {
+            d = `M ${r.polygon[0].x} ${r.polygon[0].y} ` + r.polygon.slice(1).map(p => `L ${p.x} ${p.y}`).join(" ") + " Z";
+        } else {
+            let radius = getRoomCornerRadius(r);
+
+            if (radius > 0) {
+                const w = r.width;
+                const h = r.height;
+                const rEff = Math.min(radius, w / 2, h / 2);
+                d = `M ${rEff} 0 H ${w - rEff} Q ${w} 0 ${w} ${rEff} V ${h - rEff} Q ${w} ${h} ${w - rEff} ${h} H ${rEff} Q 0 ${h} 0 ${h - rEff} V ${rEff} Q 0 0 ${rEff} 0 Z`;
+            } else {
+                d = `M 0 0 H ${r.width} V ${r.height} H 0 Z`;
+            }
+        }
+
+        const cx = (r.polygon ? 0 : r.width / 2) + (r.polygon ? calculateCentroid(r.polygon).x : 0);
+        const cy = (r.polygon ? 0 : r.height / 2) + (r.polygon ? calculateCentroid(r.polygon).y : 0);
+
+        const widthVal = (r.polygon && r.polygon.length > 0) ?
+            (Math.max(...r.polygon.map(p => p.x)) - Math.min(...r.polygon.map(p => p.x))) :
+            r.width;
+        const lines = wrapText(r.name, widthVal - 16, appSettings.fontSize);
         const lineHeight = appSettings.fontSize * 1.2;
         const startY = (cy - 6) - ((lines.length - 1) * lineHeight) / 2;
 
@@ -508,14 +1003,55 @@ export const handleExport = async (
             ? `${Number((r.area * 10.7639).toFixed(1))} sq ft`
             : `${r.area.toFixed(1)} m²`;
 
-        svgContent += `
-        <g transform="translate(${r.x}, ${r.y})">
-            <path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" fill-opacity="${opacity}" stroke-dasharray="${strokeDasharray}" />
-            ${hatchPath}
-            <text x="${cx}" y="${startY}" class="text title" fill="${currentStyle?.colorMode === 'monochrome' ? '#000000' : '#1e293b'}" font-family="${currentStyle?.fontFamily || 'sans-serif'}">
+        const rotationStr = r.rotation ? ` rotate(${r.rotation})` : '';
+
+        // Text Group (counter-rotated around room centroid to remain horizontal)
+        const textProps = getStyleTextProps();
+        let textGroup = `
+            <text x="${cx}" y="${startY}" class="text title" fill="${textProps.titleColor}" font-family="${textProps.fontFamily}">
                 ${lines.map((line, i) => `<tspan x="${cx}" dy="${i === 0 ? 0 : lineHeight}">${line}</tspan>`).join('')}
             </text>
-            <text x="${cx}" y="${cy + 8 + (lines.length > 1 ? (lines.length * lineHeight) / 2 : 0)}" class="text subtitle">${areaText}</text>
+            <text x="${cx}" y="${cy + 8 + (lines.length > 1 ? (lines.length * lineHeight) / 2 : 0)}" class="text subtitle" fill="${textProps.subtitleColor}" font-family="${textProps.fontFamily}">${areaText}</text>
+        `;
+        if (r.rotation) {
+            textGroup = `<g transform="rotate(${-r.rotation}, ${cx}, ${cy})">${textGroup}</g>`;
+        }
+
+        // Vertical Connection Symbol
+        let symbolSvg = "";
+        if (r.spaceType === 'verticalConnection') {
+            const symW = widthVal;
+            const symH = (r.polygon && r.polygon.length > 0) ? 
+                (Math.max(...r.polygon.map(p => p.y)) - Math.min(...r.polygon.map(p => p.y))) : 
+                r.height;
+            const symX = (r.polygon && r.polygon.length > 0) ? calculateCentroid(r.polygon).x - symW / 2 : 0;
+            const symY = (r.polygon && r.polygon.length > 0) ? calculateCentroid(r.polygon).y - symH / 2 : 0;
+            const vcType = r.vcType || 'stair';
+            const symbolColor = stroke;
+
+            const rawSvg = vcType === 'stair' ? stairSvgRaw : vcType === 'elevator' ? elevatorSvgRaw : rampSvgRaw;
+            const processedSvg = rawSvg
+                .replaceAll('stroke:black', `stroke:${symbolColor}`)
+                .replaceAll('stroke:#000000', `stroke:${symbolColor}`)
+                .replaceAll('fill:black', `fill:${symbolColor}`);
+            
+            const svgContentClean = processedSvg
+                .replace(/<svg[^>]*>/, '')
+                .replace(/<\/svg>/, '');
+
+            const size = Math.min(symW, symH) * 0.7;
+            const left = symX + (symW - size) / 2;
+            const top = symY + (symH - size) / 2;
+
+            symbolSvg = `<g transform="translate(${left}, ${top}) scale(${size / 100})" fill="none" stroke="${symbolColor}" opacity="0.18">${svgContentClean}</g>`;
+        }
+
+        svgContent += `
+        <g transform="translate(${r.x}, ${r.y})${rotationStr}">
+            <path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" fill-opacity="${opacity}" stroke-dasharray="${strokeDasharray}" />
+            ${hatchPath}
+            ${symbolSvg}
+            ${textGroup}
         </g>`;
     });
 
@@ -531,7 +1067,9 @@ export const handleExport = async (
             const path = SketchManager.generatePath(ann);
             const markerStart = SketchManager.getMarkerUrl('start', ann.style.startCap);
             const markerEnd = SketchManager.getMarkerUrl('end', ann.style.endCap);
-            svgContent += `<path d="${path}" stroke="${ann.style.stroke}" stroke-width="${ann.style.strokeWidth}" stroke-dasharray="${ann.style.strokeDash || 'none'}" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-start="${markerStart}" marker-end="${markerEnd}" />`;
+            const annStrokeWidth = getStrokeWidthForExport(ann.style.strokeWidth > 2 ? 'annotation-thick' : 'annotation', ann.style.strokeWidth);
+            const annDashArray = ann.style.strokeDash ? getDashArrayForExport('custom', ann.style.strokeDash) : 'none';
+            svgContent += `<path d="${path}" stroke="${ann.style.stroke}" stroke-width="${annStrokeWidth}" stroke-dasharray="${annDashArray}" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-start="${markerStart}" marker-end="${markerEnd}" />`;
         });
     }
 
@@ -748,8 +1286,15 @@ export const handleExport = async (
         if (!ctx) return;
 
         // Fill background
-        if (format === 'jpeg' || !options?.transparentBackground) {
-            ctx.fillStyle = darkMode ? '#1a1a1a' : '#f0f2f5';
+        if (format === 'jpeg' || !options?.transparentBackground || options?.isPreview || options?.format === 'pdf') {
+            const bg = (options?.format === 'pdf')
+                ? '#ffffff'
+                : (styleId === 'blueprint'
+                    ? (darkMode ? '#0b2b5c' : '#e0f2fe')
+                    : (styleId === 'clay'
+                        ? (darkMode ? '#242729' : '#fcfaf2')
+                        : (darkMode ? '#1a1a1a' : '#f0f2f5')));
+            ctx.fillStyle = bg;
             ctx.fillRect(0, 0, canvasW, canvasH);
         }
 
@@ -860,6 +1405,20 @@ export const handleExport = async (
         ctx.font = `bold ${7 * scale}px sans-serif`;
         const textDist = compassRadius + 2.5 * mmToPx;
         ctx.fillText("N", compassX + textDist * cosA, compassY + textDist * sinA + 2.5 * scale);
+
+        // Draw preview page boundary if requested
+        if (options?.isPreview) {
+            ctx.strokeStyle = 'rgba(255, 50, 50, 0.8)';
+            ctx.lineWidth = 4 * scale;
+            ctx.setLineDash([10 * scale, 10 * scale]);
+            ctx.strokeRect(2 * scale, 2 * scale, canvasW - 4 * scale, canvasH - 4 * scale);
+
+            ctx.fillStyle = 'rgba(255, 50, 50, 0.8)';
+            ctx.font = `bold ${8 * scale}px sans-serif`;
+            ctx.textAlign = 'left';
+            const scaleText = options?.pdfScale ? `1:${options.pdfScale}` : 'Fit to Page';
+            ctx.fillText(`Page Boundary (${scaleText})`, 10 * scale, 15 * scale);
+        }
 
         return new Promise<Blob | null>((resolve) => {
             canvas.toBlob((blob) => {

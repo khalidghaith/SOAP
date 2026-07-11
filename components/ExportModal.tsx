@@ -20,6 +20,7 @@ interface ExportOptions {
     transparentBackground: boolean; // for PNG
     includeBackground: boolean; // for PNG/PDF
     pdfScale: number; // 1:X scale (e.g. 50, 100)
+    format?: ExportFormat;
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, viewMode, projectName, onPreview }) => {
@@ -37,18 +38,42 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
     });
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+    const [customScaleInput, setCustomScaleInput] = useState<string>(options.pdfScale.toString());
+
+    // Sync input when options.pdfScale changes (e.g. from presets)
+    useEffect(() => {
+        setCustomScaleInput(options.pdfScale ? options.pdfScale.toString() : '');
+    }, [options.pdfScale]);
+
+    // Debounced effect to update parent scale from custom input
+    useEffect(() => {
+        const val = parseInt(customScaleInput);
+        if (!isNaN(val) && val > 0) {
+            const timer = setTimeout(() => {
+                setOptions(prev => {
+                    if (prev.pdfScale !== val) {
+                        return { ...prev, pdfScale: val };
+                    }
+                    return prev;
+                });
+            }, 400);
+            return () => clearTimeout(timer);
+        }
+    }, [customScaleInput]);
+
+    const { scale, quality, pageSize, orientation, transparentBackground, pdfScale } = options;
 
     useEffect(() => {
         if (step === 'CONFIGURE' && onPreview && (selectedFormat === 'png' || selectedFormat === 'pdf')) {
             setIsLoadingPreview(true);
-            onPreview(options).then(url => {
+            onPreview({ ...options, format: selectedFormat }).then(url => {
                 setPreviewUrl(url);
                 setIsLoadingPreview(false);
             });
         } else {
             setPreviewUrl(null);
         }
-    }, [step, onPreview, selectedFormat, options]);
+    }, [step, onPreview, selectedFormat, scale, quality, pageSize, orientation, transparentBackground, pdfScale]);
 
     useEffect(() => {
         setOptions(prev => ({ ...prev, filename: projectName }));
@@ -96,9 +121,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
         );
     };
 
+    const hasPreview = selectedFormat === 'png' || selectedFormat === 'pdf';
+    const isConfigureStepWithPreview = step === 'CONFIGURE' && hasPreview;
+
     return (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-dark-surface w-full max-w-lg rounded-[2rem] shadow-2xl overflow-hidden border border-white/20 scale-100 transition-all duration-300">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+            <div className={`bg-white dark:bg-dark-surface w-full rounded-[2rem] shadow-2xl overflow-hidden border border-white/20 scale-100 transition-all duration-300 ${isConfigureStepWithPreview ? 'max-w-lg md:max-w-5xl' : 'max-w-lg'}`}>
 
                 {/* Header */}
                 <div className="p-6 border-b border-slate-100 dark:border-dark-border flex justify-between items-center bg-slate-50/50 dark:bg-white/5">
@@ -121,7 +149,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                 </div>
 
                 {/* Body */}
-                <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <div className="p-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
                     {step === 'SELECT' ? (
                         <div className="grid grid-cols-1 gap-3">
                             <FormatButton
@@ -195,52 +223,55 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                             />
                         </div>
                     ) : (
-                        <div className="space-y-6">
-                            {/* Filename Input */}
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">File Name</label>
-                                <input
-                                    type="text"
-                                    value={options.filename}
-                                    onChange={(e) => setOptions({ ...options, filename: e.target.value })}
-                                    className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
-                                    placeholder="Enter filename..."
-                                />
-                            </div>
-
-                            {/* Format Specific Options */}
-                            {selectedFormat === 'png' && (
-                                <>
+                        // Configure Step
+                        isConfigureStepWithPreview ? (
+                            <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+                                {/* Left Side: Options */}
+                                <div className="md:col-span-2 space-y-5">
+                                    {/* Filename Input */}
                                     <div className="space-y-2">
-                                        <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Scale / Quality</label>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {[1, 2, 4].map(scale => (
+                                        <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">File Name</label>
+                                        <input
+                                            type="text"
+                                            value={options.filename}
+                                            onChange={(e) => setOptions({ ...options, filename: e.target.value })}
+                                            className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                                            placeholder="Enter filename..."
+                                        />
+                                    </div>
+                                    
+                                    {/* Format Specific Options */}
+                                    {selectedFormat === 'png' && (
+                                        <>
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Scale / Quality</label>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {[1, 2, 4].map(scale => (
+                                                        <button
+                                                            key={scale}
+                                                            onClick={() => setOptions({ ...options, scale })}
+                                                            className={`px-3 py-2 rounded-lg text-sm font-bold border transition-all ${options.scale === scale
+                                                                ? 'bg-blue-500 text-white border-blue-500'
+                                                                : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:border-blue-300'}`}
+                                                        >
+                                                            {scale}x ({scale * 72} DPI)
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3 pt-2">
                                                 <button
-                                                    key={scale}
-                                                    onClick={() => setOptions({ ...options, scale })}
-                                                    className={`px-3 py-2 rounded-lg text-sm font-bold border transition-all ${options.scale === scale
-                                                        ? 'bg-blue-500 text-white border-blue-500'
-                                                        : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:border-blue-300'}`}
+                                                    onClick={() => setOptions({ ...options, transparentBackground: !options.transparentBackground })}
+                                                    className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${options.transparentBackground ? 'bg-blue-500 border-blue-500 text-white' : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-transparent'}`}
                                                 >
-                                                    {scale}x ({scale * 72} DPI)
+                                                    {options.transparentBackground && <Check size={14} />}
                                                 </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3 pt-2">
-                                        <button
-                                            onClick={() => setOptions({ ...options, transparentBackground: !options.transparentBackground })}
-                                            className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${options.transparentBackground ? 'bg-blue-500 border-blue-500 text-white' : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-transparent'}`}
-                                        >
-                                            {options.transparentBackground && <Check size={14} />}
-                                        </button>
-                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Transparent Background</span>
-                                    </div>
-                                </>
-                            )}
+                                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Transparent Background</span>
+                                            </div>
+                                        </>
+                                    )}
 
-                            {(selectedFormat === 'pdf' || selectedFormat === 'png') && (
-                                <>
+                                    {/* Page Size & Orientation */}
                                     <div className="space-y-2">
                                         <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Page Size</label>
                                         <div className="grid grid-cols-3 gap-2">
@@ -275,72 +306,141 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Drawing Scale</label>
-                                        <div className="grid grid-cols-3 gap-2">
+                                        <div className="grid grid-cols-5 gap-1.5">
+                                            {/* Fit Button */}
+                                            <button
+                                                onClick={() => setOptions({ ...options, pdfScale: 0 })}
+                                                className={`px-1 py-2 rounded-lg text-[11px] font-bold border transition-all ${options.pdfScale === 0
+                                                    ? (selectedFormat === 'png' ? 'bg-blue-500 text-white border-blue-500' : 'bg-orange-500 text-white border-orange-500')
+                                                    : `bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 ${selectedFormat === 'png' ? 'hover:border-blue-300' : 'hover:border-orange-300'}`}`}
+                                            >
+                                                Fit
+                                            </button>
+
+                                            {/* Presets */}
                                             {[50, 100, 200].map(scale => (
                                                 <button
                                                     key={scale}
                                                     onClick={() => setOptions({ ...options, pdfScale: scale })}
-                                                    className={`px-3 py-2 rounded-lg text-sm font-bold border transition-all ${options.pdfScale === scale
+                                                    className={`px-1 py-2 rounded-lg text-[11px] font-bold border transition-all ${options.pdfScale === scale
                                                         ? (selectedFormat === 'png' ? 'bg-blue-500 text-white border-blue-500' : 'bg-orange-500 text-white border-orange-500')
                                                         : `bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 ${selectedFormat === 'png' ? 'hover:border-blue-300' : 'hover:border-orange-300'}`}`}
                                                 >
                                                     1:{scale}
                                                 </button>
                                             ))}
-                                        </div>
-                                    </div>
-                                </>
-                            )}
 
-                            {/* Preview Area */}
-                            {(selectedFormat === 'png' || selectedFormat === 'pdf') && (
-                                <div className="mt-4 p-4 bg-slate-100 dark:bg-black/20 rounded-xl border border-slate-200 dark:border-white/5 flex flex-col items-center">
-                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 self-start">Preview</label>
-                                    {isLoadingPreview ? (
-                                        <div className="h-32 flex items-center justify-center text-slate-400">Loading preview...</div>
-                                    ) : previewUrl ? (
-                                        <img src={previewUrl} alt="Preview" className="max-h-48 rounded-lg shadow-sm border border-slate-200 dark:border-white/10" />
-                                    ) : (
-                                        <div className="h-32 flex items-center justify-center text-slate-400 text-xs text-center px-4">Preview not available</div>
-                                    )}
+                                            {/* Custom Select Button */}
+                                            <button
+                                                onClick={() => {
+                                                    const currentIsPreset = [0, 50, 100, 200].includes(options.pdfScale);
+                                                    if (currentIsPreset) {
+                                                        setOptions({ ...options, pdfScale: 150 });
+                                                    }
+                                                }}
+                                                className={`px-1 py-2 rounded-lg text-[11px] font-bold border transition-all ${![0, 50, 100, 200].includes(options.pdfScale)
+                                                    ? (selectedFormat === 'png' ? 'bg-blue-500 text-white border-blue-500' : 'bg-orange-500 text-white border-orange-500')
+                                                    : `bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 ${selectedFormat === 'png' ? 'hover:border-blue-300' : 'hover:border-orange-300'}`}`}
+                                            >
+                                                Custom
+                                            </button>
+                                        </div>
+
+                                        {/* Custom Scale Input Field */}
+                                        {![0, 50, 100, 200].includes(options.pdfScale) && (
+                                            <div className="flex items-center gap-2 mt-2 bg-slate-50 dark:bg-black/10 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2">
+                                                <span className="text-xs font-bold text-slate-400">Scale: 1 :</span>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    value={customScaleInput}
+                                                    onChange={(e) => setCustomScaleInput(e.target.value)}
+                                                    className="w-full bg-transparent border-none text-sm font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Right Side: Large Preview Area */}
+                                <div className="md:col-span-3 bg-slate-50 dark:bg-black/10 rounded-2xl border border-slate-150 dark:border-white/5 p-5 flex flex-col justify-between items-center min-h-[350px] overflow-hidden">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 self-start">Print Sheet Preview</label>
+                                    <div className="flex-1 w-full flex items-center justify-center overflow-hidden">
+                                        {previewUrl ? (
+                                            <div className="relative border border-slate-200 dark:border-white/10 rounded-lg overflow-hidden shadow-md max-w-full max-h-[45vh]">
+                                                <img 
+                                                    src={previewUrl} 
+                                                    alt="Preview" 
+                                                    className={`object-contain max-h-[45vh] w-auto h-auto block transition-opacity duration-200 ${isLoadingPreview ? 'opacity-45' : 'opacity-100'}`} 
+                                                />
+                                                {isLoadingPreview && (
+                                                    <div className="absolute inset-0 flex items-center justify-center bg-slate-900/10 dark:bg-black/10 backdrop-blur-[1px]">
+                                                        <div className="w-8 h-8 rounded-full border-4 border-slate-400/50 border-t-slate-800 dark:border-t-white animate-spin" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : isLoadingPreview ? (
+                                            <div className="flex flex-col items-center justify-center gap-3 text-slate-400">
+                                                <div className="w-8 h-8 rounded-full border-4 border-slate-300 border-t-slate-600 animate-spin" />
+                                                <span className="text-sm font-bold text-center">Generating high-fidelity preview...</span>
+                                            </div>
+                                        ) : (
+                                            <div className="h-32 flex items-center justify-center text-slate-400 text-xs text-center px-4">Preview not available</div>
+                                        )}
+                                    </div>
                                     {selectedFormat === 'pdf' && (
-                                        <p className="text-[10px] text-slate-400 mt-2 text-center">
-                                            Preview shows content only. Page layout will vary based on {options.pageSize} - {options.orientation}.
+                                        <p className="text-[10px] text-slate-400 mt-3 text-center">
+                                            Preview shows exact contents and drawing scale. Canvas background is excluded in printable PDFs.
                                         </p>
                                     )}
                                 </div>
-                            )}
-
-                            {selectedFormat === 'csv' && (
-                                <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
-                                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                                        Exports room schedule including Name, Area, Zone, Floor, and Dimensions.
-                                    </p>
+                            </div>
+                        ) : (
+                            // Non-preview config formats (json, csv, dxf, obj)
+                            <div className="space-y-6">
+                                {/* Filename Input */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">File Name</label>
+                                    <input
+                                        type="text"
+                                        value={options.filename}
+                                        onChange={(e) => setOptions({ ...options, filename: e.target.value })}
+                                        className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                                        placeholder="Enter filename..."
+                                    />
                                 </div>
-                            )}
 
-                            {selectedFormat === 'json' && (
-                                <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
-                                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                                        Saves the entire project state including history, settings, and view configuration.
-                                    </p>
-                                </div>
-                            )}
+                                {selectedFormat === 'csv' && (
+                                    <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
+                                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                                            Exports room schedule including Name, Area, Zone, Floor, and Dimensions.
+                                        </p>
+                                    </div>
+                                )}
 
-                            {selectedFormat === 'dxf' && (
-                                <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
-                                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                                        Exports standard multi-layered CAD drawing containing:
-                                    </p>
-                                    <ul className="list-disc list-inside text-xs text-slate-500 dark:text-gray-400 mt-2 space-y-1">
-                                        <li><strong className="text-slate-700 dark:text-slate-300">A-WALLS:</strong> High-precision room outlines.</li>
-                                        <li><strong className="text-slate-700 dark:text-slate-300">A-ZONES:</strong> Convex hulls for functional zones.</li>
-                                        <li><strong className="text-slate-700 dark:text-slate-300">A-LABELS:</strong> Space names and areas in m².</li>
-                                        <li><strong className="text-slate-700 dark:text-slate-300">A-ANNO:</strong> Sketch annotations, lines, and circles.</li>
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
+                                {selectedFormat === 'json' && (
+                                    <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
+                                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                                            Saves the entire project state including history, settings, and view configuration.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {selectedFormat === 'dxf' && (
+                                    <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
+                                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                                            Exports standard multi-layered CAD drawing containing:
+                                        </p>
+                                        <ul className="list-disc list-inside text-xs text-slate-500 dark:text-gray-400 mt-2 space-y-1">
+                                            <li><strong className="text-slate-700 dark:text-slate-300">A-WALLS:</strong> High-precision room outlines.</li>
+                                            <li><strong className="text-slate-700 dark:text-slate-300">A-ZONES:</strong> Convex hulls for functional zones.</li>
+                                            <li><strong className="text-slate-700 dark:text-slate-300">A-LABELS:</strong> Space names and areas in m².</li>
+                                            <li><strong className="text-slate-700 dark:text-slate-300">A-ANNO:</strong> Sketch annotations, lines, and circles.</li>
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )
                     )}
                 </div>
 
@@ -353,10 +453,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                         Cancel
                     </button>
                     {step === 'SELECT' ? (
-                        // Step 1: Nothing here, buttons do action
                         <div />
                     ) : (
-                        // Step 2: Export Button
                         <button
                             onClick={handleExport}
                             className="px-8 py-3 rounded-xl font-bold text-white bg-slate-900 dark:bg-white dark:text-black hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center gap-2"
