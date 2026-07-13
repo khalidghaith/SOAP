@@ -242,11 +242,11 @@ export const Rulers: React.FC<RulersProps> = ({
                                 />
                                 {tick.level === 'major' && (
                                     <text
-                                        x={10}
-                                        y={tick.screenY - 24 + 3}
+                                        x={8}
+                                        y={tick.screenY - 24 - 3}
                                         className="font-mono text-[8px] fill-slate-400 dark:fill-gray-500 font-bold"
-                                        transform={`rotate(-90, 10, ${tick.screenY - 24})`}
-                                        textAnchor="middle"
+                                        transform={`rotate(-90, 8, ${tick.screenY - 24 - 3})`}
+                                        textAnchor="end"
                                     >
                                         {tick.label}
                                     </text>
