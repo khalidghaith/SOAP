@@ -98,7 +98,11 @@ export interface AnalysisResponse {
     name: string;
     area: number;
     zone: string;
-    description: string;
+    description?: string;
+    spaceType?: SpaceType;
+    vcType?: VCType;
+    daylightReq?: 'perimeter' | 'core';
+    aspectRatioHint?: 'regular' | 'long' | 'square';
   }>;
 }
 

@@ -869,9 +869,37 @@ export default function App() {
             }
         }
 
-        if (appSettings.snapToGrid && !activeGuideX && !activeGuideY) {
-            // Fallback to grid snapping if no object snap
-            // (Already handled by snapPixelUnit in Bubble, but for whole room drag we might want it here too if we want grid snap)
+        if (appSettings.snapToGrid) {
+            const gridSizePx = currentGridSizeMeters * PIXELS_PER_METER;
+            if (gridSizePx > 0) {
+                if (!activeGuideX) {
+                    const nearestGridLeft = Math.round(room.x / gridSizePx) * gridSizePx;
+                    const distLeft = Math.abs(room.x - nearestGridLeft);
+                    const nearestGridRight = Math.round((room.x + room.width) / gridSizePx) * gridSizePx;
+                    const distRight = Math.abs((room.x + room.width) - nearestGridRight);
+                    if (distLeft < threshold && distLeft <= distRight) {
+                        snappedX = nearestGridLeft;
+                        activeGuideX = nearestGridLeft;
+                    } else if (distRight < threshold && distRight < distLeft) {
+                        snappedX = nearestGridRight - room.width;
+                        activeGuideX = nearestGridRight;
+                    }
+                }
+
+                if (!activeGuideY) {
+                    const nearestGridTop = Math.round(room.y / gridSizePx) * gridSizePx;
+                    const distTop = Math.abs(room.y - nearestGridTop);
+                    const nearestGridBottom = Math.round((room.y + room.height) / gridSizePx) * gridSizePx;
+                    const distBottom = Math.abs((room.y + room.height) - nearestGridBottom);
+                    if (distTop < threshold && distTop <= distBottom) {
+                        snappedY = nearestGridTop;
+                        activeGuideY = nearestGridTop;
+                    } else if (distBottom < threshold && distBottom < distTop) {
+                        snappedY = nearestGridBottom - room.height;
+                        activeGuideY = nearestGridBottom;
+                    }
+                }
+            }
         }
 
         const newGuides = activeGuideX || activeGuideY ? { x: activeGuideX, y: activeGuideY } : null;
@@ -1508,7 +1536,12 @@ export default function App() {
         setRooms(prev => arrangeRooms(prev, currentFloor));
     };
 
-    const handleAiSpatialLayout = async (instructions?: string, typology?: ZoningTypology) => {
+    const handleAiSpatialLayout = async (
+        instructions?: string,
+        typology?: ZoningTypology,
+        massing: 'compact' | 'l-shape' | 'u-shape' | 'courtyard' = 'compact',
+        gridSize: number = 0.5
+    ) => {
         if (!apiKey) {
             setShowApiKeyModal(true);
             return;
@@ -1544,12 +1577,22 @@ export default function App() {
             const floorsForAi = floors.map(f => ({ id: f.id, label: f.label }));
 
             const layout = await generateSpatialLayout(
-                roomsToArrange.map(r => ({ id: r.id, name: r.name, area: r.area, zone: r.zone })),
+                roomsToArrange.map(r => ({
+                    id: r.id,
+                    name: r.name,
+                    area: r.area,
+                    zone: r.zone,
+                    spaceType: r.spaceType,
+                    vcType: r.vcType,
+                    description: r.description
+                })),
                 fixedSpacesForAi,
                 floorsForAi,
                 apiKey,
                 instructions,
-                typology
+                typology,
+                massing,
+                gridSize
             );
 
             addToHistory();

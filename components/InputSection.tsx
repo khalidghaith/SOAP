@@ -32,6 +32,8 @@ export const InputSection: React.FC<InputSectionProps> = ({ onDataParsed, apiKey
         area: s.area,
         zone: s.zone,
         description: s.description,
+        spaceType: s.spaceType || 'standard',
+        vcType: s.vcType,
         isPlaced: false,
         floor: 0,
         x: 0, y: 0,

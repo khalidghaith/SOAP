@@ -9,14 +9,32 @@ export const analyzeProgram = async (programText: string, apiKey: string): Promi
   const ai = new GoogleGenAI({ apiKey });
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: `You are an expert architectural programmer. Analyze the following architectural functional program description. 
-      Break it down into individual spaces/rooms.
-      For each space, estimate a reasonable area in square meters if not explicitly stated (assume standard architectural sizing).
-      Assign a logical "Zone" (e.g., Public, Private, Service, Outdoor, Admin, Circulation).
-      
-      CRITICAL: Do not group circulation as a single, bulk area. Instead, identify and list individual corridors, hallways, and lobbies needed to logically connect all other spaces.
-      
+      model: "gemini-3.6-flash",
+      contents: `You are a Senior Computational Architectural Programmer and Space Planner.
+      Analyze the following architectural functional program description.
+
+      Tasks:
+      1. Break down the text into individual, distinct functional spaces/rooms.
+      2. For each space, estimate or extract a realistic area in square meters (assume standard professional architectural sizing if unstated).
+      3. Assign a logical "Zone" (e.g., Public, Private, Service, Outdoor, Admin, Circulation).
+      4. Classify the "spaceType":
+         - "verticalConnection" for stairs, elevators, or escalators connecting floors.
+         - "outdoor" for open gardens, yards, or patios.
+         - "terrace" for elevated balconies or rooftop decks.
+         - "multistory" for double-height atriums or halls.
+         - "standard" for regular rooms.
+      5. If "verticalConnection", specify "vcType" as "stair", "elevator", or "ramp".
+      6. Determine "daylightReq":
+         - "perimeter": Primary rooms requiring external windows and natural daylight (e.g. Bedrooms, Living Rooms, Private Offices, Classrooms, Dining).
+         - "core": Internal service spaces that do not require external windows (e.g. Bathrooms, Storage, Elevator Shafts, Copy Rooms, Internal Corridors).
+      7. Provide an "aspectRatioHint":
+         - "regular": Proportional rooms (1:1.1 to 1:1.5).
+         - "long": Corridor strips, narrow hallways, or linear galleries (1:3 to 1:8).
+         - "square": Compact core spaces or uniform rooms (1:1).
+
+      CRITICAL CIRCULATION RULE:
+      Do not group circulation as a single bulk area. Identify and list individual corridors, hallways, and lobbies needed to logically connect all other spaces.
+
       Program Description:
       ${programText}`,
       config: {
@@ -34,6 +52,10 @@ export const analyzeProgram = async (programText: string, apiKey: string): Promi
                   area: { type: Type.NUMBER, description: "Area in square meters" },
                   zone: { type: Type.STRING },
                   description: { type: Type.STRING },
+                  spaceType: { type: Type.STRING, description: "standard, outdoor, terrace, multistory, or verticalConnection" },
+                  vcType: { type: Type.STRING, description: "stair, elevator, or ramp" },
+                  daylightReq: { type: Type.STRING, description: "perimeter or core" },
+                  aspectRatioHint: { type: Type.STRING, description: "regular, long, or square" },
                 },
                 required: ["name", "area", "zone"],
               },
@@ -55,13 +77,34 @@ export const analyzeProgram = async (programText: string, apiKey: string): Promi
 };
 
 export const generateSpatialLayout = async (
-  spaces: { id: string, name: string, area: number, zone: string }[],
-  fixedSpaces: { id: string, name: string, x: number, y: number, width: number, height: number, zone: string, floor: number }[],
-  floors: { id: number, label: string }[],
+  spaces: {
+    id: string;
+    name: string;
+    area: number;
+    zone: string;
+    spaceType?: string;
+    vcType?: string;
+    description?: string;
+    daylightReq?: 'perimeter' | 'core';
+    aspectRatioHint?: 'regular' | 'long' | 'square';
+  }[],
+  fixedSpaces: {
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    zone: string;
+    floor: number;
+  }[],
+  floors: { id: number; label: string }[],
   apiKey: string,
   instructions?: string,
-  typology?: 'residential' | 'commercial' | 'medical' | 'educational'
-): Promise<{ id: string, name: string, x: number, y: number, width: number, height: number, floor: number }[]> => {
+  typology?: 'residential' | 'commercial' | 'medical' | 'educational',
+  massing: 'compact' | 'l-shape' | 'u-shape' | 'courtyard' = 'compact',
+  gridSize: number = 0.5
+): Promise<{ id: string; name: string; x: number; y: number; width: number; height: number; floor: number }[]> => {
   if (!apiKey || apiKey === 'your_api_key_here') {
     throw new Error("Gemini API Key is missing. Please provide a key in the settings.");
   }
@@ -72,87 +115,127 @@ export const generateSpatialLayout = async (
   let typologyInstructions = "";
   if (typology === 'residential') {
     typologyInstructions = `
-      TYPOLOGY: Residential (Villa/Apartment Layout)
-      - Public Zone (Living Room, Dining, Guest WC) on Ground Floor or lower levels.
-      - Private Zone (Bedrooms, Master Suites) clustered together on upper floors (e.g., Level 1) for intimacy, separated from high-traffic public areas.
-      - Service Zone (Kitchen, Laundry, Garage) closely adjacent to Public and circulation zones. Kitchen next to Dining.
-      - Stacking: Align wet areas (Bathrooms, Kitchen) vertically where possible to share plumbing stacks.
-      - Aspect Ratios: Most rooms should be robustly rectangular (1:1.1 to 1:1.5). Circulation hallways should be narrow (1:4 to 1:8).
+      TYPOLOGY: Residential (Villa/Apartment Floor Plan)
+      - Public Zone (Living Room, Dining, Guest WC, Foyer) MUST be located on the Ground Floor (Floor 0).
+      - Private Zone (Master Bedroom, Bedrooms, Private Baths) MUST be clustered together on upper floors (Floor 1+) for acoustic and visual privacy.
+      - Service Zone (Kitchen, Pantry, Laundry) must be directly adjacent to Dining and Public zones on Ground Floor.
+      - Stacking: Align wet areas (Bathrooms, Kitchens, Plumbing stacks) vertically above each other across floors where possible.
+      - Aspect Ratios: Bedrooms and Living spaces are robust rectangles (1:1.1 to 1:1.5). Corridors are continuous narrow strips (1:4 to 1:8).
     `;
   } else if (typology === 'commercial') {
     typologyInstructions = `
-      TYPOLOGY: Commercial (Office Space Layout)
-      - Entrance & Lobby (Public Zone) should be central, highly visible, and located at the primary entrance on the main floor.
-      - Open Workspaces (Private/Admin Zones) clustered around window perimeters.
-      - Meeting & Conference Rooms (Public/Admin Zones) adjacent to the main lobby or central circulation.
-      - Service Zone (Pantry, Copy Room, Server Closet) placed centrally but screened from the main entrance lobby.
-      - Circulation (Corridors, Lobbies) acts as a wide backbone connecting various departments.
-      - Aspect Ratios: Large spaces like open offices are wide (1:1.2 to 1:1.8), conference rooms are proportional (1:1.5), corridors are long (1:5 to 1:10).
+      TYPOLOGY: Commercial (Office / Workspace Layout)
+      - Entrance & Reception Lobby (Public Zone) MUST be placed at the primary entrance on Ground Floor (Floor 0).
+      - Open Workspaces & Executive Offices (Admin/Private) arranged along window perimeters for natural daylight.
+      - Conference & Meeting Rooms adjacent to central circulation corridors or main lobby.
+      - Service Core (Pantry, Copy Room, Restrooms, MEP) clustered centrally around elevators/stairs.
+      - Circulation Spines: Wide continuous corridors (1.8m-2.4m width) linking reception to open office zones and emergency egress.
     `;
   } else if (typology === 'medical') {
     typologyInstructions = `
       TYPOLOGY: Medical (Clinic / Healthcare Layout)
-      - Waiting Room & Reception (Public Zone) strictly placed near the entrance on the Ground Floor.
-      - Exam Rooms (Private Zone) should be uniform in size, lined up consecutively along a private corridor, and clustered together away from public waiting visibility.
-      - Doctor Offices (Admin Zone) separated from exam rooms but easily accessible.
-      - Lab & Sterilization (Service Zone) placed centrally with quick access to all Exam Rooms.
-      - Stacking: Stack utility rooms vertically.
-      - Aspect Ratios: Exam rooms are highly standardized (approx 3x4 meters, aspect ratio 1:1.3). Corridors should be wide enough for double-flow.
+      - Reception & Waiting Room (Public Zone) at the primary entrance on Ground Floor.
+      - Exam Rooms (Private Zone) MUST be uniform in size, aligned consecutively along a private circulation corridor.
+      - Doctor Offices & Admin separated from high-traffic waiting areas but easily reachable.
+      - Labs & Sterilization (Service Zone) placed centrally with direct access to all exam corridors.
+      - Corridors: Wide double-flow corridors (2.0m-3.0m width) connecting waiting areas directly to exam lines.
     `;
   } else if (typology === 'educational') {
     typologyInstructions = `
-      TYPOLOGY: Educational (School / Training Center Layout)
-      - Reception & Administration (Public/Admin) placed immediately at the main entrance.
-      - Classrooms (Private/Public learning spaces) clustered along wide circulation corridors, enjoying window access.
-      - Restrooms & Lockers (Service) placed at nodal points of corridors, stacked vertically.
-      - Library / Assembly (Public) placed in a high-visibility, large open volume.
-      - Aspect Ratios: Classrooms are deep rectangles (1:1.2 to 1:1.4), circulation halls are very wide and long corridors (1:6 to 1:12).
+      TYPOLOGY: Educational (School / Academy Layout)
+      - Main Administration & Security at the primary entrance.
+      - Classrooms & Labs arranged along double-loaded circulation spines with perimeter window access.
+      - Assembly Hall / Library located as large open volumes near main circulation nodes.
+      - Restrooms & Egress Stairs placed at nodal points along main corridors.
     `;
   } else {
     typologyInstructions = `
       TYPOLOGY: Standard General Layout
-      - Group rooms by Zone (e.g. Keeping Private clusters separated from Public zones).
-      - Maintain standard aspect ratios (1:1 to 1:2) for regular spaces, and long strips (1:4 to 1:8) for corridors.
+      - Group rooms logically by Zone (Public, Private, Service, Circulation, Admin).
+      - Maintain clear separation between high-noise Public zones and quiet Private zones.
+    `;
+  }
+
+  // Define Massing Envelope Rules
+  let massingInstructions = "";
+  if (massing === 'l-shape') {
+    massingInstructions = `
+      BUILDING MASSING: L-Shaped Footprint
+      - Arrange rooms to form an 'L' shape layout with two orthogonal wings joining at a corner circulation node (where stairs/elevators are placed).
+    `;
+  } else if (massing === 'u-shape') {
+    massingInstructions = `
+      BUILDING MASSING: U-Shaped Footprint
+      - Arrange rooms into three connected wings creating an open semi-enclosed court facing one side. Place main circulation along the central spine.
+    `;
+  } else if (massing === 'courtyard') {
+    massingInstructions = `
+      BUILDING MASSING: Central Courtyard / Ring Footprint
+      - Arrange rooms around an open central courtyard core. Corridors buffer the internal courtyard side, and rooms face the outer perimeter.
+    `;
+  } else {
+    massingInstructions = `
+      BUILDING MASSING: Compact Rectangular Footprint
+      - Arrange rooms into a tight, efficient rectangular building envelope with clean straight exterior perimeter walls.
     `;
   }
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: `You are an expert architectural programmer. 
-      Input: 
-      1. "spaces": Array of spaces to arrange (id, name, area, zone).
+      model: "gemini-3.6-flash",
+      contents: `You are a Senior Computational Architect & Algorithmic Layout Engine.
+      Your objective is to generate an architecturally realistic, grid-aligned, zero-gap partition floor plan layout.
+
+      INPUT DATA:
+      1. "spaces": Array of spaces to arrange (id, name, area, zone, spaceType, vcType, daylightReq, aspectRatioHint).
       2. "fixedSpaces": Array of existing spaces that are locked in position (id, name, x, y, width, height, zone, floor).
       3. "floors": Array of available floors (id, label).
-      
-      Architectural Typology Rules:
+
+      CRITICAL ARCHITECTURAL RULES & GEOMETRIC CONSTRAINTS:
+
+      1. STRICT MODULAR GRID (${gridSize}m Module):
+         - All bounding box values (x, y, width, height) MUST be exact multiples of ${gridSize} meters (e.g. 0.0, 0.5, 1.0, 1.5, 4.0, 4.5, 12.0, 12.5).
+         - NEVER output floating decimals like 12.37 or 8.19. Round every coordinate and dimension strictly to the ${gridSize}m grid module!
+
+      2. VERTICAL CORE STACKING & LOCKING (ABSOLUTE RULE FOR MULTI-FLOOR BUILDINGS):
+         - Any space with spaceType = "verticalConnection" (Staircases, Elevators, Shafts) or fixed vertical elements MUST be placed at the EXACT SAME (x, y, width, height) coordinates on EVERY floor level it exists on!
+         - If a Staircase is placed at x=${10 * gridSize}, y=${5 * gridSize}, width=${2 * gridSize}, height=${4 * gridSize} on Floor 0, its corresponding vertical stair on Floor 1 MUST BE PLACED AT THE EXACT SAME x=${10 * gridSize}, y=${5 * gridSize}, width=${2 * gridSize}, height=${4 * gridSize}!
+
+      3. ZERO-GAP PARTITION WALL SHARING & CO-PLANAR ALIGNMENT:
+         - Rooms must share interior partition walls with ZERO gaps (e.g. roomA.x + roomA.width == roomB.x OR roomA.y + roomA.height == roomB.y).
+         - Align room edges within the same wing to create continuous straight partition wall lines.
+         - Do not allow random empty gaps or floating rooms between spaces.
+
+      4. CIRCULATION SPINE & HALLWAY ROUTING:
+         - Do NOT model corridors as isolated floating blocks.
+         - Position circulation hallways as continuous 1.2m to 2.0m wide strips (aspect ratio 1:3 to 1:10) running alongside or between room clusters, connecting room entry doors directly to vertical stairs/elevators and building entrances.
+
+      5. DAYLIGHTING & PERIMETER vs CORE PLACEMENT:
+         - Spaces with daylightReq="perimeter" (Bedrooms, Living Rooms, Private Offices, Classrooms) MUST be placed on the outer exterior boundary of the floor massing to receive windows.
+         - Spaces with daylightReq="core" (Bathrooms, Storage, Elevator Shafts, Internal Corridors) should be placed in the interior core of the building massing.
+
+      6. RESPECT FIXED SPACES:
+         - Do NOT move or alter any "fixedSpaces". Arrange new "spaces" tightly against "fixedSpaces" without overlapping them on the same floor.
+
       ${typologyInstructions}
-      
-      Architectural Logic: The AI must act as a Senior Architect. It should:
-      1. Apply the Typology Rules above.
-      2. Calculate a Proximity Matrix: Determine which rooms must be adjacent (e.g. Kitchen next to Dining, Lobby at entrance).
-      3. **Circulation as Connectors**: Do not clump all spaces directly adjacent to each other. Position spaces identified as Circulation (corridors, hallways, lobbies) between or extending alongside other spaces so they act as functional connectors. Leave logical realistic gaps for corridors between different zones.
-      4. Assign Coordinates & Floors: Generate x, y positions and assign a floor for each space in "spaces".
-      5. **Respect Fixed Spaces**: Do NOT move "fixedSpaces". Place "spaces" around or adjacent to "fixedSpaces" where logically appropriate. Ensure no overlaps with "fixedSpaces" on the same floor.
-      6. **Vertical Connections**: Consider vertical adjacency (e.g. stacking plumbing, connecting circulation). Distribute spaces across floors logically.
-      
-      Geometric Output: Use responseSchema to enforce a JSON output where each space in "spaces" includes { id: string, x: number, y: number, width: number, height: number, floor: number }.
-      Note: Calculate width and height based on the space's area while strictly maintaining typological aspect ratio guidelines.
-      Canvas Integration: The coordinates should be scaled for a canvas where 1 unit = 1 meter.
-      
-      Spaces to Arrange:
-      ${JSON.stringify(spaces)}
- 
-      Fixed/Locked Spaces (Do not move):
-      ${JSON.stringify(fixedSpaces)}
- 
-      Available Floors:
-      ${JSON.stringify(floors)}
-      
-      Task:
-      Given these architectural spaces, organize the "spaces" into a functional floor plan layout across the available floors. Determine their positions based on standard residential/commercial flow. Output the absolute coordinates and floor ID for each space in "spaces" to ensure a tight, logical cluster without overlaps with each other or fixed spaces on the same floor.
-      
-      ${instructions && instructions.trim() ? `CRITICAL USER INSTRUCTIONS (Must follow these strict requirements for floor and orientation placement):\n      ${instructions}` : ''}
+      ${massingInstructions}
+
+      INPUT SPACES TO ARRANGE:
+      ${JSON.stringify(spaces, null, 2)}
+
+      LOCKED / FIXED SPACES (DO NOT MOVE):
+      ${JSON.stringify(fixedSpaces, null, 2)}
+
+      AVAILABLE FLOORS:
+      ${JSON.stringify(floors, null, 2)}
+
+      ${instructions && instructions.trim() ? `CRITICAL USER CUSTOM DIRECTIVES:\n${instructions}` : ''}
+
+      OUTPUT INSTRUCTIONS:
+      Generate JSON returning an array of objects for all items in "spaces".
+      Each item must contain: { id: string, name: string, x: number, y: number, width: number, height: number, floor: number }.
+      Ensure width * height matches the specified space area in m² (adjusted to the ${gridSize}m grid module while preserving valid aspect ratios).
+      Canvas coordinates are in meters (1 unit = 1 meter).
       `,
       config: {
         responseMimeType: "application/json",
@@ -176,7 +259,15 @@ export const generateSpatialLayout = async (
     });
 
     if (response.text) {
-      return JSON.parse(response.text);
+      const parsed = JSON.parse(response.text) as { id: string, name: string, x: number, y: number, width: number, height: number, floor: number }[];
+      // Enforce strict grid rounding on response as post-processing safety
+      return parsed.map(item => ({
+        ...item,
+        x: Math.round(item.x / gridSize) * gridSize,
+        y: Math.round(item.y / gridSize) * gridSize,
+        width: Math.max(gridSize, Math.round(item.width / gridSize) * gridSize),
+        height: Math.max(gridSize, Math.round(item.height / gridSize) * gridSize),
+      }));
     }
     throw new Error("No response text from Gemini");
   } catch (error) {

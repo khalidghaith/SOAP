@@ -728,51 +728,59 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                     const rawX = original.x + localDx;
                     const rawY = original.y + localDy;
+                    const globalRawX = room.x + rawX;
+                    const globalRawY = room.y + rawY;
 
-                    // Default to grid snap or raw
                     let nx = rawX;
                     let ny = rawY;
 
-                    if (shouldSnap && appSettings.snapToGrid) {
-                        nx = Math.round((rawX + room.x) / snapPixelUnit) * snapPixelUnit - room.x;
-                        ny = Math.round((rawY + room.y) / snapPixelUnit) * snapPixelUnit - room.y;
-                    }
-
-                    if (shouldSnap && appSettings.snapToObjects) {
+                    if (shouldSnap) {
                         const tolerance = appSettings.snapTolerance / zoomScale;
 
+                        // X Axis Snapping
                         let bestDX = tolerance;
-                        let bestX = null;
-                        let snapLineX = null;
+                        let bestX: number | null = null;
+                        let snapLineX: number | null = null;
 
-                        // Snap to other vertices
-                        for (let i = 0; i < newPoints.length; i++) {
-                            if (indicesToMove.includes(i)) continue;
-                            const other = newPoints[i];
-                            const dist = Math.abs(rawX - other.x);
-                            if (dist < bestDX) {
-                                bestDX = dist;
-                                bestX = other.x;
-                                snapLineX = other.x;
+                        if (appSettings.snapToGrid && snapPixelUnit > 0) {
+                            const nearestGridX = Math.round(globalRawX / snapPixelUnit) * snapPixelUnit;
+                            const distGridX = Math.abs(globalRawX - nearestGridX);
+                            if (distGridX < bestDX) {
+                                bestDX = distGridX;
+                                bestX = nearestGridX - room.x;
+                                snapLineX = bestX;
                             }
                         }
-                        // Snap to local origin
-                        if (Math.abs(rawX) < bestDX) {
-                            bestDX = Math.abs(rawX);
-                            bestX = 0;
-                            snapLineX = 0;
-                        }
 
-                        // Snap to Neighbors
-                        if (otherRooms) {
-                            const globalRawX = room.x + rawX;
-                            const { x: targetsX } = getSnapTargets();
-                            for (const tx of targetsX) {
-                                const dist = Math.abs(globalRawX - tx);
+                        if (appSettings.snapToObjects) {
+                            // Snap to other vertices
+                            for (let i = 0; i < newPoints.length; i++) {
+                                if (indicesToMove.includes(i)) continue;
+                                const other = newPoints[i];
+                                const dist = Math.abs(rawX - other.x);
                                 if (dist < bestDX) {
                                     bestDX = dist;
-                                    bestX = tx - room.x;
-                                    snapLineX = bestX;
+                                    bestX = other.x;
+                                    snapLineX = other.x;
+                                }
+                            }
+                            // Snap to local origin
+                            if (Math.abs(rawX) < bestDX) {
+                                bestDX = Math.abs(rawX);
+                                bestX = 0;
+                                snapLineX = 0;
+                            }
+
+                            // Snap to Neighbors
+                            if (otherRooms) {
+                                const { x: targetsX } = getSnapTargets();
+                                for (const tx of targetsX) {
+                                    const dist = Math.abs(globalRawX - tx);
+                                    if (dist < bestDX) {
+                                        bestDX = dist;
+                                        bestX = tx - room.x;
+                                        snapLineX = bestX;
+                                    }
                                 }
                             }
                         }
@@ -782,35 +790,47 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                             currentSnapLines.push({ x: snapLineX });
                         }
 
+                        // Y Axis Snapping
                         let bestDY = tolerance;
-                        let bestY = null;
-                        let snapLineY = null;
+                        let bestY: number | null = null;
+                        let snapLineY: number | null = null;
 
-                        for (let i = 0; i < newPoints.length; i++) {
-                            if (indicesToMove.includes(i)) continue;
-                            const other = newPoints[i];
-                            const dist = Math.abs(rawY - other.y);
-                            if (dist < bestDY) {
-                                bestDY = dist;
-                                bestY = other.y;
-                                snapLineY = other.y;
+                        if (appSettings.snapToGrid && snapPixelUnit > 0) {
+                            const nearestGridY = Math.round(globalRawY / snapPixelUnit) * snapPixelUnit;
+                            const distGridY = Math.abs(globalRawY - nearestGridY);
+                            if (distGridY < bestDY) {
+                                bestDY = distGridY;
+                                bestY = nearestGridY - room.y;
+                                snapLineY = bestY;
                             }
                         }
-                        if (Math.abs(rawY) < bestDY) {
-                            bestDY = Math.abs(rawY);
-                            bestY = 0;
-                            snapLineY = 0;
-                        }
 
-                        if (otherRooms) {
-                            const globalRawY = room.y + rawY;
-                            const { y: targetsY } = getSnapTargets();
-                            for (const ty of targetsY) {
-                                const dist = Math.abs(globalRawY - ty);
+                        if (appSettings.snapToObjects) {
+                            for (let i = 0; i < newPoints.length; i++) {
+                                if (indicesToMove.includes(i)) continue;
+                                const other = newPoints[i];
+                                const dist = Math.abs(rawY - other.y);
                                 if (dist < bestDY) {
                                     bestDY = dist;
-                                    bestY = ty - room.y;
-                                    snapLineY = bestY;
+                                    bestY = other.y;
+                                    snapLineY = other.y;
+                                }
+                            }
+                            if (Math.abs(rawY) < bestDY) {
+                                bestDY = Math.abs(rawY);
+                                bestY = 0;
+                                snapLineY = 0;
+                            }
+
+                            if (otherRooms) {
+                                const { y: targetsY } = getSnapTargets();
+                                for (const ty of targetsY) {
+                                    const dist = Math.abs(globalRawY - ty);
+                                    if (dist < bestDY) {
+                                        bestDY = dist;
+                                        bestY = ty - room.y;
+                                        snapLineY = bestY;
+                                    }
                                 }
                             }
                         }
@@ -841,44 +861,53 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 const moveAndSnap = (v: Point) => {
                     const rawX = v.x + localDx;
                     const rawY = v.y + localDy;
+                    const globalRawX = room.x + rawX;
+                    const globalRawY = room.y + rawY;
                     let nx = rawX;
                     let ny = rawY;
 
-                    if (shouldSnap && appSettings.snapToGrid) {
-                        nx = Math.round((rawX + room.x) / snapPixelUnit) * snapPixelUnit - room.x;
-                        ny = Math.round((rawY + room.y) / snapPixelUnit) * snapPixelUnit - room.y;
-                    }
-
-                    if (shouldSnap && appSettings.snapToObjects) {
+                    if (shouldSnap) {
                         const tolerance = appSettings.snapTolerance / zoomScale;
 
+                        // X Axis Snapping
                         let bestDX = tolerance;
-                        let bestX = null;
-                        let snapLineX = null;
+                        let bestX: number | null = null;
+                        let snapLineX: number | null = null;
 
-                        for (let i = 0; i < newPoints.length; i++) {
-                            if (i === idx1 || i === idx2) continue;
-                            const other = newPoints[i];
-                            const dist = Math.abs(rawX - other.x);
-                            if (dist < bestDX) {
-                                bestDX = dist;
-                                bestX = other.x;
-                                snapLineX = other.x;
+                        if (appSettings.snapToGrid && snapPixelUnit > 0) {
+                            const nearestGridX = Math.round(globalRawX / snapPixelUnit) * snapPixelUnit;
+                            const distGridX = Math.abs(globalRawX - nearestGridX);
+                            if (distGridX < bestDX) {
+                                bestDX = distGridX;
+                                bestX = nearestGridX - room.x;
+                                snapLineX = bestX;
                             }
                         }
-                        // Snap to origin
-                        if (Math.abs(rawX) < bestDX) { bestDX = Math.abs(rawX); bestX = 0; snapLineX = 0; }
 
-                        // Snap to Neighbors
-                        if (otherRooms) {
-                            const globalRawX = room.x + rawX;
-                            const { x: targetsX } = getSnapTargets();
-                            for (const tx of targetsX) {
-                                const dist = Math.abs(globalRawX - tx);
+                        if (appSettings.snapToObjects) {
+                            for (let i = 0; i < newPoints.length; i++) {
+                                if (i === idx1 || i === idx2) continue;
+                                const other = newPoints[i];
+                                const dist = Math.abs(rawX - other.x);
                                 if (dist < bestDX) {
                                     bestDX = dist;
-                                    bestX = tx - room.x;
-                                    snapLineX = bestX;
+                                    bestX = other.x;
+                                    snapLineX = other.x;
+                                }
+                            }
+                            // Snap to origin
+                            if (Math.abs(rawX) < bestDX) { bestDX = Math.abs(rawX); bestX = 0; snapLineX = 0; }
+
+                            // Snap to Neighbors
+                            if (otherRooms) {
+                                const { x: targetsX } = getSnapTargets();
+                                for (const tx of targetsX) {
+                                    const dist = Math.abs(globalRawX - tx);
+                                    if (dist < bestDX) {
+                                        bestDX = dist;
+                                        bestX = tx - room.x;
+                                        snapLineX = bestX;
+                                    }
                                 }
                             }
                         }
@@ -888,32 +917,43 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                             currentSnapLines.push({ x: snapLineX });
                         }
 
-                        // Y axis
+                        // Y Axis Snapping
                         let bestDY = tolerance;
-                        let bestY = null;
-                        let snapLineY = null;
+                        let bestY: number | null = null;
+                        let snapLineY: number | null = null;
 
-                        for (let i = 0; i < newPoints.length; i++) {
-                            if (i === idx1 || i === idx2) continue;
-                            const other = newPoints[i];
-                            const dist = Math.abs(rawY - other.y);
-                            if (dist < bestDY) {
-                                bestDY = dist;
-                                bestY = other.y;
-                                snapLineY = other.y;
+                        if (appSettings.snapToGrid && snapPixelUnit > 0) {
+                            const nearestGridY = Math.round(globalRawY / snapPixelUnit) * snapPixelUnit;
+                            const distGridY = Math.abs(globalRawY - nearestGridY);
+                            if (distGridY < bestDY) {
+                                bestDY = distGridY;
+                                bestY = nearestGridY - room.y;
+                                snapLineY = bestY;
                             }
                         }
-                        if (Math.abs(rawY) < bestDY) { bestDY = Math.abs(rawY); bestY = 0; snapLineY = 0; }
 
-                        if (otherRooms) {
-                            const globalRawY = room.y + rawY;
-                            const { y: targetsY } = getSnapTargets();
-                            for (const ty of targetsY) {
-                                const dist = Math.abs(globalRawY - ty);
+                        if (appSettings.snapToObjects) {
+                            for (let i = 0; i < newPoints.length; i++) {
+                                if (i === idx1 || i === idx2) continue;
+                                const other = newPoints[i];
+                                const dist = Math.abs(rawY - other.y);
                                 if (dist < bestDY) {
                                     bestDY = dist;
-                                    bestY = ty - room.y;
-                                    snapLineY = bestY;
+                                    bestY = other.y;
+                                    snapLineY = other.y;
+                                }
+                            }
+                            if (Math.abs(rawY) < bestDY) { bestDY = Math.abs(rawY); bestY = 0; snapLineY = 0; }
+
+                            if (otherRooms) {
+                                const { y: targetsY } = getSnapTargets();
+                                for (const ty of targetsY) {
+                                    const dist = Math.abs(globalRawY - ty);
+                                    if (dist < bestDY) {
+                                        bestDY = dist;
+                                        bestY = ty - room.y;
+                                        snapLineY = bestY;
+                                    }
                                 }
                             }
                         }
@@ -945,70 +985,112 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 updateRoom(room.id, { textPos: { x: nX, y: nY } });
             } else if (isDragging) {
                 // Moving Whole Room
-                let nX = startDragState.current.roomX + dxWorld;
-                let nY = startDragState.current.roomY + dyWorld;
+                const rawX = startDragState.current.roomX + dxWorld;
+                const rawY = startDragState.current.roomY + dyWorld;
+                let nX = rawX;
+                let nY = rawY;
 
                 if (shouldSnap) {
-                    // Grid Snap
-                    if (appSettings.snapToGrid) {
-                        nX = Math.round(nX / snapPixelUnit) * snapPixelUnit;
-                        nY = Math.round(nY / snapPixelUnit) * snapPixelUnit;
+                    const tolerance = appSettings.snapTolerance / zoomScale;
+
+                    // X Axis Snapping
+                    let bestDX = tolerance;
+                    let bestX: number | null = null;
+                    let snapLineX: number | null = null;
+
+                    if (appSettings.snapToGrid && snapPixelUnit > 0) {
+                        // Snap Left edge
+                        const nearestGridLeft = Math.round(rawX / snapPixelUnit) * snapPixelUnit;
+                        const distLeft = Math.abs(rawX - nearestGridLeft);
+                        if (distLeft < bestDX) {
+                            bestDX = distLeft;
+                            bestX = nearestGridLeft;
+                            snapLineX = 0;
+                        }
+
+                        // Snap Right edge
+                        const nearestGridRight = Math.round((rawX + room.width) / snapPixelUnit) * snapPixelUnit;
+                        const distRight = Math.abs((rawX + room.width) - nearestGridRight);
+                        if (distRight < bestDX) {
+                            bestDX = distRight;
+                            bestX = nearestGridRight - room.width;
+                            snapLineX = room.width;
+                        }
                     }
 
-                    // Object Snap
                     if (appSettings.snapToObjects) {
-                        const tolerance = appSettings.snapTolerance / zoomScale;
-                        const { x: targetsX, y: targetsY } = getSnapTargets();
-
-                        let bestDX = tolerance;
-                        let bestX = null;
-                        let snapLineX = null;
+                        const { x: targetsX } = getSnapTargets();
 
                         // Snap Left/Right edges
                         for (const tx of targetsX) {
-                            const distLeft = Math.abs(nX - tx);
+                            const distLeft = Math.abs(rawX - tx);
                             if (distLeft < bestDX) {
                                 bestDX = distLeft;
                                 bestX = tx;
                                 snapLineX = 0;
                             }
-                            const distRight = Math.abs((nX + room.width) - tx);
+                            const distRight = Math.abs((rawX + room.width) - tx);
                             if (distRight < bestDX) {
                                 bestDX = distRight;
                                 bestX = tx - room.width;
                                 snapLineX = room.width;
                             }
                         }
+                    }
 
-                        if (bestX !== null) {
-                            nX = bestX;
-                            currentSnapLines.push({ x: snapLineX });
+                    if (bestX !== null) {
+                        nX = bestX;
+                        currentSnapLines.push({ x: snapLineX });
+                    }
+
+                    // Y Axis Snapping
+                    let bestDY = tolerance;
+                    let bestY: number | null = null;
+                    let snapLineY: number | null = null;
+
+                    if (appSettings.snapToGrid && snapPixelUnit > 0) {
+                        // Snap Top edge
+                        const nearestGridTop = Math.round(rawY / snapPixelUnit) * snapPixelUnit;
+                        const distTop = Math.abs(rawY - nearestGridTop);
+                        if (distTop < bestDY) {
+                            bestDY = distTop;
+                            bestY = nearestGridTop;
+                            snapLineY = 0;
                         }
 
-                        let bestDY = tolerance;
-                        let bestY = null;
-                        let snapLineY = null;
+                        // Snap Bottom edge
+                        const nearestGridBottom = Math.round((rawY + room.height) / snapPixelUnit) * snapPixelUnit;
+                        const distBottom = Math.abs((rawY + room.height) - nearestGridBottom);
+                        if (distBottom < bestDY) {
+                            bestDY = distBottom;
+                            bestY = nearestGridBottom - room.height;
+                            snapLineY = room.height;
+                        }
+                    }
+
+                    if (appSettings.snapToObjects) {
+                        const { y: targetsY } = getSnapTargets();
 
                         // Snap Top/Bottom edges
                         for (const ty of targetsY) {
-                            const distTop = Math.abs(nY - ty);
+                            const distTop = Math.abs(rawY - ty);
                             if (distTop < bestDY) {
                                 bestDY = distTop;
                                 bestY = ty;
                                 snapLineY = 0;
                             }
-                            const distBottom = Math.abs((nY + room.height) - ty);
+                            const distBottom = Math.abs((rawY + room.height) - ty);
                             if (distBottom < bestDY) {
                                 bestDY = distBottom;
                                 bestY = ty - room.height;
                                 snapLineY = room.height;
                             }
                         }
+                    }
 
-                        if (bestY !== null) {
-                            nY = bestY;
-                            currentSnapLines.push({ y: snapLineY });
-                        }
+                    if (bestY !== null) {
+                        nY = bestY;
+                        currentSnapLines.push({ y: snapLineY });
                     }
                 }
 
