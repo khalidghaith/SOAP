@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { ApiKeyModal } from './ApiKeyModal';
 import { analyzeProgram } from '../services/geminiService';
+import { analysisToRooms } from '../utils/aiLayout';
 import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
 import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
 import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
@@ -156,18 +157,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
         setIsAiLoading(true);
         try {
             const data = await analyzeProgram(aiPrompt, apiKey);
-            const newRooms: Room[] = (data.spaces as any[]).map((s, i) => ({
-                id: `room-${Date.now()}-${i}`,
-                name: s.name,
-                area: s.area,
-                zone: s.zone,
-                description: s.description,
-                isPlaced: false,
-                floor: 0,
-                x: 0, y: 0,
-                width: Math.sqrt(s.area) * 20,
-                height: Math.sqrt(s.area) * 20,
-            }));
+            const newRooms: Room[] = analysisToRooms(data, 20);
             if (onInteractionStart) onInteractionStart();
             setRooms([...rooms, ...newRooms]);
             setShowAiModal(false);

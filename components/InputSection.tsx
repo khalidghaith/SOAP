@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Loader2, Wand2, FileText } from 'lucide-react';
 import { analyzeProgram } from '../services/geminiService';
+import { analysisToRooms } from '../utils/aiLayout';
 import { Room } from '../types';
 
 interface InputSectionProps {
@@ -26,23 +27,10 @@ export const InputSection: React.FC<InputSectionProps> = ({ onDataParsed, apiKey
     setIsLoading(true);
     try {
       const data = await analyzeProgram(input, apiKey);
-      const rooms: Room[] = (data.spaces as any[]).map((s, i) => ({
-        id: `room-${Date.now()}-${i}`,
-        name: s.name,
-        area: s.area,
-        zone: s.zone,
-        description: s.description,
-        spaceType: s.spaceType || 'standard',
-        vcType: s.vcType,
-        isPlaced: false,
-        floor: 0,
-        x: 0, y: 0,
-        width: Math.sqrt(s.area) * 20,
-        height: Math.sqrt(s.area) * 20,
-      }));
+      const rooms: Room[] = analysisToRooms(data, 20);
       onDataParsed(data.projectName || "New Project", rooms);
     } catch (err: any) {
-      alert("AI analysis failed: " + (err.message || "Unknown error") + ". Check your API key in settings.");
+      alert("AI analysis failed: " + (err.message || "Unknown error"));
     } finally {
       setIsLoading(false);
     }

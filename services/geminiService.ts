@@ -1,6 +1,33 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResponse } from "../types";
 
+// Turns SDK/network failures into a message that tells the user what to do next.
+const toFriendlyError = (error: unknown): Error => {
+  const raw = error instanceof Error ? error.message : String(error);
+  const status = (error as any)?.status ?? (error as any)?.code;
+  const text = `${status ?? ''} ${raw}`.toLowerCase();
+
+  if (text.includes('api_key_invalid') || text.includes('api key not valid') || status === 401 || status === 403 || text.includes('permission_denied')) {
+    return new Error("Your Gemini API key was rejected. Check the key in Settings → API Key.");
+  }
+  if (status === 429 || text.includes('resource_exhausted') || text.includes('quota') || text.includes('rate limit')) {
+    return new Error("Gemini rate limit or quota reached. Wait a minute and try again, or check your plan's quota.");
+  }
+  if (status === 503 || status === 500 || text.includes('overloaded') || text.includes('unavailable')) {
+    return new Error("Gemini is temporarily unavailable. Please try again in a moment.");
+  }
+  if (text.includes('failed to fetch') || text.includes('networkerror') || text.includes('network error') || !navigator.onLine) {
+    return new Error("Couldn't reach Gemini. Check your internet connection and try again.");
+  }
+  if (error instanceof SyntaxError) {
+    return new Error("Gemini returned an incomplete response. Please try again.");
+  }
+  if (text.includes('safety') || text.includes('blocked')) {
+    return new Error("Gemini declined this request. Try rephrasing the description or instructions.");
+  }
+  return new Error(`Gemini request failed: ${raw}`);
+};
+
 export const analyzeProgram = async (programText: string, apiKey: string): Promise<AnalysisResponse> => {
   if (!apiKey || apiKey === 'your_api_key_here') {
     throw new Error("Gemini API Key is missing. Please provide a key in the settings.");
@@ -69,10 +96,10 @@ export const analyzeProgram = async (programText: string, apiKey: string): Promi
     if (response.text) {
       return JSON.parse(response.text) as AnalysisResponse;
     }
-    throw new Error("No response text from Gemini");
+    throw new Error("Gemini returned an empty response. Please try again.");
   } catch (error) {
     console.error("Error analyzing program:", error);
-    throw error;
+    throw toFriendlyError(error);
   }
 };
 
@@ -258,20 +285,13 @@ export const generateSpatialLayout = async (
       },
     });
 
+    // Grid snapping and geometry checks happen in validateAiLayout (utils/aiLayout.ts)
     if (response.text) {
-      const parsed = JSON.parse(response.text) as { id: string, name: string, x: number, y: number, width: number, height: number, floor: number }[];
-      // Enforce strict grid rounding on response as post-processing safety
-      return parsed.map(item => ({
-        ...item,
-        x: Math.round(item.x / gridSize) * gridSize,
-        y: Math.round(item.y / gridSize) * gridSize,
-        width: Math.max(gridSize, Math.round(item.width / gridSize) * gridSize),
-        height: Math.max(gridSize, Math.round(item.height / gridSize) * gridSize),
-      }));
+      return JSON.parse(response.text) as { id: string, name: string, x: number, y: number, width: number, height: number, floor: number }[];
     }
-    throw new Error("No response text from Gemini");
+    throw new Error("Gemini returned an empty response. Please try again.");
   } catch (error) {
     console.error("Error generating spatial layout:", error);
-    throw error;
+    throw toFriendlyError(error);
   }
 };

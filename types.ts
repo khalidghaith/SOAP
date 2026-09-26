@@ -66,6 +66,10 @@ export interface Room {
   vcFromFloor?: number;        // for VC — starting floor (defaults to lowest floor)
   vcToFloor?: number;          // for VC — ending floor (defaults to highest floor)
   stairParams?: StairParams;   // for VC type 'stair'
+
+  // Hints from AI program analysis, used by the AI layout generator
+  daylightReq?: 'perimeter' | 'core';
+  aspectRatioHint?: 'regular' | 'long' | 'square';
 }
 
 export interface ZoneColor {

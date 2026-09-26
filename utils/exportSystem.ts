@@ -8,7 +8,7 @@ import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
 import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
 import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
 
-export type ExportFormat = 'png' | 'jpeg' | 'svg' | 'dxf' | 'json' | 'pdf';
+export type ExportFormat = 'png' | 'jpeg' | 'svg' | 'dxf' | 'pdf';
 
 // Generate points along the curve to ensure the hull wraps it tightly
 const getBubbleCurvePoints = (points: Point[], segmentsPerCurve: number = 5): Point[] => {
@@ -261,26 +261,6 @@ export const handleExport = async (
     };
     const getOpacity = (style?: DiagramStyle) => style?.opacity || 0.9;
     const isSketchy = currentStyle?.sketchy || false;
-
-    // --- JSON Export ---
-    if (format === 'json') {
-        const data = {
-            version: 1,
-            timestamp: new Date().toISOString(),
-            projectName,
-            rooms,
-            connections,
-            floors,
-            currentFloor,
-            zoneColors,
-            appSettings,
-            annotations
-        };
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        triggerDownload(url, `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`);
-        return;
-    }
 
     const visibleRooms = rooms.filter(r => {
         if (!r.isPlaced) return false;

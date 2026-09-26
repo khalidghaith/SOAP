@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Sliders, Globe, Layers, RefreshCw, Check, Undo2 } from 'lucide-react';
 import { AppSettings } from '../types';
+import { clearAutosave, getAutosaveSize } from '../utils/projectStore';
 
 interface SettingsModalProps {
     settings: AppSettings;
@@ -13,18 +14,13 @@ type TabType = 'general' | 'physics' | 'export';
 export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onUpdate, onClose }) => {
     const [activeTab, setActiveTab] = useState<TabType>('general');
     const [clearingCache, setClearingCache] = useState(false);
-    const [cacheSize, setCacheSize] = useState(() => {
-        try {
-            const saved = localStorage.getItem('SOAP_PROJECT_AUTOSAVE');
-            if (saved) {
-                const kb = (saved.length * 2) / 1024; // Approximation of string bytes in KB
-                return `${kb.toFixed(1)} KB`;
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        return '0.0 KB';
-    });
+    const [cacheSize, setCacheSize] = useState('…');
+
+    useEffect(() => {
+        getAutosaveSize()
+            .then(bytes => setCacheSize(`${(bytes / 1024).toFixed(1)} KB`))
+            .catch(() => setCacheSize('0.0 KB'));
+    }, []);
 
     const handleChange = (key: keyof AppSettings, value: any) => {
         onUpdate({ ...settings, [key]: value });
@@ -32,9 +28,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onUpdate
 
     const handleClearCache = () => {
         setClearingCache(true);
-        setTimeout(() => {
+        setTimeout(async () => {
             try {
-                localStorage.removeItem('SOAP_PROJECT_AUTOSAVE');
+                await clearAutosave();
                 setCacheSize('0.0 KB');
                 alert('Autosave project cache successfully cleared.');
             } catch (e) {

@@ -15,6 +15,8 @@ import { AILayoutModal } from './components/AILayoutModal';
 import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport, getHexColorForZone, getHexBorderForZone } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
+import { validateAiLayout } from './utils/aiLayout';
+import { buildProjectData, parseProjectData, loadAutosave, saveAutosave, hydrateReferenceImages, clearAutosave, parseCsv, parseArea, toCsvField } from './utils/projectStore';
 import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
@@ -226,16 +228,7 @@ type ViewMode = 'EDITOR' | 'CANVAS' | 'VOLUMES';
 
 export default function App() {
     // Load autosave data
-    const [initialData] = useState(() => {
-        if (typeof window === 'undefined') return null;
-        try {
-            const saved = localStorage.getItem('SOAP_PROJECT_AUTOSAVE');
-            return saved ? JSON.parse(saved) : null;
-        } catch (e) {
-            console.error("Failed to load autosave", e);
-            return null;
-        }
-    });
+    const [initialData] = useState(() => (typeof window === 'undefined' ? null : loadAutosave()));
 
     // App State
     const [viewMode, setViewMode] = useState<ViewMode>('EDITOR');
@@ -243,7 +236,10 @@ export default function App() {
     const [rooms, setRooms] = useState<Room[]>(initialData?.rooms || []);
     const [connections, setConnections] = useState<Connection[]>(initialData?.connections || []);
     const [zoneColors, setZoneColors] = useState<Record<string, ZoneColor>>(initialData?.zoneColors || ZONE_COLORS);
-    const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>(initialData?.referenceImages || []);
+    // Image data for autosaved reference images lives in IndexedDB and is filled in after mount
+    const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>(() => (initialData?.referenceImages || []).filter(img => img.url));
+    const [isAutosaveReady, setIsAutosaveReady] = useState(false);
+    const [autosaveError, setAutosaveError] = useState<string | null>(null);
     const [referenceScaleState, setReferenceScaleState] = useState<ReferenceScaleState | null>(null);
     const [selectedReferenceImageId, setSelectedReferenceImageId] = useState<string | null>(null);
     const [guides, setGuides] = useState<CanvasGuide[]>(initialData?.guides || []);
@@ -252,7 +248,8 @@ export default function App() {
     const [draggedGuideId, setDraggedGuideId] = useState<string | null>(null);
 
     // API Key State
-    const [apiKey, setApiKey] = useState(() => localStorage.getItem('SOAP_GEMINI_KEY') || import.meta.env.VITE_GEMINI_API_KEY || "");
+    // The .env key is a dev convenience only; it must never be baked into a production bundle
+    const [apiKey, setApiKey] = useState(() => localStorage.getItem('SOAP_GEMINI_KEY') || (import.meta.env.DEV ? import.meta.env.VITE_GEMINI_API_KEY : '') || "");
     const [showApiKeyModal, setShowApiKeyModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [showHelpModal, setShowHelpModal] = useState(false);
@@ -638,29 +635,39 @@ export default function App() {
 
 
 
+    const getProjectData = () => buildProjectData({
+        projectName, rooms, connections, floors, currentFloor, zoneColors, appSettings,
+        annotations, referenceImages, floorOverlays, siteProperties, guides
+    });
+
+    // Restore autosaved reference image data before autosave is allowed to overwrite it
+    useEffect(() => {
+        const saved = initialData?.referenceImages || [];
+        hydrateReferenceImages(saved)
+            .then(images => { if (images.length !== referenceImages.length) setReferenceImages(images); })
+            .catch(e => console.error("Failed to restore reference images", e))
+            .finally(() => setIsAutosaveReady(true));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // Debounced Auto-save
     useEffect(() => {
+        if (!isAutosaveReady) return;
         const timer = setTimeout(() => {
-            const saveData = {
-                projectName,
-                rooms,
-                connections,
-                zoneColors,
-                appSettings,
-                floors,
-                currentFloor,
-                annotations,
-                referenceImages,
-                floorOverlays,
-                siteProperties,
-                guides
-            };
-            localStorage.setItem('SOAP_PROJECT_AUTOSAVE', JSON.stringify(saveData));
-            console.log("Project auto-saved (debounced)");
+            saveAutosave(getProjectData())
+                .then(() => setAutosaveError(null))
+                .catch(e => {
+                    console.error("Autosave failed", e);
+                    const quota = e?.name === 'QuotaExceededError' || /quota/i.test(String(e?.message));
+                    setAutosaveError(quota
+                        ? "Autosave failed: browser storage is full. Save the project to a file to avoid losing work."
+                        : "Autosave failed. Save the project to a file to avoid losing work.");
+                });
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages, floorOverlays, siteProperties, guides]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isAutosaveReady, projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages, floorOverlays, siteProperties, guides]);
 
     // --- 3D / Volumes View Computations ---
     const verticalConnections = useMemo(() => {
@@ -774,7 +781,7 @@ export default function App() {
 
     const handleResetProject = () => {
         if (window.confirm("Are you sure you want to reset the project? This will clear all data and cannot be undone.")) {
-            localStorage.removeItem('SOAP_PROJECT_AUTOSAVE');
+            clearAutosave();
             setProjectName("New Project");
             setRooms([]);
             setConnections([]);
@@ -1425,7 +1432,7 @@ export default function App() {
     const handleAddFloor = () => {
         addToHistory();
         const newId = floors.length > 0 ? Math.max(...floors.map(f => f.id)) + 1 : 0;
-        const newFloor = { id: newId, label: `Floor ${newId}` };
+        const newFloor: Floor = { id: newId, label: `Floor ${newId}`, height: floors[floors.length - 1]?.height ?? 4 };
         setFloors([...floors, newFloor]);
         setCurrentFloor(newId);
     };
@@ -1446,7 +1453,7 @@ export default function App() {
                 setCurrentFloor(newFloors[newIndex].id);
             } else {
                 // If all floors deleted, create a default one
-                const defaultFloor = { id: 0, label: 'Ground Floor' };
+                const defaultFloor: Floor = { id: 0, label: 'Ground Floor', height: 4 };
                 setFloors([defaultFloor]);
                 setCurrentFloor(0);
             }
@@ -1584,7 +1591,9 @@ export default function App() {
                     zone: r.zone,
                     spaceType: r.spaceType,
                     vcType: r.vcType,
-                    description: r.description
+                    description: r.description,
+                    daylightReq: r.daylightReq,
+                    aspectRatioHint: r.aspectRatioHint
                 })),
                 fixedSpacesForAi,
                 floorsForAi,
@@ -1595,26 +1604,47 @@ export default function App() {
                 gridSize
             );
 
+            const { placements, issues } = validateAiLayout(
+                layout,
+                roomsToArrange.map(r => ({ id: r.id, name: r.name, area: r.area, spaceType: r.spaceType })),
+                fixedSpacesForAi,
+                floors.map(f => f.id),
+                gridSize
+            );
+
+            if (placements.length === 0) {
+                alert(`The AI layout couldn't be used.\n\n${issues.join('\n')}`);
+                return;
+            }
+
             addToHistory();
+            const byId = new Map(placements.map(p => [p.id, p]));
             setRooms(prev => prev.map(r => {
-                const match = layout.find(l => l.id === r.id);
+                const match = byId.get(r.id);
                 if (match) {
                     return { ...r, x: match.x * PIXELS_PER_METER, y: match.y * PIXELS_PER_METER, width: match.width * PIXELS_PER_METER, height: match.height * PIXELS_PER_METER, isPlaced: true, floor: match.floor };
                 }
                 return r;
             }));
+            setShowAiLayoutModal(false);
+
+            if (issues.length > 0) {
+                const shown = issues.slice(0, 12);
+                const more = issues.length - shown.length;
+                alert(`AI layout applied with ${issues.length} note(s):\n\n• ${shown.join('\n• ')}${more > 0 ? `\n…and ${more} more.` : ''}\n\nPress Ctrl+Z to undo.`);
+            }
         } catch (error) {
+            // Keep the modal open so the user's instructions aren't lost
             console.error("AI Layout failed:", error);
-            alert("Failed to generate AI layout. Please check your API key and try again.");
+            alert(error instanceof Error ? error.message : "Failed to generate AI layout.");
         } finally {
             setIsAiLayoutLoading(false);
-            setShowAiLayoutModal(false);
         }
     };
 
     const handleClearCanvas = () => {
-        addToHistory();
         if (window.confirm("Are you sure you want to clear the canvas and return all spaces to the inventory?")) {
+            addToHistory();
             setRooms(prev => prev.map(r => ({ ...r, isPlaced: false })));
             setSelectedRoomIds(new Set());
             setSelectedZone(null);
@@ -1632,35 +1662,31 @@ export default function App() {
 
                 // Handle CSV Import
                 if (file.name.toLowerCase().endsWith('.csv')) {
-                    const lines = content.split('\n');
+                    const rows = parseCsv(content);
                     const newRooms: Room[] = [];
                     // Skip header if present (simple check)
-                    const startIndex = lines[0].toLowerCase().includes('name') ? 1 : 0;
+                    const startIndex = rows[0]?.[0]?.toLowerCase().includes('name') ? 1 : 0;
 
-                    for (let i = startIndex; i < lines.length; i++) {
-                        const line = lines[i].trim();
-                        if (!line) continue;
+                    for (let i = startIndex; i < rows.length; i++) {
                         // Expecting: Name, Area, Zone
-                        const parts = line.split(',');
-                        if (parts.length >= 2) {
-                            const name = parts[0].trim();
-                            const area = parseFloat(parts[1].trim());
-                            const zone = parts[2]?.trim() || 'Default';
+                        const [rawName = '', rawArea = '', rawZone = ''] = rows[i];
+                        const name = rawName.trim();
+                        const area = parseArea(rawArea);
+                        const zone = rawZone.trim() || 'Default';
 
-                            if (name && !isNaN(area)) {
-                                const side = Math.sqrt(area) * PIXELS_PER_METER;
-                                newRooms.push({
-                                    id: `room-${Date.now()}-${i}`,
-                                    name,
-                                    area,
-                                    zone,
-                                    isPlaced: false,
-                                    floor: 0,
-                                    x: 0, y: 0,
-                                    width: side,
-                                    height: side
-                                });
-                            }
+                        if (name && !isNaN(area) && area > 0) {
+                            const side = Math.sqrt(area) * PIXELS_PER_METER;
+                            newRooms.push({
+                                id: `room-${Date.now()}-${i}`,
+                                name,
+                                area,
+                                zone,
+                                isPlaced: false,
+                                floor: 0,
+                                x: 0, y: 0,
+                                width: side,
+                                height: side
+                            });
                         }
                     }
                     if (newRooms.length > 0) {
@@ -1673,30 +1699,28 @@ export default function App() {
                     return;
                 }
 
-                const data = JSON.parse(content);
+                const data = parseProjectData(JSON.parse(content));
 
-                if (data.rooms && Array.isArray(data.rooms)) {
-                    addToHistory();
-                    if (data.projectName) setProjectName(data.projectName);
-                    setRooms(data.rooms);
-                    if (data.connections) setConnections(data.connections);
-                    if (data.floors) setFloors(data.floors);
-                    if (data.currentFloor !== undefined) setCurrentFloor(data.currentFloor);
-                    if (data.zoneColors) setZoneColors(data.zoneColors);
-                    if (data.appSettings) setAppSettings(data.appSettings);
-                    if (data.referenceImages) setReferenceImages(data.referenceImages);
-                    if (data.floorOverlays) setFloorOverlays(data.floorOverlays);
-                    if (data.siteProperties) setSiteProperties(data.siteProperties);
-                    if (data.guides) setGuides(data.guides);
+                addToHistory();
+                setRooms(data.rooms);
+                setProjectName(data.projectName ?? "New Project");
+                setConnections(data.connections ?? []);
+                setFloors(data.floors ?? FLOORS);
+                setCurrentFloor(data.currentFloor ?? 0);
+                setAnnotations(data.annotations ?? []);
+                setReferenceImages(data.referenceImages ?? []);
+                setFloorOverlays(data.floorOverlays ?? {});
+                setGuides(data.guides ?? []);
+                if (data.zoneColors) setZoneColors(data.zoneColors);
+                if (data.appSettings) setAppSettings(prev => ({ ...prev, ...data.appSettings }));
+                if (data.siteProperties) setSiteProperties(data.siteProperties);
+                setSelectedRoomIds(new Set());
 
-                    setHasInitialZoomed(false);
-                    setViewMode('CANVAS');
-                } else {
-                    alert("Invalid project file.");
-                }
+                setHasInitialZoomed(false);
+                setViewMode('CANVAS');
             } catch (error) {
                 console.error("Failed to import project:", error);
-                alert("Failed to import project file.");
+                alert(`Failed to import project file.${error instanceof Error ? `\n\n${error.message}` : ''}`);
             }
         };
         reader.readAsText(file);
@@ -2331,24 +2355,12 @@ export default function App() {
         };
 
         if (format === 'json') {
-            const data = {
-                projectName,
-                rooms,
-                connections,
-                floors,
-                currentFloor,
-                zoneColors,
-                appSettings,
-                referenceImages,
-                floorOverlays,
-                annotations,
-                siteProperties
-            };
+            const data = getProjectData();
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             await saveFile(blob, finalName, 'json');
         } else if (format === 'csv') {
             const headers = "Name,Area,Zone,Floor\n";
-            const csvContent = rooms.map(r => `${r.name},${r.area},${r.zone},${floors.find(f => f.id === r.floor)?.label || 'Unplaced'}`).join('\n');
+            const csvContent = rooms.map(r => [r.name, r.area, r.zone, (r.isPlaced && floors.find(f => f.id === r.floor)?.label) || 'Unplaced'].map(toCsvField).join(',')).join('\n');
             const blob = new Blob([headers + csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -2433,6 +2445,13 @@ export default function App() {
 
     return (
         <div className="h-screen w-screen bg-slate-50 dark:bg-dark-bg overflow-hidden font-sans selection:bg-orange-500/20 transition-colors duration-300">
+            {autosaveError && (
+                <div role="alert" className="fixed top-3 left-1/2 -translate-x-1/2 z-[400] flex items-center gap-3 max-w-[calc(100vw-2rem)] px-4 py-2 rounded-xl bg-red-600 text-white text-sm shadow-lg">
+                    <span>{autosaveError}</span>
+                    <button onClick={() => setShowExportModal(true)} className="shrink-0 px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 font-medium">Save file</button>
+                    <button onClick={() => setAutosaveError(null)} aria-label="Dismiss" className="shrink-0 opacity-80 hover:opacity-100">✕</button>
+                </div>
+            )}
             <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
                 :root, body, .font-sans { font-family: 'Inter', sans-serif; }
