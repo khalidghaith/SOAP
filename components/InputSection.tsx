@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Loader2, Wand2, FileText } from 'lucide-react';
 import { analyzeProgram } from '../services/geminiService';
 import { analysisToRooms } from '../utils/aiLayout';
+import { notify } from './Notifications';
 import { Room } from '../types';
 
 interface InputSectionProps {
@@ -30,7 +31,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onDataParsed, apiKey
       const rooms: Room[] = analysisToRooms(data, 20);
       onDataParsed(data.projectName || "New Project", rooms);
     } catch (err: any) {
-      alert("AI analysis failed: " + (err.message || "Unknown error"));
+      notify({ kind: 'error', title: 'AI analysis failed', message: err?.message });
     } finally {
       setIsLoading(false);
     }

@@ -1,9 +1,8 @@
 import { Room, Connection, Point, ZoneColor, AppSettings, Annotation, DiagramStyle, ReferenceImage, SiteProperties } from '../types';
 import { getConvexHull, createRoundedPath } from './geometry';
 import { SketchManager } from '../SketchManager';
-import { jsPDF } from "jspdf";
-import "svg2pdf.js";
 import { generateDXF } from './dxf';
+import { notify } from '../components/Notifications';
 import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
 import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
 import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
@@ -288,7 +287,8 @@ export const handleExport = async (
         : [];
 
     if (visibleRooms.length === 0 && overlayRooms.length === 0) {
-        alert("No visible rooms to export.");
+        // Previews render repeatedly while the export dialog is open; only tell the user on a real export
+        if (!options?.isPreview) notify({ kind: 'warning', title: 'Nothing to export', message: 'There are no placed spaces on this floor.' });
         return;
     }
 
@@ -851,8 +851,8 @@ export const handleExport = async (
         if (from && to) {
             const getRotatedCenter = (room: Room) => {
                 const isPoly = room.polygon && room.polygon.length > 0;
-                const localCx = isPoly ? calculateCentroid(room.polygon).x : room.width / 2;
-                const localCy = isPoly ? calculateCentroid(room.polygon).y : room.height / 2;
+                const localCx = isPoly ? calculateCentroid(room.polygon!).x : room.width / 2;
+                const localCy = isPoly ? calculateCentroid(room.polygon!).y : room.height / 2;
                 const angle = room.rotation || 0;
                 const rad = (angle * Math.PI) / 180;
                 const cos = Math.cos(rad);
@@ -1101,6 +1101,8 @@ export const handleExport = async (
     }
 
     if (format === 'pdf') {
+        // PDF libraries are loaded on demand to keep the initial bundle small
+        const [{ jsPDF }] = await Promise.all([import('jspdf'), import('svg2pdf.js')]);
         const doc = new jsPDF({
             orientation: options?.orientation || 'landscape',
             unit: 'mm',

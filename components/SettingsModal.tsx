@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Sliders, Globe, Layers, RefreshCw, Check, Undo2 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { clearAutosave, getAutosaveSize } from '../utils/projectStore';
+import { notify } from './Notifications';
 
 interface SettingsModalProps {
     settings: AppSettings;
@@ -32,7 +33,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onUpdate
             try {
                 await clearAutosave();
                 setCacheSize('0.0 KB');
-                alert('Autosave project cache successfully cleared.');
+                notify({ kind: 'success', title: 'Autosave cache cleared' });
             } catch (e) {
                 console.error(e);
             } finally {
@@ -47,7 +48,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onUpdate
             magnetStrength: 50,
             magnetPadding: 10
         });
-        alert('Physics tuning parameters reset to architectural defaults.');
+        notify({ kind: 'success', title: 'Physics settings reset to defaults' });
     };
 
     return (

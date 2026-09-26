@@ -7,6 +7,7 @@ import {
 import { ApiKeyModal } from './ApiKeyModal';
 import { analyzeProgram } from '../services/geminiService';
 import { analysisToRooms } from '../utils/aiLayout';
+import { notify } from './Notifications';
 import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
 import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
 import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
@@ -162,7 +163,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             setRooms([...rooms, ...newRooms]);
             setShowAiModal(false);
         } catch (err: any) {
-            alert("AI analysis failed: " + (err.message || "Unknown error"));
+            notify({ kind: 'error', title: 'AI analysis failed', message: err?.message });
         } finally {
             setIsAiLoading(false);
         }

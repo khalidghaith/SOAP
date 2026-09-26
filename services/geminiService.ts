@@ -1,10 +1,38 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import type { GoogleGenAI } from "@google/genai";
 import { AnalysisResponse } from "../types";
+
+// The Gemini SDK is loaded on first use to keep it out of the initial bundle
+const loadGenAI = () => import("@google/genai");
+
+// Model used for program analysis and AI layout
+const GEMINI_MODEL = "gemini-3.8-flash";
+
+const getStatus = (error: unknown) => (error as any)?.status ?? (error as any)?.code;
+
+// Overload (503/500) and rate-limit (429) errors are usually brief, so retry those with a growing delay.
+const RETRY_DELAYS_MS = [2000, 6000];
+const isRetryable = (error: unknown) => {
+  const status = getStatus(error);
+  const text = String((error as any)?.message ?? '').toLowerCase();
+  return status === 503 || status === 500 || status === 429 || text.includes('unavailable') || text.includes('overloaded') || text.includes('resource_exhausted');
+};
+
+const generateWithRetry = async (ai: GoogleGenAI, request: Parameters<GoogleGenAI['models']['generateContent']>[0]) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await ai.models.generateContent(request);
+    } catch (error) {
+      if (attempt >= RETRY_DELAYS_MS.length || !isRetryable(error)) throw error;
+      console.warn(`Gemini request failed (${getStatus(error)}), retrying in ${RETRY_DELAYS_MS[attempt] / 1000}s…`);
+      await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+    }
+  }
+};
 
 // Turns SDK/network failures into a message that tells the user what to do next.
 const toFriendlyError = (error: unknown): Error => {
   const raw = error instanceof Error ? error.message : String(error);
-  const status = (error as any)?.status ?? (error as any)?.code;
+  const status = getStatus(error);
   const text = `${status ?? ''} ${raw}`.toLowerCase();
 
   if (text.includes('api_key_invalid') || text.includes('api key not valid') || status === 401 || status === 403 || text.includes('permission_denied')) {
@@ -14,7 +42,7 @@ const toFriendlyError = (error: unknown): Error => {
     return new Error("Gemini rate limit or quota reached. Wait a minute and try again, or check your plan's quota.");
   }
   if (status === 503 || status === 500 || text.includes('overloaded') || text.includes('unavailable')) {
-    return new Error("Gemini is temporarily unavailable. Please try again in a moment.");
+    return new Error("Gemini is overloaded right now (retried 3 times). Please try again in a minute.");
   }
   if (text.includes('failed to fetch') || text.includes('networkerror') || text.includes('network error') || !navigator.onLine) {
     return new Error("Couldn't reach Gemini. Check your internet connection and try again.");
@@ -33,10 +61,11 @@ export const analyzeProgram = async (programText: string, apiKey: string): Promi
     throw new Error("Gemini API Key is missing. Please provide a key in the settings.");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+    const { GoogleGenAI, Type } = await loadGenAI();
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await generateWithRetry(ai, {
+      model: GEMINI_MODEL,
       contents: `You are a Senior Computational Architectural Programmer and Space Planner.
       Analyze the following architectural functional program description.
 
@@ -136,8 +165,6 @@ export const generateSpatialLayout = async (
     throw new Error("Gemini API Key is missing. Please provide a key in the settings.");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-
   // Define Typology Specific Rules
   let typologyInstructions = "";
   if (typology === 'residential') {
@@ -208,8 +235,10 @@ export const generateSpatialLayout = async (
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+    const { GoogleGenAI, Type } = await loadGenAI();
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await generateWithRetry(ai, {
+      model: GEMINI_MODEL,
       contents: `You are a Senior Computational Architect & Algorithmic Layout Engine.
       Your objective is to generate an architecturally realistic, grid-aligned, zero-gap partition floor plan layout.
 

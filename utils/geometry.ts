@@ -55,7 +55,12 @@ export const getHullPath = (points: Point[], padding: number = 20): string => {
 };
 
 // SVG Fillet utility
-export const createRoundedPath = (points: Point[], radius: number) => {
+export const createRoundedPath = (rawPoints: Point[], radius: number) => {
+    // Repeated consecutive points give zero-length edges, which would divide by zero below
+    const points = rawPoints.filter((p, i) => {
+        const prev = rawPoints[(i - 1 + rawPoints.length) % rawPoints.length];
+        return rawPoints.length < 2 || p.x !== prev.x || p.y !== prev.y;
+    });
     if (points.length < 3) return "";
     let path = "";
     const len = points.length;

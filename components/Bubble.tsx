@@ -787,7 +787,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                         if (bestX !== null) {
                             nx = bestX;
-                            currentSnapLines.push({ x: snapLineX });
+                            currentSnapLines.push({ x: snapLineX ?? undefined });
                         }
 
                         // Y Axis Snapping
@@ -837,7 +837,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                         if (bestY !== null) {
                             ny = bestY;
-                            currentSnapLines.push({ y: snapLineY });
+                            currentSnapLines.push({ y: snapLineY ?? undefined });
                         }
                     }
 
@@ -914,7 +914,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                         if (bestX !== null) {
                             nx = bestX;
-                            currentSnapLines.push({ x: snapLineX });
+                            currentSnapLines.push({ x: snapLineX ?? undefined });
                         }
 
                         // Y Axis Snapping
@@ -960,7 +960,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                         if (bestY !== null) {
                             ny = bestY;
-                            currentSnapLines.push({ y: snapLineY });
+                            currentSnapLines.push({ y: snapLineY ?? undefined });
                         }
                     }
                     return { x: nx, y: ny };
@@ -1040,7 +1040,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                     if (bestX !== null) {
                         nX = bestX;
-                        currentSnapLines.push({ x: snapLineX });
+                        currentSnapLines.push({ x: snapLineX ?? undefined });
                     }
 
                     // Y Axis Snapping
@@ -1090,7 +1090,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                     if (bestY !== null) {
                         nY = bestY;
-                        currentSnapLines.push({ y: snapLineY });
+                        currentSnapLines.push({ y: snapLineY ?? undefined });
                     }
                 }
 

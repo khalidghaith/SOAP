@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Globe, Navigation, Compass as CompassIcon, MapPin, Search, Loader2 } from 'lucide-react';
 import { SiteProperties } from '../types';
+import { notify } from './Notifications';
 
 interface SitePropertiesModalProps {
     properties: SiteProperties;
@@ -98,7 +99,7 @@ export const SitePropertiesModal: React.FC<SitePropertiesModalProps> = ({ proper
             if (Array.isArray(data) && data.length > 0) {
                 setSearchResults(data);
             } else {
-                alert("No locations found matching your search.");
+                notify({ kind: 'info', title: 'No locations found', message: 'Try a different place name.' });
             }
         } catch (err) {
             console.error("Lookup search failed:", err);

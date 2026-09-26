@@ -9,14 +9,20 @@ import { ZoneOverlay } from './components/ZoneOverlay'; // Newly added
 import { ExportModal } from './components/ExportModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SitePropertiesModal } from './components/SitePropertiesModal';
-import { VolumesView, VolumesViewHandle } from './components/VolumesView';
+import type { VolumesViewHandle } from './components/VolumesView';
+// three.js is large; load the 3D view only when it's first opened
+const VolumesView = React.lazy(() => import('./components/VolumesView').then(m => ({ default: m.VolumesView })));
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AILayoutModal } from './components/AILayoutModal';
 import { applyMagneticPhysics } from './utils/physics'; // Newly added
 import { handleExport, getHexColorForZone, getHexBorderForZone } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
 import { validateAiLayout } from './utils/aiLayout';
-import { buildProjectData, parseProjectData, loadAutosave, saveAutosave, hydrateReferenceImages, clearAutosave, parseCsv, parseArea, toCsvField } from './utils/projectStore';
+import { parseProjectData, parseCsv, parseArea, toCsvField } from './utils/projectStore';
+import { useProjectDocument } from './hooks/useProjectDocument';
+import { SpacePropertiesPanel } from './components/SpacePropertiesPanel';
+import { ZonePropertiesPanel } from './components/ZonePropertiesPanel';
+import { NotificationHost, notify, confirmDialog } from './components/Notifications';
 import {
     Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
     TableProperties, Hexagon, Circle, Square,
@@ -36,11 +42,7 @@ import { Rulers, getRulerTickInterval } from './components/Rulers';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
 import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
-import stairSvgRaw from './lib/symbols/stairs.svg?raw';
-import elevatorSvgRaw from './lib/symbols/Elevator.svg?raw';
-import rampSvgRaw from './lib/symbols/Ramp.svg?raw';
 
-import * as htmlToImage from 'html-to-image';
 import { analyzeProgram, generateSpatialLayout } from './services/geminiService';
 
 // Shim process for libs that might expect it in Vite
@@ -219,7 +221,7 @@ const saveFile = async (blob: Blob, suggestedName: string, extension: string) =>
     } catch (err: any) {
         if (err.name !== 'AbortError') {
             console.error('Failed to save file:', err);
-            alert('Failed to save file.');
+            notify({ kind: 'error', title: "Couldn't save the file", message: err?.message });
         }
     }
 };
@@ -227,22 +229,30 @@ const saveFile = async (blob: Blob, suggestedName: string, extension: string) =>
 type ViewMode = 'EDITOR' | 'CANVAS' | 'VOLUMES';
 
 export default function App() {
-    // Load autosave data
-    const [initialData] = useState(() => (typeof window === 'undefined' ? null : loadAutosave()));
+    // Project document: saved data, undo/redo and autosave
+    const {
+        projectName, setProjectName,
+        rooms, setRooms,
+        connections, setConnections,
+        zoneColors, setZoneColors,
+        referenceImages, setReferenceImages,
+        guides, setGuides,
+        siteProperties, setSiteProperties,
+        annotations, setAnnotations,
+        appSettings, setAppSettings,
+        floors, setFloors,
+        currentFloor, setCurrentFloor,
+        floorOverlays, setFloorOverlays,
+        autosaveError, setAutosaveError,
+        getProjectData,
+        addToHistory, undo, redo, canUndo, canRedo,
+        loadProject, resetProject,
+    } = useProjectDocument();
 
     // App State
     const [viewMode, setViewMode] = useState<ViewMode>('EDITOR');
-    const [projectName, setProjectName] = useState(initialData?.projectName || "New Project");
-    const [rooms, setRooms] = useState<Room[]>(initialData?.rooms || []);
-    const [connections, setConnections] = useState<Connection[]>(initialData?.connections || []);
-    const [zoneColors, setZoneColors] = useState<Record<string, ZoneColor>>(initialData?.zoneColors || ZONE_COLORS);
-    // Image data for autosaved reference images lives in IndexedDB and is filled in after mount
-    const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>(() => (initialData?.referenceImages || []).filter(img => img.url));
-    const [isAutosaveReady, setIsAutosaveReady] = useState(false);
-    const [autosaveError, setAutosaveError] = useState<string | null>(null);
     const [referenceScaleState, setReferenceScaleState] = useState<ReferenceScaleState | null>(null);
     const [selectedReferenceImageId, setSelectedReferenceImageId] = useState<string | null>(null);
-    const [guides, setGuides] = useState<CanvasGuide[]>(initialData?.guides || []);
     const [isGuidesMode, setIsGuidesMode] = useState(false);
     const [selectedGuideId, setSelectedGuideId] = useState<string | null>(null);
     const [draggedGuideId, setDraggedGuideId] = useState<string | null>(null);
@@ -256,14 +266,6 @@ export default function App() {
     const [showAboutModal, setShowAboutModal] = useState(false);
     const [showSnapPanel, setShowSnapPanel] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
-    const [siteProperties, setSiteProperties] = useState<SiteProperties>(() => {
-        return initialData?.siteProperties || {
-            locationName: 'Cairo, Egypt',
-            latitude: 30.0444,
-            longitude: 31.2357,
-            northAngle: 0,
-        };
-    });
     const [showSitePropertiesModal, setShowSitePropertiesModal] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);
@@ -271,7 +273,6 @@ export default function App() {
     const [showAiLayoutModal, setShowAiLayoutModal] = useState(false);
 
     // Sketch State
-    const [annotations, setAnnotations] = useState<Annotation[]>(initialData?.annotations || []);
     const [isSketchMode, setIsSketchMode] = useState(false);
     const [isReferenceMode, setIsReferenceMode] = useState(false);
     const [activeSketchType, setActiveSketchType] = useState<AnnotationType | 'eraser' | 'select'>('select');
@@ -293,29 +294,7 @@ export default function App() {
     const selectedAnnotation = useMemo(() => annotations.find(a => a.id === selectedAnnotationId), [annotations, selectedAnnotationId]);
 
 
-    const [appSettings, setAppSettings] = useState<AppSettings>(initialData?.appSettings || {
-        zoneTransparency: 0.5,
-        zonePadding: 10,
-        strokeWidth: 2,
-        cornerRadius: 12,
-        fontSize: 12,
-        snapTolerance: 10,
-        snapToGrid: false,
-        snapToObjects: true,
-        snapWhileScaling: false,
-        volumesOpacity: 0.6,
-        colorSaturation: 1.0,
-        unitSystem: 'metric',
-        magnetStrength: 50,
-        magnetPadding: 10,
-        incrementalScalingEnabled: false,
-        incrementalScaleAmount: 0.05,
-        snapToGuides: true
-    });
-
     // View State
-    const [floors, setFloors] = useState(initialData?.floors || FLOORS);
-    const [currentFloor, setCurrentFloor] = useState(initialData?.currentFloor || 0);
     const [viewport, setViewport] = useState({
         scale: 1,
         offset: { x: window.innerWidth / 2, y: window.innerHeight / 2 }
@@ -364,6 +343,9 @@ export default function App() {
     const [cameraVersion, setCameraVersion] = useState(0);
 
     const volumesViewRef = useRef<VolumesViewHandle>(null);
+    // Mount the (lazy-loaded) 3D view on first visit, then keep it mounted to preserve its camera
+    const [hasOpenedVolumes, setHasOpenedVolumes] = useState(false);
+    useEffect(() => { if (viewMode === 'VOLUMES') setHasOpenedVolumes(true); }, [viewMode]);
 
     // Extracted Handlers for Volumes View (to avoid conditional hook calls)
     const handleViewStateChange = useCallback((updates: any, incrementVersion = false) => {
@@ -406,7 +388,6 @@ export default function App() {
     const [isInventoryOpen, setIsInventoryOpen] = useState(true);
     const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
     const [snapGuides, setSnapGuides] = useState<{ x?: number, y?: number } | null>(null);
-    const [floorOverlays, setFloorOverlays] = useState<Record<number, number | null>>(initialData?.floorOverlays || {});
     const activeOverlayFloorId = floorOverlays[currentFloor] ?? null;
     const [isOverlaySelectorOpen, setIsOverlaySelectorOpen] = useState(false);
     const [isZoneDragging, setIsZoneDragging] = useState(false);
@@ -635,39 +616,6 @@ export default function App() {
 
 
 
-    const getProjectData = () => buildProjectData({
-        projectName, rooms, connections, floors, currentFloor, zoneColors, appSettings,
-        annotations, referenceImages, floorOverlays, siteProperties, guides
-    });
-
-    // Restore autosaved reference image data before autosave is allowed to overwrite it
-    useEffect(() => {
-        const saved = initialData?.referenceImages || [];
-        hydrateReferenceImages(saved)
-            .then(images => { if (images.length !== referenceImages.length) setReferenceImages(images); })
-            .catch(e => console.error("Failed to restore reference images", e))
-            .finally(() => setIsAutosaveReady(true));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    // Debounced Auto-save
-    useEffect(() => {
-        if (!isAutosaveReady) return;
-        const timer = setTimeout(() => {
-            saveAutosave(getProjectData())
-                .then(() => setAutosaveError(null))
-                .catch(e => {
-                    console.error("Autosave failed", e);
-                    const quota = e?.name === 'QuotaExceededError' || /quota/i.test(String(e?.message));
-                    setAutosaveError(quota
-                        ? "Autosave failed: browser storage is full. Save the project to a file to avoid losing work."
-                        : "Autosave failed. Save the project to a file to avoid losing work.");
-                });
-        }, 500);
-
-        return () => clearTimeout(timer);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isAutosaveReady, projectName, rooms, connections, zoneColors, appSettings, floors, currentFloor, annotations, referenceImages, floorOverlays, siteProperties, guides]);
 
     // --- 3D / Volumes View Computations ---
     const verticalConnections = useMemo(() => {
@@ -688,72 +636,6 @@ export default function App() {
         return vconns;
     }, [connections, rooms]);
 
-    // --- History System ---
-    const [history, setHistory] = useState<{
-        rooms: Room[];
-        connections: Connection[];
-        floors: typeof floors;
-        zoneColors: Record<string, ZoneColor>;
-        projectName: string;
-        annotations: Annotation[];
-        referenceImages: ReferenceImage[];
-        guides: CanvasGuide[];
-    }[]>([]);
-    const [future, setFuture] = useState<{
-        rooms: Room[];
-        connections: Connection[];
-        floors: typeof floors;
-        zoneColors: Record<string, ZoneColor>;
-        projectName: string;
-        annotations: Annotation[];
-        referenceImages: ReferenceImage[];
-        guides: CanvasGuide[];
-    }[]>([]);
-
-    const addToHistory = useCallback(() => {
-        setHistory(prev => {
-            const newHistory = [...prev, { rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides }];
-            if (newHistory.length > 50) newHistory.shift();
-            return newHistory;
-        });
-        setFuture([]);
-    }, [rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
-
-    const undo = useCallback(() => {
-        if (history.length === 0) return;
-        const previous = history[history.length - 1];
-        const newHistory = history.slice(0, -1);
-
-        setFuture(prev => [{ rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides }, ...prev]);
-
-        setRooms(previous.rooms);
-        setConnections(previous.connections);
-        setFloors(previous.floors);
-        setZoneColors(previous.zoneColors);
-        setProjectName(previous.projectName);
-        setAnnotations(previous.annotations || []);
-        setReferenceImages(previous.referenceImages || []);
-        setGuides(previous.guides || []);
-        setHistory(newHistory);
-    }, [history, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
-
-    const redo = useCallback(() => {
-        if (future.length === 0) return;
-        const next = future[0];
-        const newFuture = future.slice(1);
-
-        setHistory(prev => [...prev, { rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides }]);
-
-        setRooms(next.rooms);
-        setConnections(next.connections);
-        setFloors(next.floors);
-        setZoneColors(next.zoneColors);
-        setProjectName(next.projectName);
-        setAnnotations(next.annotations || []);
-        setReferenceImages(next.referenceImages || []);
-        setGuides(next.guides || []);
-        setFuture(newFuture);
-    }, [future, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
 
     // Clear selection when exiting reference mode
     useEffect(() => {
@@ -779,21 +661,14 @@ export default function App() {
         }
     }, [isGuidesMode]);
 
-    const handleResetProject = () => {
-        if (window.confirm("Are you sure you want to reset the project? This will clear all data and cannot be undone.")) {
-            clearAutosave();
-            setProjectName("New Project");
-            setRooms([]);
-            setConnections([]);
-            setFloors(FLOORS);
-            setCurrentFloor(0);
-            setZoneColors(ZONE_COLORS);
-            setHistory([]);
-            setFuture([]);
-            setAnnotations([]);
-            setReferenceImages([]);
-            setGuides([]);
-        }
+    const handleResetProject = async () => {
+        const ok = await confirmDialog({
+            title: 'Reset project?',
+            message: 'This clears all spaces, floors, sketches and reference images. It cannot be undone.',
+            confirmLabel: 'Reset project',
+            danger: true
+        });
+        if (ok) resetProject();
     };
 
     // --- Utilities ---
@@ -1613,7 +1488,7 @@ export default function App() {
             );
 
             if (placements.length === 0) {
-                alert(`The AI layout couldn't be used.\n\n${issues.join('\n')}`);
+                notify({ kind: 'error', title: "The AI layout couldn't be used", details: issues });
                 return;
             }
 
@@ -1629,21 +1504,31 @@ export default function App() {
             setShowAiLayoutModal(false);
 
             if (issues.length > 0) {
-                const shown = issues.slice(0, 12);
-                const more = issues.length - shown.length;
-                alert(`AI layout applied with ${issues.length} note(s):\n\n• ${shown.join('\n• ')}${more > 0 ? `\n…and ${more} more.` : ''}\n\nPress Ctrl+Z to undo.`);
+                notify({
+                    kind: 'warning',
+                    title: `AI layout applied with ${issues.length} adjustment${issues.length > 1 ? 's' : ''}`,
+                    message: 'Press Ctrl+Z to undo.',
+                    details: issues
+                });
+            } else {
+                notify({ kind: 'success', title: `AI layout applied to ${placements.length} space${placements.length > 1 ? 's' : ''}`, message: 'Press Ctrl+Z to undo.' });
             }
         } catch (error) {
             // Keep the modal open so the user's instructions aren't lost
             console.error("AI Layout failed:", error);
-            alert(error instanceof Error ? error.message : "Failed to generate AI layout.");
+            notify({ kind: 'error', title: 'AI layout failed', message: error instanceof Error ? error.message : undefined });
         } finally {
             setIsAiLayoutLoading(false);
         }
     };
 
-    const handleClearCanvas = () => {
-        if (window.confirm("Are you sure you want to clear the canvas and return all spaces to the inventory?")) {
+    const handleClearCanvas = async () => {
+        const ok = await confirmDialog({
+            title: 'Clear canvas?',
+            message: 'All spaces return to the inventory. You can undo this with Ctrl+Z.',
+            confirmLabel: 'Clear canvas'
+        });
+        if (ok) {
             addToHistory();
             setRooms(prev => prev.map(r => ({ ...r, isPlaced: false })));
             setSelectedRoomIds(new Set());
@@ -1692,35 +1577,21 @@ export default function App() {
                     if (newRooms.length > 0) {
                         addToHistory();
                         setRooms(prev => [...prev, ...newRooms]);
-                        alert(`Imported ${newRooms.length} spaces from CSV.`);
+                        notify({ kind: 'success', title: `Imported ${newRooms.length} space${newRooms.length > 1 ? 's' : ''} from CSV` });
                     } else {
-                        alert("No valid spaces found in CSV.");
+                        notify({ kind: 'warning', title: 'No valid spaces found in the CSV', message: 'Expected columns: Name, Area (m²), Zone.' });
                     }
                     return;
                 }
 
-                const data = parseProjectData(JSON.parse(content));
-
-                addToHistory();
-                setRooms(data.rooms);
-                setProjectName(data.projectName ?? "New Project");
-                setConnections(data.connections ?? []);
-                setFloors(data.floors ?? FLOORS);
-                setCurrentFloor(data.currentFloor ?? 0);
-                setAnnotations(data.annotations ?? []);
-                setReferenceImages(data.referenceImages ?? []);
-                setFloorOverlays(data.floorOverlays ?? {});
-                setGuides(data.guides ?? []);
-                if (data.zoneColors) setZoneColors(data.zoneColors);
-                if (data.appSettings) setAppSettings(prev => ({ ...prev, ...data.appSettings }));
-                if (data.siteProperties) setSiteProperties(data.siteProperties);
+                loadProject(parseProjectData(JSON.parse(content)));
                 setSelectedRoomIds(new Set());
 
                 setHasInitialZoomed(false);
                 setViewMode('CANVAS');
             } catch (error) {
                 console.error("Failed to import project:", error);
-                alert(`Failed to import project file.${error instanceof Error ? `\n\n${error.message}` : ''}`);
+                notify({ kind: 'error', title: "Couldn't open the project file", message: error instanceof Error ? error.message : undefined });
             }
         };
         reader.readAsText(file);
@@ -1807,6 +1678,18 @@ export default function App() {
             return updatedRoom;
         }));
     }, []);
+
+    // Property-panel edits are undoable. Consecutive edits to the same fields of the same space
+    // (e.g. typing a name) within a second are grouped into one undo step.
+    const lastPanelEditRef = useRef<{ key: string; time: number } | null>(null);
+    const updateRoomFromPanel = useCallback((id: string, updates: Partial<Room>) => {
+        const key = `${id}:${Object.keys(updates).sort().join(',')}`;
+        const now = Date.now();
+        const last = lastPanelEditRef.current;
+        if (!last || last.key !== key || now - last.time > 1000) addToHistory();
+        lastPanelEditRef.current = { key, time: now };
+        updateRoom(id, updates);
+    }, [addToHistory, updateRoom]);
 
 
     const handleMoveRoom = useCallback((id: string, x: number, y: number) => {
@@ -1926,7 +1809,7 @@ export default function App() {
             };
             reader.readAsDataURL(file);
         } else if (file.type === 'application/pdf') {
-            alert("PDF support coming soon! Please use PNG/JPG for now.");
+            notify({ kind: 'info', title: 'PDF references are not supported yet', message: 'Please use a PNG or JPG image for now.' });
         }
 
         e.target.value = '';
@@ -2376,7 +2259,7 @@ export default function App() {
                 if (blob) {
                     await saveFile(blob, finalName, 'obj');
                 } else {
-                    alert("Failed to export 3D model.");
+                    notify({ kind: 'error', title: "Couldn't export the 3D model" });
                 }
             }
         } else if (format === 'png') {
@@ -2390,11 +2273,16 @@ export default function App() {
                 }
             } catch (err) {
                 console.error("Image export failed", err);
-                alert("Failed to export image.");
+                notify({ kind: 'error', title: "Couldn't export the image", message: err instanceof Error ? err.message : undefined });
             }
         } else if (format === 'pdf' || format === 'dxf') {
-            const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, exportOptions, canvasStyle, referenceImages, siteProperties, floorOverlays);
-            if (blob) await saveFile(blob, finalName, format);
+            try {
+                const blob = await handleExport(format, finalName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, exportOptions, canvasStyle, referenceImages, siteProperties, floorOverlays);
+                if (blob) await saveFile(blob, finalName, format);
+            } catch (err) {
+                console.error(`${format.toUpperCase()} export failed`, err);
+                notify({ kind: 'error', title: `Couldn't export the ${format.toUpperCase()}`, message: err instanceof Error ? err.message : undefined });
+            }
         }
     };
 
@@ -2445,6 +2333,7 @@ export default function App() {
 
     return (
         <div className="h-screen w-screen bg-slate-50 dark:bg-dark-bg overflow-hidden font-sans selection:bg-orange-500/20 transition-colors duration-300">
+            <NotificationHost />
             {autosaveError && (
                 <div role="alert" className="fixed top-3 left-1/2 -translate-x-1/2 z-[400] flex items-center gap-3 max-w-[calc(100vw-2rem)] px-4 py-2 rounded-xl bg-red-600 text-white text-sm shadow-lg">
                     <span>{autosaveError}</span>
@@ -2527,10 +2416,10 @@ export default function App() {
 
                             <div className="h-6 w-px bg-slate-200/60 dark:bg-dark-border mx-1" />
 
-                            <button onClick={undo} disabled={history.length === 0} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30" title="Undo (Ctrl+Z)">
+                            <button onClick={undo} disabled={!canUndo} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30" title="Undo (Ctrl+Z)">
                                 <Undo2 size={14} />
                             </button>
-                            <button onClick={redo} disabled={future.length === 0} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30" title="Redo (Ctrl+Y)">
+                            <button onClick={redo} disabled={!canRedo} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30" title="Redo (Ctrl+Y)">
                                 <Redo2 size={14} />
                             </button>
                             <div className="w-px h-3 bg-slate-200 dark:bg-dark-border mx-1" />
@@ -2624,10 +2513,10 @@ export default function App() {
                             </div>
                             <div className="h-px bg-slate-100 dark:bg-dark-border" />
                             <div className="grid grid-cols-3 gap-2">
-                                <button onClick={() => { undo(); setIsMobileMenuOpen(false); }} disabled={history.length === 0} className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 disabled:opacity-50">
+                                <button onClick={() => { undo(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 disabled:opacity-50">
                                     <Undo2 size={16} />
                                 </button>
-                                <button onClick={() => { redo(); setIsMobileMenuOpen(false); }} disabled={future.length === 0} className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 disabled:opacity-50">
+                                <button onClick={() => { redo(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 disabled:opacity-50">
                                     <Redo2 size={16} />
                                 </button>
                                 <button onClick={() => { handleResetProject(); setIsMobileMenuOpen(false); }} className="h-10 rounded-xl flex items-center justify-center bg-red-50 text-red-500 dark:bg-red-900/20">
@@ -2788,6 +2677,8 @@ export default function App() {
                                     <button onClick={() => window.location.reload()} className="px-4 py-2 bg-red-600 text-white rounded shadow hover:bg-red-700 transition">Reload App</button>
                                 </div>
                             }>
+                                {hasOpenedVolumes && (
+                                <React.Suspense fallback={<div className="flex items-center justify-center h-full text-sm text-slate-400">Loading 3D view…</div>}>
                                 <VolumesView
                                     ref={volumesViewRef}
                                     rooms={rooms}
@@ -2813,6 +2704,8 @@ export default function App() {
                                     labelFontSize={volumeLabelFontSize}
                                     showGrid={showGrid}
                                 />
+                                </React.Suspense>
+                                )}
                             </ErrorBoundary>
                         </div>
                         <div
@@ -3729,529 +3622,40 @@ export default function App() {
                                 </div>
                                 <div className="flex-1 p-6 overflow-y-auto">
                                     {selectedRoom || isMultiSelection ? (
-                                        <div className="space-y-6">
-                                            <div>
-                                                <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Space Name</label>
-                                                {isMultiSelection ? (
-                                                    <div className="text-sm font-bold text-slate-500 italic">{selectedRoomIds.size} spaces selected</div>
-                                                ) : (
-                                                    <input
-                                                        className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-orange-600 bg-transparent border-b border-transparent focus:border-orange-500 pb-1"
-                                                        value={selectedRoom!.name}
-                                                        onChange={(e) => updateRoom(selectedRoom!.id, { name: e.target.value })}
-                                                    />
-                                                )}
-                                            </div>
-
-                                            {/* Shape Conversion Buttons */}
-                                            <div>
-                                                <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Shape Type</label>
-                                                <div className="flex glass-card p-1 rounded-xl">
-                                                    <button onClick={() => handleConvertShape('rect')} className={`flex-1 flex items-center justify-center py-2 rounded-lg ${(!isMultiSelection && (!selectedRoom?.shape || selectedRoom?.shape === 'rect')) || (isMultiSelection && multiSelectionStats?.commonShape === 'rect') ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600' : 'text-slate-400 hover:text-slate-600'}`} title="Rectangle"><Square size={16} /></button>
-                                                    <button onClick={() => handleConvertShape('polygon')} className={`flex-1 flex items-center justify-center py-2 rounded-lg ${(!isMultiSelection && selectedRoom?.shape === 'polygon') || (isMultiSelection && multiSelectionStats?.commonShape === 'polygon') ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600' : 'text-slate-400 hover:text-slate-600'}`} title="Polygon"><Hexagon size={16} /></button>
-                                                    <button onClick={() => handleConvertShape('bubble')} className={`flex-1 flex items-center justify-center py-2 rounded-lg ${(!isMultiSelection && selectedRoom?.shape === 'bubble') || (isMultiSelection && multiSelectionStats?.commonShape === 'bubble') ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600' : 'text-slate-400 hover:text-slate-600'}`} title="Bubble"><Circle size={16} /></button>
-                                                </div>
-                                            </div>
-
-                                            {/* Space Type Selector */}
-                                            {!isMultiSelection && (
-                                                <div>
-                                                    <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Space Type</label>
-                                                    <div className="grid grid-cols-3 glass-card p-1 rounded-xl gap-0.5">
-                                                        {[
-                                                            { type: 'standard' as SpaceType, icon: <Home size={13} />, label: 'Standard' },
-                                                            { type: 'outdoor' as SpaceType, icon: <Sun size={13} />, label: 'Outdoor' },
-                                                            { type: 'terrace' as SpaceType, icon: <TreePine size={13} />, label: 'Terrace' },
-                                                            { type: 'multistory' as SpaceType, icon: <Building2 size={13} />, label: 'Multi' },
-                                                            { type: 'verticalConnection' as SpaceType, icon: <ArrowUpDown size={13} />, label: 'Vert.C' },
-                                                        ].map(item => (
-                                                            <button
-                                                                key={item.type}
-                                                                onClick={() => updateRoom(selectedRoom!.id, {
-                                                                    spaceType: item.type,
-                                                                    ...(item.type === 'verticalConnection' && !selectedRoom!.vcType ? {
-                                                                        vcType: 'stair' as VCType,
-                                                                        vcFromFloor: Math.min(...floors.map(f => f.id)),
-                                                                        vcToFloor: Math.max(...floors.map(f => f.id)),
-                                                                        stairParams: { ...DEFAULT_STAIR_PARAMS },
-                                                                        zone: 'Circulation',
-                                                                    } : {}),
-                                                                    ...(item.type === 'multistory' && !selectedRoom!.msFromFloor ? {
-                                                                        msFromFloor: selectedRoom!.floor,
-                                                                        msToFloor: Math.min(Math.max(...floors.map(f => f.id)), selectedRoom!.floor + 1),
-                                                                    } : {}),
-                                                                })}
-                                                                className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9px] font-bold transition-all ${
-                                                                    (selectedRoom?.spaceType || 'standard') === item.type
-                                                                        ? 'bg-white dark:bg-dark-surface shadow-sm text-orange-600'
-                                                                        : 'text-slate-400 hover:text-slate-600 dark:hover:text-gray-300'
-                                                                }`}
-                                                                title={item.label}
-                                                            >
-                                                                {item.icon}
-                                                                <span className="hidden sm:inline">{item.label}</span>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-
-                                                    {/* Multistory: floor range input */}
-                                                    {(selectedRoom?.spaceType === 'multistory') && (() => {
-                                                        const msFrom = selectedRoom.msFromFloor ?? selectedRoom.floor;
-                                                        const msTo = selectedRoom.msToFloor ?? selectedRoom.floor;
-
-                                                        return (
-                                                            <div className="mt-3 bg-slate-50/50 dark:bg-white/5 rounded-xl p-3 border border-slate-100/30 dark:border-dark-border/30">
-                                                                <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Floor Range</span>
-                                                                <div className="flex gap-2 items-center">
-                                                                    <div className="flex-1">
-                                                                        <label className="text-[8px] font-bold text-slate-400 uppercase">From</label>
-                                                                        <select
-                                                                            value={msFrom}
-                                                                            onChange={(e) => updateRoom(selectedRoom!.id, { msFromFloor: parseInt(e.target.value) })}
-                                                                            className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
-                                                                        >
-                                                                            {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                                                                        </select>
-                                                                    </div>
-                                                                    <ArrowUpDown size={14} className="text-slate-300 mt-3" />
-                                                                    <div className="flex-1">
-                                                                        <label className="text-[8px] font-bold text-slate-400 uppercase">To</label>
-                                                                        <select
-                                                                            value={msTo}
-                                                                            onChange={(e) => updateRoom(selectedRoom!.id, { msToFloor: parseInt(e.target.value) })}
-                                                                            className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
-                                                                        >
-                                                                            {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                                                                        </select>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })()}
-
-                                                    {/* Vertical Connection sub-panel */}
-                                                    {(selectedRoom?.spaceType === 'verticalConnection') && (() => {
-                                                        const vcType = selectedRoom.vcType || 'stair';
-                                                        const vcFrom = selectedRoom.vcFromFloor ?? Math.min(...floors.map(f => f.id));
-                                                        const vcTo = selectedRoom.vcToFloor ?? Math.max(...floors.map(f => f.id));
-
-                                                        return (
-                                                            <div className="mt-3 space-y-3">
-                                                                {/* VC Type selector */}
-                                                                <div className="bg-slate-50/50 dark:bg-white/5 rounded-xl p-3 border border-slate-100/30 dark:border-dark-border/30 space-y-3">
-                                                                    <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Connection Type</span>
-                                                                    <div className="flex bg-white dark:bg-dark-surface p-1 rounded-lg gap-0.5 border border-slate-100/30 dark:border-dark-border/30">
-                                                                        {(['stair', 'elevator', 'ramp'] as VCType[]).map(t => (
-                                                                            <button
-                                                                                key={t}
-                                                                                onClick={() => updateRoom(selectedRoom!.id, {
-                                                                                    vcType: t,
-                                                                                })}
-                                                                                className={`flex-1 py-1.5 px-1 rounded-md text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all ${
-                                                                                    vcType === t
-                                                                                        ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 shadow-sm'
-                                                                                        : 'text-slate-400 hover:text-slate-600 dark:hover:text-gray-300'
-                                                                                }`}
-                                                                            >
-                                                                                <div
-                                                                                    className="w-3.5 h-3.5 flex items-center justify-center shrink-0"
-                                                                                    dangerouslySetInnerHTML={{
-                                                                                        __html: (t === 'stair' ? stairSvgRaw : t === 'elevator' ? elevatorSvgRaw : rampSvgRaw)
-                                                                                            .replaceAll('stroke:black', 'stroke:currentColor')
-                                                                                            .replaceAll('stroke:#000000', 'stroke:currentColor')
-                                                                                            .replaceAll('fill:black', 'fill:currentColor')
-                                                                                    }}
-                                                                                />
-                                                                                <span>{t === 'stair' ? 'Stair' : t === 'elevator' ? 'Elevator' : 'Ramp'}</span>
-                                                                            </button>
-                                                                        ))}
-
-                                                                    </div>
-
-                                                                    {/* Floor Range */}
-                                                                    <div>
-                                                                        <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Floor Range</span>
-                                                                        <div className="flex gap-2 items-center">
-                                                                            <div className="flex-1">
-                                                                                <label className="text-[8px] font-bold text-slate-400 uppercase">From</label>
-                                                                                <select
-                                                                                    value={vcFrom}
-                                                                                    onChange={(e) => updateRoom(selectedRoom!.id, { vcFromFloor: parseInt(e.target.value) })}
-                                                                                    className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
-                                                                                >
-                                                                                    {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                                                                                </select>
-                                                                            </div>
-                                                                            <ArrowUpDown size={14} className="text-slate-300 mt-3" />
-                                                                            <div className="flex-1">
-                                                                                <label className="text-[8px] font-bold text-slate-400 uppercase">To</label>
-                                                                                <select
-                                                                                    value={vcTo}
-                                                                                    onChange={(e) => updateRoom(selectedRoom!.id, { vcToFloor: parseInt(e.target.value) })}
-                                                                                    className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200/50 dark:border-dark-border/30 rounded-lg p-1.5 focus:outline-none focus:border-orange-500"
-                                                                                >
-                                                                                    {floors.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                                                                                </select>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })()}
-                                                </div>
-                                            )}
-
-                                            {/* Link Logic Button */}
-                                            {!isMultiSelection && (
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => toggleLink(selectedRoom!.id)}
-                                                        className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border flex items-center justify-center gap-2 ${connectionSourceId === selectedRoom!.id ? 'bg-yellow-50 border-yellow-300 text-yellow-600 dark:bg-yellow-900/20 dark:border-yellow-700 dark:text-yellow-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-dark-border text-slate-500 dark:text-gray-400 hover:border-orange-500 hover:text-orange-600'}`}
-                                                    >
-                                                        <Link size={14} className={connectionSourceId === selectedRoom!.id ? 'fill-current' : ''} /> {connectionSourceId === selectedRoom!.id ? 'Cancel' : 'Link'}
-                                                    </button>
-
-                                                    <div className="flex items-center bg-slate-100 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-dark-border p-1 gap-1">
-                                                        <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest px-2">Text</span>
-                                                        <button
-                                                            onClick={() => updateRoom(selectedRoom!.id, { isTextUnlocked: !selectedRoom!.isTextUnlocked })}
-                                                            className={`w-8 h-8 rounded-lg flex items-center justify-center ${selectedRoom!.isTextUnlocked ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 dark:text-gray-400 dark:hover:text-gray-200'}`}
-                                                            title={selectedRoom!.isTextUnlocked ? "Lock Text Position" : "Unlock Text to Move"}
-                                                        >
-                                                            {selectedRoom!.isTextUnlocked ? <Unlock size={14} /> : <Lock size={14} />}
-                                                        </button>
-                                                        <button
-                                                            onClick={() => updateRoom(selectedRoom!.id, { textPos: undefined })}
-                                                            disabled={!selectedRoom!.textPos}
-                                                            className={`w-8 h-8 rounded-lg flex items-center justify-center ${!selectedRoom!.textPos ? 'text-slate-300 dark:text-slate-600 cursor-not-allowed' : 'text-slate-400 hover:text-orange-600 hover:bg-white dark:hover:bg-dark-surface hover:shadow-sm dark:text-gray-400'}`}
-                                                            title="Reset Text Position"
-                                                        >
-                                                            <RotateCcw size={14} />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {!isMultiSelection && (
-                                                <div className="space-y-3">
-
-                                                    {/* Linked Spaces List */}
-                                                    {(() => {
-                                                        const linkedConnections = connections.filter(c => c.fromId === selectedRoom!.id || c.toId === selectedRoom!.id);
-                                                        if (linkedConnections.length > 0) {
-                                                            return (
-                                                                <div className="glass-card rounded-xl p-3">
-                                                                    <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-2">Linked Spaces</span>
-                                                                    <div className="space-y-1.5">
-                                                                        {linkedConnections.map(conn => {
-                                                                            const otherId = conn.fromId === selectedRoom!.id ? conn.toId : conn.fromId;
-                                                                            const otherRoom = rooms.find(r => r.id === otherId);
-                                                                            if (!otherRoom) return null;
-                                                                            return (
-                                                                                <div key={conn.id} className="flex items-center justify-between text-xs group">
-                                                                                    <span className="font-bold text-slate-600 dark:text-gray-300 flex items-center gap-2">
-                                                                                        <div className={`w-2 h-2 rounded-full ${zoneColors[otherRoom.zone]?.bg || 'bg-slate-300'}`} />
-                                                                                        {otherRoom.name}
-                                                                                    </span>
-                                                                                    <button
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation();
-                                                                                            setConnections(prev => prev.filter(c => c.id !== conn.id));
-                                                                                        }}
-                                                                                        className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 p-1"
-                                                                                        title="Unlink"
-                                                                                    >
-                                                                                        <X size={12} />
-                                                                                    </button>
-                                                                                </div>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })()}
-                                                </div>
-                                            )}
-
-                                            {!isMultiSelection ? (
-                                                <>
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="p-4 glass-card rounded-2xl">
-                                                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Area</span>
-                                                            <div className="flex items-baseline gap-1">
-                                                                <input
-                                                                    type="number"
-                                                                    className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200 bg-transparent border-b border-transparent focus:border-orange-500 outline-none w-full"
-                                                                    value={appSettings.unitSystem === 'imperial' ? Number((selectedRoom!.area * 10.7639).toFixed(1)) : Number(selectedRoom!.area.toFixed(2))}
-                                                                    onChange={(e) => {
-                                                                        const val = parseFloat(e.target.value);
-                                                                        if (!isNaN(val)) updateRoom(selectedRoom!.id, { area: appSettings.unitSystem === 'imperial' ? val / 10.7639 : val });
-                                                                    }} />
-                                                                <small className="text-xs opacity-60 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</small>
-                                                            </div>
-                                                        </div>
-                                                        <div className="p-4 glass-card rounded-2xl flex justify-between items-center">
-                                                            <div>
-                                                                <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
-                                                                <span className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200">{floors.find(f => f.id === selectedRoom!.floor)?.label || 'N/A'}</span>
-                                                            </div>
-                                                            <div className="flex flex-col gap-1">
-                                                                <button
-                                                                    onClick={() => {
-                                                                        const currentIdx = floors.findIndex(f => f.id === selectedRoom!.floor);
-                                                                        if (currentIdx < floors.length - 1) {
-                                                                            updateRoom(selectedRoom!.id, { floor: floors[currentIdx + 1].id });
-                                                                        }
-                                                                    }}
-                                                                    disabled={floors.findIndex(f => f.id === selectedRoom!.floor) >= floors.length - 1}
-                                                                    className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30"
-                                                                    title="Move Up"
-                                                                >
-                                                                    <ChevronUp size={14} />
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        const currentIdx = floors.findIndex(f => f.id === selectedRoom!.floor);
-                                                                        if (currentIdx > 0) {
-                                                                            updateRoom(selectedRoom!.id, { floor: floors[currentIdx - 1].id });
-                                                                        }
-                                                                    }}
-                                                                    disabled={floors.findIndex(f => f.id === selectedRoom!.floor) <= 0}
-                                                                    className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30"
-                                                                    title="Move Down"
-                                                                >
-                                                                    <ChevronDown size={14} />
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Architectural Hatch Styling */}
-                                                    <div className="space-y-3">
-                                                        <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Architectural Hatch</label>
-                                                        <div className="space-y-3 glass-card rounded-2xl p-4">
-                                                            {/* Hatch Pattern Selector */}
-                                                            <div>
-                                                                <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Pattern</span>
-                                                                <select
-                                                                    value={selectedRoom?.style?.hatchPattern || 'none'}
-                                                                    onChange={(e) => {
-                                                                        const pattern = e.target.value as any;
-                                                                        const style = { ...selectedRoom?.style, hatchPattern: pattern };
-                                                                        updateRoom(selectedRoom!.id, { style });
-                                                                    }}
-                                                                    className="w-full text-xs font-bold text-slate-700 dark:text-gray-200 bg-white dark:bg-dark-surface border border-slate-200 dark:border-dark-border rounded-lg p-2 focus:outline-none focus:border-orange-500"
-                                                                >
-                                                                    <option value="none">None</option>
-                                                                    <option value="diagonal">Diagonal Lines</option>
-                                                                    <option value="cross">Cross Hatch</option>
-                                                                    <option value="dots">Stipple Dots</option>
-                                                                    <option value="concrete">Concrete</option>
-                                                                    <option value="brick">Brick</option>
-                                                                </select>
-                                                            </div>
-
-                                                            {selectedRoom?.style?.hatchPattern && selectedRoom?.style?.hatchPattern !== 'none' && (
-                                                                <>
-                                                                    {/* Hatch Scale */}
-                                                                    <div>
-                                                                        <div className="flex justify-between items-center mb-1">
-                                                                            <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Scale</span>
-                                                                            <span className="text-[10px] font-bold text-slate-700 dark:text-gray-300">{(selectedRoom?.style?.hatchScale ?? 1.0).toFixed(1)}x</span>
-                                                                        </div>
-                                                                        <input
-                                                                            type="range"
-                                                                            min="0.5"
-                                                                            max="3.0"
-                                                                            step="0.1"
-                                                                            value={selectedRoom?.style?.hatchScale ?? 1.0}
-                                                                            onChange={(e) => {
-                                                                                const scale = parseFloat(e.target.value);
-                                                                                const style = { ...selectedRoom?.style, hatchScale: scale };
-                                                                                updateRoom(selectedRoom!.id, { style });
-                                                                            }}
-                                                                            className="w-full accent-orange-500 text-orange-600 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none h-1 cursor-pointer"
-                                                                        />
-                                                                    </div>
-
-                                                                    {/* Hatch Color */}
-                                                                    <div>
-                                                                        <div className="flex justify-between items-center mb-1">
-                                                                            <span className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Hatch Color</span>
-                                                                            <span className="text-[10px] font-mono text-slate-500">{selectedRoom?.style?.hatchColor || 'Auto'}</span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <input
-                                                                                type="color"
-                                                                                value={selectedRoom?.style?.hatchColor || '#cbd5e1'}
-                                                                                onChange={(e) => {
-                                                                                    const style = { ...selectedRoom?.style, hatchColor: e.target.value };
-                                                                                    updateRoom(selectedRoom!.id, { style });
-                                                                                }}
-                                                                                className="w-8 h-8 rounded border border-slate-200 dark:border-dark-border cursor-pointer bg-transparent"
-                                                                            />
-                                                                            <button
-                                                                                onClick={() => {
-                                                                                    const style = { ...selectedRoom?.style };
-                                                                                    delete style.hatchColor;
-                                                                                    updateRoom(selectedRoom!.id, { style });
-                                                                                }}
-                                                                                className="px-2 py-1 text-[9px] font-black uppercase tracking-widest border border-slate-200 dark:border-dark-border rounded text-slate-500 hover:text-orange-600 hover:border-orange-500 transition-colors"
-                                                                            >
-                                                                                Use Auto
-                                                                            </button>
-                                                                        </div>
-                                                                    </div>
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-3 block">Zone Category</label>
-                                                        <div className="grid grid-cols-2 gap-2">
-                                                            {Object.keys(zoneColors).map(z => (
-                                                                <button
-                                                                    key={z}
-                                                                    onClick={() => updateRoom(selectedRoom!.id, { zone: z })}
-                                                                    className={`px-3 py-2 rounded-lg text-[10px] font-bold border ${selectedRoom!.zone === z ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white dark:bg-white/5 border-slate-100 dark:border-white/10 text-slate-500 dark:text-gray-400 hover:border-slate-300 dark:hover:border-white/20'}`}
-                                                                >
-                                                                    {z}
-                                                                </button>
-                                                            ))}
-                                                            <button
-                                                                onClick={() => {
-                                                                    const name = prompt("Enter new zone name:");
-                                                                    if (name) handleAddZone(name);
-                                                                }}
-                                                                className="px-3 py-2 rounded-lg text-[10px] font-bold border border-dashed border-slate-300 dark:border-white/20 text-slate-400 hover:text-orange-600 hover:border-orange-400 flex items-center justify-center gap-1"
-                                                            >
-                                                                <Plus size={12} /> New
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </>
-                                            ) : (
-                                                // Multi-selection Summary
-                                                <div className="space-y-4">
-                                                    <div className="p-5 glass-card rounded-2xl">
-                                                        <div className="flex justify-between items-center mb-2">
-                                                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Area</span>
-                                                        </div>
-                                                        <div className="text-2xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                                            {appSettings.unitSystem === 'imperial' ? Number((multiSelectionStats?.totalArea * 10.7639).toFixed(1)) : Number(multiSelectionStats?.totalArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="p-4 glass-card rounded-2xl flex justify-between items-center">
-                                                        <div>
-                                                            <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-1">Floor</span>
-                                                            <span className="text-lg font-sans font-bold text-slate-700 dark:text-gray-200">
-                                                                {(() => {
-                                                                    if (selectedRoomsList.length === 0) return 'N/A';
-                                                                    const firstFloor = selectedRoomsList[0].floor;
-                                                                    const allSame = selectedRoomsList.every(r => r.floor === firstFloor);
-                                                                    return allSame ? (floors.find(f => f.id === firstFloor)?.label || 'N/A') : 'Mixed';
-                                                                })()}
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex flex-col gap-1">
-                                                            <button
-                                                                onClick={() => handleMoveSelectionFloors(1)}
-                                                                disabled={selectedRoomsList.every(r => floors.findIndex(f => f.id === r.floor) >= floors.length - 1)}
-                                                                className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30"
-                                                                title="Move Selection Up"
-                                                            >
-                                                                <ChevronUp size={14} />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleMoveSelectionFloors(-1)}
-                                                                disabled={selectedRoomsList.every(r => floors.findIndex(f => f.id === r.floor) <= 0)}
-                                                                className="p-1 hover:bg-slate-200 dark:hover:bg-white/10 rounded text-slate-400 hover:text-orange-600 disabled:opacity-30"
-                                                                title="Move Selection Down"
-                                                            >
-                                                                <ChevronDown size={14} />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                    <div className="p-4 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl">
-                                                        <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase block mb-2">Breakdown</span>
-                                                        <p className="text-xs font-medium text-slate-600 dark:text-gray-300">{multiSelectionStats?.breakdown}</p>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            <div className="pt-6 border-t border-slate-100 dark:border-dark-border mt-auto">
-                                                <button onClick={() => {
-                                                    if (isMultiSelection) {
-                                                        selectedRoomIds.forEach(id => deleteRoom(id));
-                                                        setSelectedRoomIds(new Set());
-                                                    } else {
-                                                        deleteRoom(selectedRoom!.id);
-                                                    }
-                                                }} className="w-full py-3 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white flex items-center justify-center gap-2">
-                                                    <Trash2 size={16} /> Delete Space
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <SpacePropertiesPanel
+                                            rooms={rooms}
+                                            floors={floors}
+                                            connections={connections}
+                                            setConnections={setConnections}
+                                            zoneColors={zoneColors}
+                                            appSettings={appSettings}
+                                            selectedRoom={selectedRoom}
+                                            selectedRoomIds={selectedRoomIds}
+                                            setSelectedRoomIds={setSelectedRoomIds}
+                                            selectedRoomsList={selectedRoomsList}
+                                            isMultiSelection={isMultiSelection}
+                                            multiSelectionStats={multiSelectionStats}
+                                            connectionSourceId={connectionSourceId}
+                                            updateRoom={updateRoomFromPanel}
+                                            deleteRoom={deleteRoom}
+                                            toggleLink={toggleLink}
+                                            handleAddZone={handleAddZone}
+                                            handleConvertShape={handleConvertShape}
+                                            handleMoveSelectionFloors={handleMoveSelectionFloors}
+                                        />
                                     ) : selectedZone ? (
-                                        <div className="space-y-6">
-                                            <div>
-                                                <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Zone Name</label>
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-orange-600 bg-transparent border-b border-dashed border-slate-300 dark:border-dark-border focus:border-orange-500 pb-1"
-                                                        value={selectedZone}
-                                                        onChange={(e) => renameZone(selectedZone, e.target.value)}
-                                                    />
-                                                    <div className={`w-4 h-4 rounded-full ${zoneColors[selectedZone]?.bg || 'bg-slate-200'}`} />
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Zone Color</label>
-                                                <div className="flex flex-wrap gap-2 p-3 glass-card rounded-xl">
-                                                    {COLOR_PALETTE.map((style, i) => (
-                                                        <button
-                                                            key={i}
-                                                            onClick={() => {
-                                                                addToHistory();
-                                                                setZoneColors(prev => ({ ...prev, [selectedZone]: style }));
-                                                            }}
-                                                            className={`w-6 h-6 rounded-full ${style.bg} shadow-sm ring-2 ring-offset-2 ring-offset-white dark:ring-offset-dark-surface ${zoneColors[selectedZone]?.bg === style.bg ? 'ring-slate-900 dark:ring-white scale-110' : 'ring-transparent hover:scale-110 transition-transform'}`}
-                                                            title="Select Color"
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            <div className="p-5 glass-card rounded-2xl">
-                                                <div className="flex justify-between items-center mb-4">
-                                                    <span className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase">Total Stats</span>
-                                                    <span className="text-[10px] font-bold text-orange-600 bg-orange-500/10 px-2 py-1 rounded-md">{selectedZoneRooms.length} Spaces</span>
-                                                </div>
-                                                <div className="text-3xl font-sans font-bold text-slate-800 dark:text-gray-100 tracking-tight">
-                                                    {appSettings.unitSystem === 'imperial' ? Number((zoneArea * 10.7639).toFixed(1)) : Number(zoneArea.toFixed(2))} <span className="text-sm font-sans text-slate-400 dark:text-gray-500 font-bold">{appSettings.unitSystem === 'imperial' ? 'sq ft' : 'm²'}</span>
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-3 block flex justify-between">
-                                                    Included Spaces
-                                                </label>
-                                                <div className="space-y-2">
-                                                    {selectedZoneRooms.map(r => (
-                                                        <div key={r.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl hover:shadow-md hover:border-orange-300 dark:hover:border-orange-800 cursor-pointer group"
-                                                            onClick={() => setSelectedRoomIds(new Set([r.id]))}>
-                                                            <span className="text-sm font-bold text-slate-700 dark:text-gray-300 group-hover:text-orange-600">{r.name}</span>
-                                                            <span className="text-[10px] font-sans text-slate-400 dark:text-gray-500">{appSettings.unitSystem === 'imperial' ? `${Number((r.area * 10.7639).toFixed(1))} sq ft` : `${r.area} m²`}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <ZonePropertiesPanel
+                                            selectedZone={selectedZone}
+                                            selectedZoneRooms={selectedZoneRooms}
+                                            zoneArea={zoneArea}
+                                            zoneColors={zoneColors}
+                                            setZoneColors={setZoneColors}
+                                            colorPalette={COLOR_PALETTE}
+                                            appSettings={appSettings}
+                                            addToHistory={addToHistory}
+                                            renameZone={renameZone}
+                                            setSelectedRoomIds={setSelectedRoomIds}
+                                        />
                                     ) : (
                                         <div className="space-y-8 animate-in fade-in duration-500">
                                             {/* Floor Settings - Shown when nothing is selected */}

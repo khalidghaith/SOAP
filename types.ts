@@ -3,11 +3,12 @@ export interface Point {
   y: number;
 }
 
+// All optional: rooms without an override fall back to zone colors and app settings
 export interface RoomStyle {
-  fill: string;
-  stroke: string;
-  strokeWidth: number;
-  opacity: number;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  opacity?: number;
   cornerRadius?: number;
   strokeDasharray?: string;
   hatchPattern?: 'brick' | 'concrete' | 'dots' | 'diagonal' | 'cross' | 'none';
