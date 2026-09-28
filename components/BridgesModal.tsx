@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plug, Copy, Check, ChevronDown, ChevronRight, RefreshCw, Trash2, AlertTriangle, ShieldCheck, Cloud, Laptop, KeyRound } from 'lucide-react';
+import { X, Plug, Copy, Check, ChevronDown, ChevronRight, RefreshCw, Trash2, AlertTriangle, ShieldCheck, Cloud, Laptop, KeyRound, Circle, CheckCircle2, ExternalLink, Lightbulb } from 'lucide-react';
 import { bridge, useBridge, bridgeEndpoints, CLIENT_LABELS, BridgeStatus } from '../services/bridgeClient';
 import type { BridgeClientKind } from '../utils/bridgeCommands';
 import { confirmDialog } from './Notifications';
@@ -56,6 +56,21 @@ export const BridgesModal: React.FC<BridgesModalProps> = ({ onClose }) => {
     const isRelay = settings.connection === 'relay';
     const link = endpoints?.mcp || '';
     const shown = link && !showLink && isRelay ? link.replace(settings.room, `${settings.room.slice(0, 4)}••••••••`) : link;
+
+    // Remember that the current link was copied (for the checklist)
+    const COPIED_KEY = 'SOAP_AI_LINK_COPIED';
+    const [copiedRoom, setCopiedRoom] = useState(() => { try { return localStorage.getItem(COPIED_KEY) || ''; } catch { return ''; } });
+    const copyLink = () => {
+        copy(link);
+        setCopiedRoom(settings.room);
+        try { localStorage.setItem(COPIED_KEY, settings.room); } catch { /* storage unavailable */ }
+    };
+    const needsRelay = isRelay && !endpoints;
+    const steps = [
+        { done: settings.enabled && status === 'connected', label: 'Turn on AI access', hint: settings.enabled && status !== 'connected' ? 'Connecting…' : 'Use the button here or the switch below.' },
+        { done: copiedRoom === settings.room && !!link, label: 'Copy your AI link', hint: 'It works like a password — keep it private.' },
+        { done: sessions.length > 0, label: 'Add the link to your AI app', hint: sessions.length ? `Connected: ${[...new Set(sessions.map(x => x.name))].join(', ')}` : 'Pick your app for the exact steps.' },
+    ];
 
     const resetLink = async () => {
         const ok = await confirmDialog({
@@ -118,6 +133,61 @@ export const BridgesModal: React.FC<BridgesModalProps> = ({ onClose }) => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5 text-[11px] text-slate-600 dark:text-gray-300">
+                    {/* Guide */}
+                    {needsRelay ? (
+                        <div className="rounded-2xl border border-orange-200 dark:border-orange-500/30 bg-orange-50/60 dark:bg-orange-500/10 p-4 space-y-3">
+                            <h3 className="text-xs font-black text-slate-800 dark:text-gray-100 uppercase tracking-wide">One-time setup: the relay</h3>
+                            <p>Claude, ChatGPT and Gemini run on their own servers, so they need an internet address to reach SOAP in your browser. A small, free <b>relay</b> on Cloudflare gives them one. It is set up once for this site; after that, everyone just copies their own AI link.</p>
+                            <p className="font-semibold">Not the owner of this site? Ask the owner for the relay address and paste it into <i>Relay address</i> below.</p>
+                            <details className="rounded-xl bg-white/70 dark:bg-black/20 border border-orange-100 dark:border-white/10 p-3" open>
+                                <summary className="cursor-pointer font-bold text-slate-800 dark:text-gray-100">Site owner: set up the relay (about 5 minutes)</summary>
+                                <ol className="list-decimal pl-4 mt-2 space-y-2">
+                                    <li>Create a free Cloudflare account: <a className="text-orange-600 hover:underline inline-flex items-center gap-0.5" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noreferrer">dash.cloudflare.com/sign-up <ExternalLink size={10} /></a></li>
+                                    <li>Install Node.js (the LTS version) if you do not have it: <a className="text-orange-600 hover:underline inline-flex items-center gap-0.5" href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org <ExternalLink size={10} /></a></li>
+                                    <li>Open a terminal in your SOAP code folder and run these one at a time. The login step opens your browser: sign in to Cloudflare and click <b>Allow</b>.
+                                        <CopyBlock text={'cd relay\nnpm install\nnpx wrangler login\nnpx wrangler deploy'} />
+                                    </li>
+                                    <li>The last command prints an address ending in <code>.workers.dev</code>. Paste it into <b>Relay address</b> below.</li>
+                                    <li>So everyone gets it automatically: in Vercel, open the project → <b>Settings → Environment Variables</b>, add <code>VITE_SOAP_RELAY_URL</code> with that address (for Production and Preview), then redeploy.</li>
+                                </ol>
+                            </details>
+                        </div>
+                    ) : (
+                        <div className="rounded-2xl border border-slate-200/60 dark:border-white/10 p-4 space-y-2.5">
+                            <h3 className="text-xs font-black text-slate-800 dark:text-gray-100 uppercase tracking-wide">Connect your AI in 3 steps</h3>
+                            <ol className="space-y-2">
+                                {steps.map((st, i) => (
+                                    <li key={i} className="flex items-start gap-2.5">
+                                        {st.done ? <CheckCircle2 size={16} className="text-emerald-500 shrink-0" /> : <Circle size={16} className="text-slate-300 dark:text-gray-600 shrink-0" />}
+                                        <div className="flex-1 min-w-0">
+                                            <div className={`font-bold ${st.done ? 'text-slate-400 line-through' : 'text-slate-800 dark:text-gray-100'}`}>{i + 1}. {st.label}</div>
+                                            <div className="text-[10px] text-slate-400">{st.hint}</div>
+                                        </div>
+                                        {i === 0 && !settings.enabled && (
+                                            <button onClick={() => bridge.updateSettings({ enabled: true })} className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold">Turn on</button>
+                                        )}
+                                        {i === 1 && (
+                                            <button disabled={!link} onClick={copyLink} className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-[10px] font-bold flex items-center gap-1">
+                                                {copied === link && link ? <Check size={11} /> : <Copy size={11} />} Copy link
+                                            </button>
+                                        )}
+                                        {i === 2 && (
+                                            <div className="flex gap-1">
+                                                {(['claude', 'chatgpt', 'gemini'] as BridgeClientKind[]).map(k => (
+                                                    <button key={k} onClick={() => setOpen(k)} className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${open === k ? 'border-orange-400 text-orange-600' : 'border-slate-200 dark:border-white/10 text-slate-500 hover:text-orange-600'}`}>{CLIENT_LABELS[k]}</button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </li>
+                                ))}
+                            </ol>
+                            <p className="flex items-start gap-1.5 text-[10px] text-slate-500 dark:text-gray-400 pt-1 border-t border-slate-100 dark:border-white/5">
+                                <Lightbulb size={12} className="shrink-0 mt-0.5 text-amber-500" />
+                                <span>Then just ask, e.g. <i>"Look at my SOAP project, arrange the ground floor following the planning rules, and show me the plan."</i> Keep this SOAP tab open while the AI works.</span>
+                            </p>
+                        </div>
+                    )}
+
                     {/* Master switch */}
                     <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-200/60 dark:border-white/10">
                         <div className="min-w-0">
@@ -175,7 +245,7 @@ export const BridgesModal: React.FC<BridgesModalProps> = ({ onClose }) => {
                                 <code className="flex-1 min-w-0 truncate text-[11px] bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-1.5 px-2 select-all" onClick={() => setShowLink(true)} title={isRelay ? 'Click to reveal' : undefined}>
                                     {shown || 'Enter the relay address first'}
                                 </code>
-                                <button disabled={!link} onClick={() => copy(link)} className="px-2.5 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-[10px] font-bold flex items-center gap-1">
+                                <button disabled={!link} onClick={copyLink} className="px-2.5 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-[10px] font-bold flex items-center gap-1">
                                     {copied === link && link ? <Check size={12} /> : <Copy size={12} />} Copy
                                 </button>
                                 {isRelay && (

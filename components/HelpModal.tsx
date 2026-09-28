@@ -84,12 +84,25 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
             <li><strong>Calibrated Scaling</strong>: Scale imported images to real-world dimensions.</li>
           </ul>
 
-          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>6. AI Assistance</h4>
+          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>6. Site Context</h4>
+          <ul>
+            <li><strong>Site mode</strong>: Click the <strong>Site</strong> icon (land plot) in the canvas toolbar to draw the property line, import it from Google Earth (KML/KMZ), set setbacks, height, coverage and FAR limits, and draw no-build zones.</li>
+            <li><strong>Site check</strong>: Spaces that break the site rules are outlined in red, with a live report in the Site panel.</li>
+          </ul>
+
+          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>7. AI Bridges (Claude, ChatGPT, Gemini)</h4>
+          <ul>
+            <li><strong>What it does</strong>: Lets an AI assistant read your project and place, edit or check spaces for you. Every AI change can be undone with Ctrl+Z.</li>
+            <li><strong>How to start</strong>: Click the <strong>plug</strong> icon in the top bar. The panel walks you through it: turn on AI access, copy your AI link, and add it to your AI app.</li>
+            <li><strong>First time on a site</strong>: the site owner sets up a free relay once; the panel shows the steps.</li>
+          </ul>
+
+          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>8. AI Assistance</h4>
           <ul>
             <li><strong>Generative Layout</strong>: Powered by Google Gemini, the app can suggest spatial arrangements based on your program data.</li>
           </ul>
 
-          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>7. Project Management</h4>
+          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>9. Project Management</h4>
           <ul>
             <li><strong>Save/Load</strong>: Save projects locally as <code>.json</code> files.</li>
             <li><strong>Export</strong>: PDF reports, PNG screenshots, and CSV program data.</li>
@@ -136,6 +149,12 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
 
           <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>Working with References</h4>
           <p>Click the <strong>Image Icon</strong> to enter Reference Mode. Upload an image and use the <strong>Ruler Icon</strong> to calibrate the scale by clicking two points and entering the real-world distance.</p>
+
+          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>Setting Up the Site</h4>
+          <p>Click the compass to set the location and true north. Then open <strong>Site</strong> mode and choose <strong>Google Earth (KML/KMZ)</strong> or draw the boundary with <strong>Boundary</strong>. Click the street edge and choose <strong>Align edge to street</strong>, then set setbacks and limits.</p>
+
+          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>Working with an AI Assistant</h4>
+          <p>Click the <strong>plug</strong> icon, follow the three steps, then ask your assistant something like <em>"Look at my SOAP project, arrange the ground floor following the planning rules, and show me the plan."</em> Keep the SOAP tab open while it works; the panel's Activity list shows everything it did.</p>
 
           <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>3D Visualization</h4>
           <p>Switch to <strong>Volumes</strong> view to see the massing. Adjust floor heights in the Floor Settings to change extrusion heights.</p>
