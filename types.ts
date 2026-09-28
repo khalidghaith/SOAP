@@ -254,6 +254,7 @@ export interface ReferenceImage {
   opacity: number;
   isLocked: boolean;
   floor: number;
+  isSiteImagery?: boolean; // satellite underlay placed from the site's coordinates; moves with the site
 }
 
 export interface ReferenceScaleState {
@@ -264,9 +265,31 @@ export interface ReferenceScaleState {
 
 export type ZoningTypology = 'residential' | 'commercial' | 'medical' | 'educational';
 
+// Areas inside the site where building is not allowed (easements, rights of way, protected trees...)
+export interface SiteZone {
+  id: string;
+  name: string;
+  points: Point[]; // world meters
+}
+
+export interface SiteConstraints {
+  defaultSetback: number;             // meters, applied to every boundary edge without an override
+  edgeSetbacks?: (number | null)[];   // per boundary edge (edge i runs from vertex i to i+1); null = default
+  maxHeight?: number;                 // meters above ground floor level
+  maxCoverage?: number;               // percent of site area
+  maxFAR?: number;                    // gross floor area / site area
+}
+
 export interface SiteProperties {
   locationName: string;
   latitude: number;
   longitude: number;
   northAngle: number;
+  // Site geometry, in world meters (the canvas stores rooms in pixels, see PIXELS_PER_METER)
+  boundary?: Point[];
+  zones?: SiteZone[];
+  constraints?: SiteConstraints;
+  // Links the plan to the globe: this lat/long sits at world point (x, y). Set by KML import.
+  geoAnchor?: { lat: number; lon: number; x: number; y: number };
+  showSite?: boolean; // default true
 }

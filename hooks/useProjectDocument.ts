@@ -39,7 +39,11 @@ interface HistorySnapshot {
     annotations: Annotation[];
     referenceImages: ReferenceImage[];
     guides: CanvasGuide[];
+    // Site geometry and north angle are undoable (rotating the site turns north with it); the location is a setting
+    site: SiteGeometry;
 }
+
+type SiteGeometry = Pick<SiteProperties, 'boundary' | 'zones' | 'constraints' | 'geoAnchor' | 'northAngle'>;
 
 const HISTORY_LIMIT = 50;
 
@@ -106,7 +110,10 @@ export const useProjectDocument = () => {
     const [history, setHistory] = useState<HistorySnapshot[]>([]);
     const [future, setFuture] = useState<HistorySnapshot[]>([]);
 
-    const snapshot = (): HistorySnapshot => ({ rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides });
+    const snapshot = (): HistorySnapshot => ({
+        rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides,
+        site: { boundary: siteProperties.boundary, zones: siteProperties.zones, constraints: siteProperties.constraints, geoAnchor: siteProperties.geoAnchor, northAngle: siteProperties.northAngle },
+    });
 
     const restore = (s: HistorySnapshot) => {
         setRooms(s.rooms);
@@ -117,6 +124,7 @@ export const useProjectDocument = () => {
         setAnnotations(s.annotations || []);
         setReferenceImages(s.referenceImages || []);
         setGuides(s.guides || []);
+        if (s.site) setSiteProperties(prev => ({ ...prev, ...s.site }));
     };
 
     const addToHistory = useCallback(() => {
@@ -127,7 +135,7 @@ export const useProjectDocument = () => {
         });
         setFuture([]);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
+    }, [rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides, siteProperties]);
 
     const undo = useCallback(() => {
         if (history.length === 0) return;
@@ -135,7 +143,7 @@ export const useProjectDocument = () => {
         restore(history[history.length - 1]);
         setHistory(history.slice(0, -1));
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [history, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
+    }, [history, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides, siteProperties]);
 
     const redo = useCallback(() => {
         if (future.length === 0) return;
@@ -143,7 +151,7 @@ export const useProjectDocument = () => {
         restore(future[0]);
         setFuture(future.slice(1));
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [future, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides]);
+    }, [future, rooms, connections, floors, zoneColors, projectName, annotations, referenceImages, guides, siteProperties]);
 
     // --- Whole-project operations ---
 
@@ -161,7 +169,8 @@ export const useProjectDocument = () => {
         setGuides(data.guides ?? []);
         if (data.zoneColors) setZoneColors(data.zoneColors);
         if (data.appSettings) setAppSettings(prev => ({ ...prev, ...data.appSettings }));
-        if (data.siteProperties) setSiteProperties(data.siteProperties);
+        // Older files have no site; don't carry the previous project's boundary over
+        setSiteProperties(prev => data.siteProperties ?? { ...prev, boundary: undefined, zones: [], constraints: undefined, geoAnchor: undefined });
     };
 
     /** Clears the project and its autosave. Not undoable. */
@@ -178,6 +187,7 @@ export const useProjectDocument = () => {
         setAnnotations([]);
         setReferenceImages([]);
         setGuides([]);
+        setSiteProperties(prev => ({ ...prev, boundary: undefined, zones: [], constraints: undefined, geoAnchor: undefined }));
     };
 
     return {

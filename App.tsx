@@ -29,13 +29,16 @@ import {
     PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, Ruler, Copy,
     Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
     Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, Shapes,
-    TreePine, Building2, Home, ArrowUpDown
+    TreePine, Building2, Home, ArrowUpDown, LandPlot
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
 import { AnnotationLayer } from './components/AnnotationLayer';
 import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
+import { SiteLayer, SiteTool, SiteSelection } from './components/SiteLayer';
+import { SitePanel } from './components/SitePanel';
+import { analyzeSite, readGoogleEarthFile, shapeToBoundary, polygonCentroid, rotatePoint, roomWorldPolygon, worldToGeo, geoToWorld, imageryBox, fetchSiteImagery, IMAGERY_ATTRIBUTION, KmlShape } from './utils/site';
 import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
 import { Rulers, getRulerTickInterval } from './components/Rulers';
@@ -266,6 +269,11 @@ export default function App() {
     const [referenceScaleState, setReferenceScaleState] = useState<ReferenceScaleState | null>(null);
     const [selectedReferenceImageId, setSelectedReferenceImageId] = useState<string | null>(null);
     const [isGuidesMode, setIsGuidesMode] = useState(false);
+    const [isSiteMode, setIsSiteMode] = useState(false);
+    const [siteTool, setSiteTool] = useState<SiteTool>('select');
+    const [siteSelection, setSiteSelection] = useState<SiteSelection | null>(null);
+    const [fitRequest, setFitRequest] = useState(0);
+    const siteModalHistoryRef = useRef(false);
     const [selectedGuideId, setSelectedGuideId] = useState<string | null>(null);
     const [draggedGuideId, setDraggedGuideId] = useState<string | null>(null);
 
@@ -1125,7 +1133,10 @@ export default function App() {
             a.points && a.points.length > 0 // Ensure annotation has points
         );
 
-        if (currentFloorRooms.length === 0 && currentFloorAnnotations.length === 0) {
+        const siteBoundary = siteProperties.boundary && siteProperties.boundary.length >= 3 && (siteProperties.showSite !== false || isSiteMode)
+            ? siteProperties.boundary : [];
+
+        if (currentFloorRooms.length === 0 && currentFloorAnnotations.length === 0 && siteBoundary.length === 0) {
             setViewport({
                 scale: 1,
                 offset: getCenter()
@@ -1160,6 +1171,13 @@ export default function App() {
             });
         });
 
+        siteBoundary.forEach(p => {
+            minX = Math.min(minX, p.x * PIXELS_PER_METER);
+            minY = Math.min(minY, p.y * PIXELS_PER_METER);
+            maxX = Math.max(maxX, p.x * PIXELS_PER_METER);
+            maxY = Math.max(maxY, p.y * PIXELS_PER_METER);
+        });
+
         // If bounds are still infinite (e.g. empty points arrays), reset view
         if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
             setViewport({ scale: 1, offset: getCenter() });
@@ -1182,7 +1200,13 @@ export default function App() {
                 offset: { x: newOffsetX, y: newOffsetY }
             });
         }
-    }, [rooms, annotations, currentFloor]);
+    }, [rooms, annotations, currentFloor, siteProperties.boundary, siteProperties.showSite, isSiteMode]);
+
+    // Fit the view after a site import (runs once the new boundary is in state)
+    useEffect(() => {
+        if (fitRequest) handleZoomToFit();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fitRequest]);
 
     // Resize Observer for Canvas
     useEffect(() => {
@@ -1830,6 +1854,137 @@ export default function App() {
     const handleUpdateReferenceImage = useCallback((id: string, updates: Partial<ReferenceImage>) => {
         setReferenceImages(prev => prev.map(img => img.id === id ? { ...img, ...updates } : img));
     }, []);
+
+    // --- Site ---
+    const siteReport = useMemo(() => analyzeSite(siteProperties, rooms, floors, appSettings, PIXELS_PER_METER), [siteProperties, rooms, floors, appSettings]);
+
+    const updateSite = useCallback((updates: Partial<SiteProperties>) => {
+        setSiteProperties(prev => ({ ...prev, ...updates }));
+    }, [setSiteProperties]);
+
+    // Moves the boundary, zones, geographic anchor and satellite underlay together (meters)
+    const moveSite = useCallback((dx: number, dy: number) => {
+        const shift = (p: Point) => ({ x: p.x + dx, y: p.y + dy });
+        setSiteProperties(prev => ({
+            ...prev,
+            boundary: prev.boundary?.map(shift),
+            zones: prev.zones?.map(z => ({ ...z, points: z.points.map(shift) })),
+            geoAnchor: prev.geoAnchor && { ...prev.geoAnchor, x: prev.geoAnchor.x + dx, y: prev.geoAnchor.y + dy },
+        }));
+        setReferenceImages(prev => prev.map(img => img.isSiteImagery ? { ...img, x: img.x + dx * PIXELS_PER_METER, y: img.y + dy * PIXELS_PER_METER } : img));
+    }, [setSiteProperties, setReferenceImages]);
+
+    // Rotates the site about its centre (clockwise degrees). North turns with it, so the site stays true
+    // to the globe while the plan's axes follow the street. Placed spaces don't move.
+    const rotateSite = useCallback((deg: number) => {
+        const boundary = siteProperties.boundary;
+        if (!boundary || boundary.length < 3 || !deg) return;
+        const pivot = polygonCentroid(boundary);
+        const rot = (p: Point) => rotatePoint(p, pivot, deg);
+        addToHistory();
+        setSiteProperties(prev => ({
+            ...prev,
+            boundary: prev.boundary?.map(rot),
+            zones: prev.zones?.map(z => ({ ...z, points: z.points.map(rot) })),
+            geoAnchor: prev.geoAnchor && { ...prev.geoAnchor, ...rot(prev.geoAnchor) },
+            northAngle: Number((((((prev.northAngle || 0) + deg) % 360) + 360) % 360).toFixed(2)),
+        }));
+        const pivotPx = { x: pivot.x * PIXELS_PER_METER, y: pivot.y * PIXELS_PER_METER };
+        setReferenceImages(prev => prev.map(img => {
+            if (!img.isSiteImagery) return img;
+            const w = img.width * img.scale, h = img.height * img.scale;
+            const c = rotatePoint({ x: img.x + w / 2, y: img.y + h / 2 }, pivotPx, deg);
+            return { ...img, x: c.x - w / 2, y: c.y - h / 2, rotation: (img.rotation || 0) + deg };
+        }));
+    }, [siteProperties.boundary, addToHistory, setSiteProperties, setReferenceImages]);
+
+    const handleImportSiteFile = async (file: File): Promise<KmlShape[]> => {
+        try {
+            const shapes = await readGoogleEarthFile(file);
+            if (shapes.length === 0) {
+                notify({ kind: 'warning', title: 'No site outline found', message: 'The file has no polygons or closed paths. Draw the site as a polygon in Google Earth and export it again.' });
+            }
+            return shapes;
+        } catch (err) {
+            console.error('Google Earth import failed', err);
+            notify({ kind: 'error', title: 'Could not read the file', message: err instanceof Error ? err.message : 'Use a .kml or .kmz file exported from Google Earth.' });
+            return [];
+        }
+    };
+
+    const handleApplySiteShape = (shape: KmlShape) => {
+        // Centre the site on the spaces already placed on this floor, or on the origin
+        const placed = rooms.filter(r => r.isPlaced && r.floor === currentFloor);
+        const center = placed.length
+            ? polygonCentroid(placed.flatMap(r => roomWorldPolygon(r, PIXELS_PER_METER)))
+            : { x: 0, y: 0 };
+        const { boundary, anchor } = shapeToBoundary(shape, siteProperties.northAngle || 0, center);
+        addToHistory();
+        setSiteProperties(prev => ({
+            ...prev,
+            boundary,
+            geoAnchor: anchor,
+            latitude: Number(anchor.lat.toFixed(6)),
+            longitude: Number(anchor.lon.toFixed(6)),
+            locationName: shape.name || prev.locationName,
+            constraints: prev.constraints ? { ...prev.constraints, edgeSetbacks: [] } : prev.constraints,
+            showSite: true,
+        }));
+        setSiteSelection({ kind: 'boundary' });
+        setSiteTool('select');
+        setFitRequest(n => n + 1);
+        notify({ kind: 'success', title: 'Site imported', message: `${shape.name}: ${boundary.length} corners. Location and coordinates were updated.` });
+    };
+
+    const handleAddSiteImagery = async () => {
+        const northAngle = siteProperties.northAngle || 0;
+        const boundary = siteProperties.boundary && siteProperties.boundary.length >= 3 ? siteProperties.boundary : null;
+        // Without a KML anchor, assume the site's coordinates are at the middle of the boundary (or the origin)
+        const anchor = siteProperties.geoAnchor ?? {
+            lat: siteProperties.latitude, lon: siteProperties.longitude,
+            ...(boundary ? polygonCentroid(boundary) : { x: 0, y: 0 }),
+        };
+        if (!Number.isFinite(anchor.lat) || !Number.isFinite(anchor.lon) || (anchor.lat === 0 && anchor.lon === 0)) {
+            notify({ kind: 'warning', title: 'Set the site location first', message: 'Click the compass to search for the site, or import it from Google Earth.' });
+            return;
+        }
+        try {
+            const geoPts = boundary ? boundary.map(p => worldToGeo(p, anchor, northAngle)) : [{ lat: anchor.lat, lon: anchor.lon }];
+            const imagery = await fetchSiteImagery(imageryBox(geoPts, boundary ? 40 : 120));
+            const c = geoToWorld(imagery.center.lat, imagery.center.lon, anchor, northAngle);
+            const pxScale = imagery.metersPerPixel * PIXELS_PER_METER;
+            const image: ReferenceImage = {
+                id: `ref-site-${Date.now()}`,
+                url: imagery.dataUrl,
+                name: 'Satellite (Esri World Imagery)',
+                width: imagery.widthPx,
+                height: imagery.heightPx,
+                scale: pxScale,
+                x: c.x * PIXELS_PER_METER - (imagery.widthPx * pxScale) / 2,
+                y: c.y * PIXELS_PER_METER - (imagery.heightPx * pxScale) / 2,
+                rotation: northAngle,
+                opacity: 0.6,
+                isLocked: true,
+                floor: currentFloor,
+                isSiteImagery: true,
+            };
+            addToHistory();
+            // One underlay per floor: replace an earlier one
+            setReferenceImages(prev => [...prev.filter(img => !(img.isSiteImagery && img.floor === currentFloor)), image]);
+            if (!siteProperties.geoAnchor) updateSite({ geoAnchor: anchor });
+            setFitRequest(n => n + 1);
+            notify({ kind: 'success', title: 'Satellite underlay added', message: `Locked reference image on this floor. ${IMAGERY_ATTRIBUTION}.` });
+        } catch (err) {
+            console.error('Satellite imagery failed', err);
+            notify({ kind: 'error', title: 'Could not add satellite imagery', message: err instanceof Error ? err.message : 'Try again later.' });
+        }
+    };
+
+    const closeSiteMode = () => {
+        setIsSiteMode(false);
+        setSiteSelection(null);
+        setSiteTool('select');
+    };
 
     const handleDeleteReferenceImage = (id: string) => {
         addToHistory();
@@ -2647,11 +2802,11 @@ export default function App() {
                         onMouseMove={viewMode === 'VOLUMES' ? undefined : handleMouseMove}
                         onMouseUp={viewMode === 'VOLUMES' ? undefined : handleMouseUp}
                         onContextMenu={(e) => e.preventDefault()}
-                        onTouchStart={isSketchMode || isReferenceMode || isGuidesMode || viewMode === 'VOLUMES' ? undefined : handleTouchStart}
-                        onTouchMove={isSketchMode || isReferenceMode || isGuidesMode || viewMode === 'VOLUMES' ? undefined : handleTouchMove}
-                        onTouchEnd={isSketchMode || isReferenceMode || isGuidesMode || viewMode === 'VOLUMES' ? undefined : handleTouchEnd}
-                        onDragOver={viewMode === 'VOLUMES' || isSketchMode || isReferenceMode || isGuidesMode ? undefined : handleDragOver}
-                        onDrop={viewMode === 'VOLUMES' || isSketchMode || isReferenceMode || isGuidesMode ? undefined : handleDrop}
+                        onTouchStart={isSketchMode || isReferenceMode || isGuidesMode || isSiteMode || viewMode === 'VOLUMES' ? undefined : handleTouchStart}
+                        onTouchMove={isSketchMode || isReferenceMode || isGuidesMode || isSiteMode || viewMode === 'VOLUMES' ? undefined : handleTouchMove}
+                        onTouchEnd={isSketchMode || isReferenceMode || isGuidesMode || isSiteMode || viewMode === 'VOLUMES' ? undefined : handleTouchEnd}
+                        onDragOver={viewMode === 'VOLUMES' || isSketchMode || isReferenceMode || isGuidesMode || isSiteMode ? undefined : handleDragOver}
+                        onDrop={viewMode === 'VOLUMES' || isSketchMode || isReferenceMode || isGuidesMode || isSiteMode ? undefined : handleDrop}
                         style={{
                             touchAction: 'none',
                             cursor: viewMode === 'VOLUMES' ? 'default' : (isSketchMode ? 'crosshair' : (isPanning ? 'grabbing' : 'default'))
@@ -3016,13 +3171,48 @@ export default function App() {
                                             onDragStart={() => { setIsBubbleDragging(true); addToHistory(); }}
                                             isAnyDragging={isBubbleDragging}
                                             otherRooms={selectedRoomIds.has(room.id) ? [...visibleRooms.filter(r => r.id !== room.id), ...overlayRooms] : undefined}
-                                            isSketchMode={isSketchMode || isReferenceMode || isGuidesMode}
+                                            isSketchMode={isSketchMode || isReferenceMode || isGuidesMode || isSiteMode}
                                             darkMode={darkMode}
                                             guides={guides}
                                         />
                                     ));
                                 })()}
                             </div>
+
+                            {/* Site Layer - property line, setbacks, no-build zones and rule breaks, above the spaces */}
+                            {(isSiteMode || (siteProperties.showSite !== false && !!siteProperties.boundary)) && (
+                                <div
+                                    className="absolute inset-0 origin-top-left pointer-events-none"
+                                    style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, zIndex: isSiteMode ? 95 : undefined }}
+                                >
+                                    <SiteLayer
+                                        site={siteProperties}
+                                        rooms={rooms}
+                                        currentFloor={currentFloor}
+                                        violations={siteReport?.violations || []}
+                                        scale={scale}
+                                        pixelsPerMeter={PIXELS_PER_METER}
+                                        isSiteMode={isSiteMode}
+                                        tool={siteTool}
+                                        selection={siteSelection}
+                                        guides={guides}
+                                        snap={{
+                                            enabled: snapEnabled,
+                                            grid: appSettings.snapToGrid ? currentGridSizeMeters : 0,
+                                            objects: appSettings.snapToObjects !== false,
+                                            guides: appSettings.snapToGuides !== false,
+                                            tolerancePx: Math.max(6, appSettings.snapTolerance || 10),
+                                        }}
+                                        darkMode={darkMode}
+                                        toWorld={toWorld}
+                                        onSelect={setSiteSelection}
+                                        onToolChange={setSiteTool}
+                                        onInteractionStart={addToHistory}
+                                        onChange={updateSite}
+                                        onMoveSite={moveSite}
+                                    />
+                                </div>
+                            )}
 
                             {/* Annotation Layer - Above all spaces and zones */}
                             <div
@@ -3076,7 +3266,7 @@ export default function App() {
                             <div className="absolute bottom-12 right-6 flex items-center gap-4 pointer-events-none z-[150]">
                                 {/* Clickable Compass */}
                                 <button
-                                    onClick={() => setShowSitePropertiesModal(true)}
+                                    onClick={() => { siteModalHistoryRef.current = false; setShowSitePropertiesModal(true); }}
                                     onMouseDown={(e) => e.stopPropagation()}
                                     className="w-12 h-12 rounded-full glass-card hover:bg-slate-50 dark:hover:bg-white/10 flex items-center justify-center pointer-events-auto cursor-pointer shadow-lg transition-all duration-300 hover:scale-105 active:scale-95 group relative border border-slate-200/50 dark:border-white/10"
                                     title="Adjust Site Location & True North"
@@ -3329,6 +3519,7 @@ export default function App() {
                                                             const newValue = !isReferenceMode;
                                                             setIsReferenceMode(newValue);
                                                             if (newValue) {
+                                                                closeSiteMode();
                                                                 setIsSketchMode(false);
                                                                 setShowStylePanel(false);
                                                                 setShowSnapPanel(false);
@@ -3342,9 +3533,26 @@ export default function App() {
 
                                                     <button
                                                         onClick={() => {
+                                                            if (isSiteMode) { closeSiteMode(); return; }
+                                                            setIsSiteMode(true);
+                                                            setIsSketchMode(false);
+                                                            setIsReferenceMode(false);
+                                                            setIsGuidesMode(false);
+                                                            setShowStylePanel(false);
+                                                            setShowSnapPanel(false);
+                                                        }}
+                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isSiteMode ? 'bg-orange-500 text-white shadow-lg scale-105 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
+                                                        title="Site: boundary, setbacks & Google Earth import"
+                                                    >
+                                                        <LandPlot size={16} />
+                                                    </button>
+
+                                                    <button
+                                                        onClick={() => {
                                                             const newValue = !isGuidesMode;
                                                             setIsGuidesMode(newValue);
                                                             if (newValue) {
+                                                                closeSiteMode();
                                                                 setIsSketchMode(false);
                                                                 setIsReferenceMode(false);
                                                                 setShowStylePanel(false);
@@ -3363,6 +3571,7 @@ export default function App() {
                                                             const newValue = !isSketchMode;
                                                             setIsSketchMode(newValue);
                                                             if (newValue) {
+                                                                closeSiteMode();
                                                                 setIsReferenceMode(false);
                                                                 setShowStylePanel(false);
                                                                 setShowSnapPanel(false);
@@ -3471,6 +3680,36 @@ export default function App() {
                                             gridSizeIndex={gridSizeIndex}
                                             onGridSizeIndexChange={setGridSizeIndex}
                                             GRID_SIZES={GRID_SIZES}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Site Panel */}
+                                {viewMode === 'CANVAS' && isSiteMode && (
+                                    <div
+                                        className="absolute top-6 left-[78px] z-[190] export-exclude pointer-events-auto"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                    >
+                                        <SitePanel
+                                            site={siteProperties}
+                                            report={siteReport}
+                                            tool={siteTool}
+                                            selection={siteSelection}
+                                            onToolChange={setSiteTool}
+                                            onSelect={setSiteSelection}
+                                            onInteractionStart={addToHistory}
+                                            onChange={updateSite}
+                                            onImportFile={handleImportSiteFile}
+                                            onApplyShape={handleApplySiteShape}
+                                            onAddImagery={handleAddSiteImagery}
+                                            onRotate={rotateSite}
+                                            onSelectRoom={(id) => {
+                                                closeSiteMode();
+                                                const room = rooms.find(r => r.id === id);
+                                                if (room && room.floor !== currentFloor) setCurrentFloor(room.floor);
+                                                setSelectedRoomIds(new Set([id]));
+                                            }}
                                         />
                                     </div>
                                 )}
@@ -3904,7 +4143,10 @@ export default function App() {
                     showSitePropertiesModal && (
                         <SitePropertiesModal
                             properties={siteProperties}
-                            onUpdate={setSiteProperties}
+                            onUpdate={(next) => {
+                                if (!siteModalHistoryRef.current) { addToHistory(); siteModalHistoryRef.current = true; }
+                                setSiteProperties(next);
+                            }}
                             onClose={() => setShowSitePropertiesModal(false)}
                         />
                     )

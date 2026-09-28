@@ -50,10 +50,19 @@ SOAP is a web-based architectural programming and spatial layout tool. It allows
 - **Calibrated Scaling**: Scale imported images to real-world dimensions by defining a known distance between two points.
 - **Opacity Control**: Adjust transparency to trace over references.
 
-### 6. AI Assistance
+### 6. Site Context
+- **Google Earth Import**: Import the site outline from a `.kml` or `.kmz` file exported from Google Earth Pro or Google Earth Web. SOAP places it at true scale and orientation and updates the project's coordinates.
+- **Boundary Drawing**: Draw or edit the property line on the canvas (click to add corners, drag corners to reshape, double-click an edge to add a corner, drag the site to move it).
+- **Snapping**: While drawing or editing the boundary and zones, points snap to corners, midpoints and edges (of the site, zones and spaces), guides and their crossings, the grid, and 45°/square tracking from the last corner. Type a length and press Enter for an exact side; Shift locks the angle, Alt places a point freely. Uses the canvas Snapping settings.
+- **Align to Street**: Click the street edge and choose **Align edge to street** to rotate the site so that edge runs along the bottom of the plan, or rotate by any angle. True north, no-build zones and the satellite underlay rotate with it; placed spaces stay put.
+- **Constraints**: Setbacks for all edges or per edge, maximum height, site coverage and FAR, plus no-build zones for easements and rights of way.
+- **Site Check**: Live report of site area, buildable area, coverage, FAR and height, with spaces that break the rules outlined in red.
+- **Satellite Underlay**: Adds an aerial photo of the site as a locked, scaled reference image (Esri World Imagery).
+
+### 7. AI Assistance
 - **Generative Layout**: Powered by Google Gemini, the app can suggest spatial arrangements based on your program data and zoning (requires API Key).
 
-### 7. Project Management
+### 8. Project Management
 - **Save/Load**: Save projects locally as `.json` files.
 - **Autosave**: Work is automatically saved to browser local storage.
 - **Export**:
@@ -94,6 +103,13 @@ SOAP is a web-based architectural programming and spatial layout tool. It allows
 1. **Place Spaces**: Open the **Inventory** (left sidebar) and drag spaces onto the canvas.
 2. **Arrange**: Move and resize spaces. Use the **Magnet** tool in the top toolbar to help pack bubbles organically.
 3. **Refine**: Select a space to open the **Properties** panel (right sidebar). Here you can change dimensions, shape type (Rect/Poly/Bubble), or move it to a different floor.
+
+### Setting Up the Site
+1. In Google Earth, trace the site as a polygon and export it (Pro: right-click the polygon → **Save Place As…**; Web: project menu → **Export as KML file**).
+2. In SOAP, click the compass to set **True North** first, then click the **Site** icon in the top toolbar and choose **Google Earth (KML/KMZ)**. Or draw the boundary with **Boundary**.
+3. Click the street edge and choose **Align edge to street** so your spaces can follow the street grid.
+4. Click an edge to give it its own setback, fill in the height, coverage and FAR limits, and draw any **No-build** zones.
+5. Optional: **Satellite underlay** adds an aerial photo under the plan.
 
 ### Working with References
 1. Click the **Image Icon** in the top toolbar to enter Reference Mode.

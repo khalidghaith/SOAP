@@ -50,6 +50,12 @@ Treat the program's areas as targets, and movement through the building as the t
 - Areas within about ±10–15 % of the program. Larger deviations are acceptable only with a stated reason (e.g. keeping a WC at a usable 1.5 m width). Circulation may be smaller than programmed.
 - Stair size: a U-shaped stair for ~3.5–4 m floor-to-floor fits roughly 2.5–3 m × 3–4 m. Set `stairParams.config` to match the shape you drew.
 
+### Site
+
+- If the project has a site (`siteProperties.boundary`, in world **meters**, not pixels), every non-outdoor space must sit inside the boundary, above-ground spaces must also stay inside the setback line, and nothing (basements included) may overlap a no-build zone (`siteProperties.zones`).
+- Setbacks: `constraints.defaultSetback`, overridden per edge by `constraints.edgeSetbacks[i]` (edge i runs from boundary vertex i to i+1). Also respect `maxHeight` (m), `maxCoverage` (% of site area) and `maxFAR`; the app's Site panel reports all three.
+- Orient the plan to the site: entrance toward the street edge, living spaces toward the sun (use `northAngle`), service rooms toward the less valuable edges.
+
 ## Checker script
 
 `scripts/check_layout.mjs` checks a SOAP project file: overlaps, grid alignment, area deviations, access to every room, and whether each corridor end lands on something. Run it on the project JSON before applying:
@@ -58,7 +64,7 @@ Treat the program's areas as targets, and movement through the building as the t
 node .claude/skills/soap-space-planning/scripts/check_layout.mjs path/to/project.json
 ```
 
-It exits non-zero if there are errors. It identifies circulation by `zone === 'Circulation'` or names containing hall/corridor/landing/foyer/lobby, and subordinate rooms by names containing ensuite/en-suite/walk-in/closet/pantry — rename or set zones accordingly if it misclassifies something. It can also run in the browser: paste the file's `checkLayout` function and call it on the autosave (`JSON.parse(localStorage.getItem('SOAP_PROJECT_AUTOSAVE'))`).
+It exits non-zero if there are errors, including site errors (outside the boundary, inside a setback, in a no-build zone) when the project has a site boundary. It identifies circulation by `zone === 'Circulation'` or names containing hall/corridor/landing/foyer/lobby, and subordinate rooms by names containing ensuite/en-suite/walk-in/closet/pantry — rename or set zones accordingly if it misclassifies something. It can also run in the browser: paste the file's `checkLayout` function and call it on the autosave (`JSON.parse(localStorage.getItem('SOAP_PROJECT_AUTOSAVE'))`).
 
 ## Applying a layout in SOAP
 

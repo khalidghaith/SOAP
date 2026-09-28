@@ -44,7 +44,14 @@ export const parseProjectData = (raw: unknown): Partial<ProjectData> & { rooms: 
     if (Array.isArray(d.annotations)) out.annotations = d.annotations;
     if (Array.isArray(d.referenceImages)) out.referenceImages = d.referenceImages;
     if (isObj(d.floorOverlays)) out.floorOverlays = d.floorOverlays;
-    if (isObj(d.siteProperties)) out.siteProperties = d.siteProperties;
+    if (isObj(d.siteProperties)) {
+        // Drop malformed site geometry rather than failing to render it
+        const isPts = (v: unknown) => Array.isArray(v) && v.length >= 3 && v.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+        const site = { ...d.siteProperties };
+        if (site.boundary !== undefined && !isPts(site.boundary)) delete site.boundary;
+        if (site.zones !== undefined) site.zones = Array.isArray(site.zones) ? site.zones.filter((z: any) => z && isPts(z.points)) : [];
+        out.siteProperties = site;
+    }
     if (Array.isArray(d.guides)) out.guides = d.guides;
     return out;
 };

@@ -27,6 +27,20 @@ describe('project file round trip', () => {
         }
     });
 
+    it('keeps site geometry and drops malformed shapes', () => {
+        const square = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+        const site = {
+            locationName: 'X', latitude: 1, longitude: 2, northAngle: 0,
+            boundary: square, constraints: { defaultSetback: 3, maxFAR: 1.2 },
+            zones: [{ id: 'z1', name: 'Easement', points: square }, { id: 'bad', name: 'Bad', points: [{ x: 0 }] }],
+        };
+        const loaded = parseProjectData({ rooms: [], siteProperties: site });
+        expect(loaded.siteProperties?.boundary).toEqual(square);
+        expect(loaded.siteProperties?.constraints).toEqual({ defaultSetback: 3, maxFAR: 1.2 });
+        expect(loaded.siteProperties?.zones?.map(z => z.id)).toEqual(['z1']);
+        expect(parseProjectData({ rooms: [], siteProperties: { ...site, boundary: [{ x: 1, y: 'a' }] } }).siteProperties?.boundary).toBeUndefined();
+    });
+
     it('loads older files that lack newer fields', () => {
         const loaded = parseProjectData({ projectName: 'Old', rooms: [], floors: [{ id: 0, label: 'Ground' }] });
         expect(loaded.guides).toBeUndefined();

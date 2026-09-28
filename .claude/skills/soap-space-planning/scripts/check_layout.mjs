@@ -141,7 +141,95 @@ export function checkLayout(project, { grid = 0.5, tolerance = 0.15, deadEnd = 2
         }
     }
 
+    errors.push(...checkSite(project, rooms));
     return { errors, warnings };
+}
+
+// --- Site: boundary, setbacks and no-build zones (siteProperties, in world meters) ---
+// Mirrors utils/site.ts in the app. Basements may sit under setbacks; outdoor spaces are exempt.
+
+const signedArea = pts => pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + p.x * q.y - q.x * p.y; }, 0) / 2;
+const distSeg = (p, a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+};
+const inPoly = (p, poly, tol = 1e-4) => {
+    if (poly.some((a, i) => distSeg(p, a, poly[(i + 1) % poly.length]) <= tol)) return tol >= 0;
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const a = poly[i], b = poly[j];
+        if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+    }
+    return inside;
+};
+const cross = (a, b, c, d) => {
+    const o = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    const [d1, d2, d3, d4] = [o(c, d, a), o(c, d, b), o(a, b, c), o(a, b, d)];
+    return d1 * d2 < -EPS && d3 * d4 < -EPS;
+};
+const edgesCross = (A, B) => A.some((a, i) => B.some((b, j) => cross(a, A[(i + 1) % A.length], b, B[(j + 1) % B.length])));
+const inside = (inner, outer) => inner.every(p => inPoly(p, outer)) && !edgesCross(inner, outer)
+    && inner.every((p, i) => { const q = inner[(i + 1) % inner.length]; return inPoly({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, outer); });
+// Strictly inside: on-edge points don't count, so a room touching a zone's edge is fine
+const strictlyIn = (p, poly) => inPoly(p, poly, -1) && poly.every((a, i) => distSeg(p, a, poly[(i + 1) % poly.length]) > 1e-4);
+const centre = pts => ({ x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length });
+const overlaps = (A, B) => edgesCross(A, B) || A.some(p => strictlyIn(p, B)) || B.some(p => strictlyIn(p, A))
+    || strictlyIn(centre(A), B) || strictlyIn(centre(B), A);
+
+const inset = (pts, setbacks) => {
+    const sign = signedArea(pts) > 0 ? 1 : -1;
+    let lines = pts.map((p, i) => {
+        const q = pts[(i + 1) % pts.length], len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+        const d = { x: (q.x - p.x) / len, y: (q.y - p.y) / len }, s = setbacks[i] ?? 0;
+        return { p: { x: p.x - d.y * sign * s, y: p.y + d.x * sign * s }, d };
+    });
+    const meet = ls => ls.map((l2, i) => {
+        const l1 = ls[(i - 1 + ls.length) % ls.length], den = l1.d.x * l2.d.y - l1.d.y * l2.d.x;
+        if (Math.abs(den) < 1e-9) return l2.p;
+        const t = ((l2.p.x - l1.p.x) * l2.d.y - (l2.p.y - l1.p.y) * l2.d.x) / den;
+        return { x: l1.p.x + l1.d.x * t, y: l1.p.y + l1.d.y * t };
+    });
+    let out = meet(lines);
+    for (let k = 0; k < pts.length; k++) {
+        const rev = lines.map((l, i) => { const a = out[i], b = out[(i + 1) % out.length]; return (b.x - a.x) * l.d.x + (b.y - a.y) * l.d.y < -EPS; });
+        if (!rev.includes(true)) break;
+        lines = lines.filter((_, i) => !rev[i]);
+        if (lines.length < 3) return null;
+        out = meet(lines);
+    }
+    const a = signedArea(out);
+    return Math.sign(a) === Math.sign(signedArea(pts)) && Math.abs(a) > EPS && out.every(p => inPoly(p, pts, 1e-3)) ? out : null;
+};
+
+function checkSite(project, rooms) {
+    const site = project.siteProperties || {};
+    const boundary = site.boundary;
+    if (!Array.isArray(boundary) || boundary.length < 3) return [];
+    const c = site.constraints || {};
+    const setbacks = boundary.map((_, i) => typeof c.edgeSetbacks?.[i] === 'number' ? c.edgeSetbacks[i] : (c.defaultSetback ?? 0));
+    const buildable = setbacks.every(s => s === 0) ? boundary : inset(boundary, setbacks);
+    const errors = [];
+    if (!buildable) errors.push('site: the setbacks leave no buildable area');
+    for (const r of rooms) {
+        if (r.spaceType === 'outdoor') continue;
+        // Rect rooms rotate about their centre on the canvas; polygon/bubble rooms about their origin
+        const isPoly = r.polygon?.length >= 3 || r.shape === 'bubble';
+        const local = r.polygon?.length >= 3 ? r.polygon : [{ x: 0, y: 0 }, { x: r.width, y: 0 }, { x: r.width, y: r.height }, { x: 0, y: r.height }];
+        const piv = isPoly ? { x: 0, y: 0 } : { x: r.width / 2, y: r.height / 2 };
+        const rad = ((r.rotation || 0) * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+        const poly = local.map(p => {
+            const dx = p.x - piv.x, dy = p.y - piv.y;
+            return { x: (r.x + piv.x + dx * cos - dy * sin) / PX, y: (r.y + piv.y + dx * sin + dy * cos) / PX };
+        });
+        if (!inside(poly, boundary)) errors.push(`site: ${r.name} (floor ${r.floor}) is outside the site boundary`);
+        else if (r.floor >= 0 && buildable && !inside(poly, buildable)) errors.push(`site: ${r.name} (floor ${r.floor}) is inside the setback`);
+        else {
+            const zone = (site.zones || []).find(z => z.points?.length >= 3 && overlaps(poly, z.points));
+            if (zone) errors.push(`site: ${r.name} (floor ${r.floor}) is in ${zone.name}`);
+        }
+    }
+    return errors;
 }
 
 // CLI
