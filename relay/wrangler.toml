@@ -1,0 +1,17 @@
+# SOAP MCP relay — deploy with: npx wrangler deploy   (from this folder, after: npx wrangler login)
+name = "soap-relay"
+main = "src/worker.ts"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[vars]
+# Comma-separated origins allowed to connect a SOAP tab, e.g. "https://your-soap.vercel.app,http://localhost:3000".
+# Empty = any origin (the room secret still protects each link).
+ALLOWED_ORIGINS = ""

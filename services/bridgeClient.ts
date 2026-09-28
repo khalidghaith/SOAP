@@ -1,0 +1,200 @@
+import { useSyncExternalStore } from 'react';
+import type { BridgeClientKind } from '../utils/bridgeCommands';
+
+// Connects the SOAP tab to an MCP bridge and enforces the per-client switches. Two ways to connect:
+// - relay: the cloud relay (relay/), for the hosted app. AI apps use a personal link containing `room`.
+// - local: the dev server's built-in bridge (mcp/hub.ts), for `npm run dev`.
+
+export type BridgeConnection = 'relay' | 'local';
+
+export interface BridgeSettings {
+    enabled: boolean;
+    clients: Record<BridgeClientKind, boolean>;
+    connection: BridgeConnection;
+    relayUrl: string;  // e.g. https://soap-relay.you.workers.dev
+    room: string;      // secret part of the personal link
+}
+
+export interface BridgeSession { id: string; name: string; version: string; kind: BridgeClientKind }
+
+export interface BridgeLogEntry {
+    time: number;
+    client: string;
+    kind: BridgeClientKind;
+    tool: string;
+    ok: boolean;
+    message?: string;
+}
+
+export type BridgeStatus = 'off' | 'connecting' | 'connected' | 'unavailable';
+
+export interface BridgeSnapshot {
+    settings: BridgeSettings;
+    status: BridgeStatus;
+    sessions: BridgeSession[];
+    log: BridgeLogEntry[];
+    hub: { mode?: string } | null;
+}
+
+export type BridgeHandler = (tool: string, args: unknown, client: BridgeSession) => Promise<unknown> | unknown;
+
+const SETTINGS_KEY = 'SOAP_AI_BRIDGES';
+const LOG_LIMIT = 50;
+export const CLIENT_LABELS: Record<BridgeClientKind, string> = { claude: 'Claude', gemini: 'Gemini', chatgpt: 'ChatGPT', other: 'Other apps' };
+
+// Set when building the hosted app: VITE_SOAP_RELAY_URL=https://soap-relay.<account>.workers.dev
+const DEFAULT_RELAY = ((import.meta as any).env?.VITE_SOAP_RELAY_URL as string | undefined)?.replace(/\/+$/, '') || '';
+const isLocalhost = () => typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+
+/** A new unguessable link secret (192 bits, URL-safe). */
+export const newRoom = () => {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+const saveSettings = (settings: BridgeSettings) => {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* storage unavailable */ }
+};
+
+const loadSettings = (): BridgeSettings => {
+    const defaults: BridgeSettings = {
+        enabled: false,
+        clients: { claude: true, gemini: true, chatgpt: true, other: false },
+        // The hosted app uses the relay; a dev server without a relay configured uses its own bridge
+        connection: DEFAULT_RELAY || !isLocalhost() ? 'relay' : 'local',
+        relayUrl: DEFAULT_RELAY,
+        room: '',
+    };
+    let settings = defaults;
+    try {
+        const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+        if (saved && typeof saved === 'object') {
+            settings = {
+                ...defaults,
+                enabled: !!saved.enabled,
+                clients: { ...defaults.clients, ...saved.clients },
+                ...(saved.connection === 'relay' || saved.connection === 'local' ? { connection: saved.connection } : {}),
+                ...(typeof saved.relayUrl === 'string' && saved.relayUrl ? { relayUrl: saved.relayUrl } : {}),
+                ...(typeof saved.room === 'string' && /^[A-Za-z0-9_-]{32,128}$/.test(saved.room) ? { room: saved.room } : {}),
+            };
+        }
+    } catch { /* storage unavailable */ }
+    if (!settings.room) {
+        settings = { ...settings, room: newRoom() };
+        saveSettings(settings);
+    }
+    return settings;
+};
+
+/** Where the tab connects, and the address AI apps use. Null when the relay address isn't set. */
+export const bridgeEndpoints = (s: BridgeSettings): { ws: string; mcp: string } | null => {
+    if (s.connection === 'local') {
+        const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+        return { ws: `${wsProto}://${location.host}/soap-bridge`, mcp: `${location.origin}/mcp` };
+    }
+    const base = s.relayUrl.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(base)) return null;
+    return { ws: `${base.replace(/^http/, 'ws')}/bridge/${s.room}`, mcp: `${base}/mcp/${s.room}` };
+};
+
+let snapshot: BridgeSnapshot = { settings: loadSettings(), status: 'off', sessions: [], log: [], hub: null };
+const listeners = new Set<() => void>();
+const set = (patch: Partial<BridgeSnapshot>) => {
+    snapshot = { ...snapshot, ...patch };
+    listeners.forEach(l => l());
+};
+
+let socket: WebSocket | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let handler: BridgeHandler | null = null;
+// Calls run one at a time, so each sees the previous call's changes
+let queue: Promise<void> = Promise.resolve();
+
+const addLog = (entry: BridgeLogEntry) => set({ log: [entry, ...snapshot.log].slice(0, LOG_LIMIT) });
+
+const handleCall = async (msg: { id: string; tool: string; args: unknown; client: BridgeSession }) => {
+    const reply = (body: object) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: 'result', id: msg.id, ...body }));
+    const client = msg.client || { id: '', name: 'unknown', version: '', kind: 'other' as const };
+    const { settings } = snapshot;
+    const base = { time: Date.now(), client: client.name, kind: client.kind, tool: msg.tool };
+    if (!settings.enabled || !settings.clients[client.kind]) {
+        const error = `The ${CLIENT_LABELS[client.kind]} bridge is switched off in SOAP. Ask the user to turn it on (AI Bridges, in the SOAP toolbar).`;
+        addLog({ ...base, ok: false, message: 'Blocked: switched off' });
+        reply({ ok: false, error });
+        return;
+    }
+    if (!handler) { reply({ ok: false, error: 'SOAP is still loading.' }); return; }
+    try {
+        const result = await handler(msg.tool, msg.args, client);
+        // Let React commit the change before the next call reads the project
+        await new Promise(r => setTimeout(r, 0));
+        addLog({ ...base, ok: true });
+        reply({ ok: true, result });
+    } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        addLog({ ...base, ok: false, message: error });
+        reply({ ok: false, error });
+    }
+};
+
+const connect = () => {
+    if (socket || !snapshot.settings.enabled) return;
+    const endpoints = bridgeEndpoints(snapshot.settings);
+    if (!endpoints) { set({ status: 'unavailable' }); return; }
+    set({ status: 'connecting' });
+    let opened = false;
+    let ws: WebSocket;
+    try { ws = new WebSocket(endpoints.ws); } catch { set({ status: 'unavailable' }); return; }
+    socket = ws;
+    ws.onopen = () => { opened = true; set({ status: 'connected' }); };
+    ws.onmessage = ev => {
+        let msg: any;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === 'sessions') set({ sessions: msg.sessions || [] });
+        else if (msg.type === 'hello') set({ hub: { mode: msg.mode } });
+        else if (msg.type === 'call') queue = queue.then(() => handleCall(msg));
+    };
+    ws.onclose = ev => {
+        if (socket === ws) socket = null;
+        set({ sessions: [] });
+        if (!snapshot.settings.enabled) { set({ status: 'off' }); return; }
+        // 4000: another tab took over — don't fight it
+        if (ev.code === 4000) { set({ status: 'unavailable' }); return; }
+        set({ status: opened ? 'connecting' : 'unavailable' });
+        retryTimer = setTimeout(() => { retryTimer = null; connect(); }, opened ? 1000 : 4000);
+    };
+};
+
+const disconnect = () => {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    const ws = socket;
+    socket = null;
+    ws?.close();
+    set({ status: 'off', sessions: [] });
+};
+
+export const bridge = {
+    get: () => snapshot,
+    subscribe: (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; },
+    setHandler: (h: BridgeHandler | null) => { handler = h; },
+    updateSettings: (patch: Partial<BridgeSettings>) => {
+        const prev = snapshot.settings;
+        const settings = { ...prev, ...patch, clients: { ...prev.clients, ...patch.clients } };
+        saveSettings(settings);
+        set({ settings });
+        // Changing where we connect means a fresh connection
+        const moved = settings.connection !== prev.connection || settings.relayUrl !== prev.relayUrl || settings.room !== prev.room;
+        if (!settings.enabled) disconnect();
+        else if (moved) { disconnect(); connect(); }
+        else connect();
+    },
+    /** Replaces the personal link; AI apps using the old one lose access. */
+    resetLink: () => bridge.updateSettings({ room: newRoom() }),
+    /** Reconnect now (e.g. after starting the dev server). */
+    retry: () => { if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; } disconnect(); if (snapshot.settings.enabled) connect(); },
+    clearLog: () => set({ log: [] }),
+    start: () => { if (snapshot.settings.enabled) connect(); },
+};
+
+export const useBridge = () => useSyncExternalStore(bridge.subscribe, bridge.get);

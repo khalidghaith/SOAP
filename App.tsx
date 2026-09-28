@@ -29,7 +29,7 @@ import {
     PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, Ruler, Copy,
     Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
     Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, Shapes,
-    TreePine, Building2, Home, ArrowUpDown, LandPlot
+    TreePine, Building2, Home, ArrowUpDown, LandPlot, Plug
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
@@ -38,6 +38,10 @@ import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
 import { SiteLayer, SiteTool, SiteSelection } from './components/SiteLayer';
 import { SitePanel } from './components/SitePanel';
+import { BridgesModal } from './components/BridgesModal';
+import { bridge, useBridge } from './services/bridgeClient';
+import { runBridgeCommand, BridgeError, checkProject, PLANNING_RULES } from './utils/bridgeCommands';
+import { renderPlanSvg, svgToPngBase64 } from './utils/planRender';
 import { analyzeSite, readGoogleEarthFile, shapeToBoundary, polygonCentroid, rotatePoint, roomWorldPolygon, worldToGeo, geoToWorld, imageryBox, fetchSiteImagery, IMAGERY_ATTRIBUTION, KmlShape } from './utils/site';
 import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
@@ -287,6 +291,8 @@ export default function App() {
     const [showSnapPanel, setShowSnapPanel] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showSitePropertiesModal, setShowSitePropertiesModal] = useState(false);
+    const [showBridgesModal, setShowBridgesModal] = useState(false);
+    const bridgeState = useBridge();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);
     const [isAiLayoutLoading, setIsAiLayoutLoading] = useState(false);
@@ -1980,6 +1986,63 @@ export default function App() {
         }
     };
 
+    // --- AI bridges (MCP): commands from Claude / Gemini / ChatGPT, applied as one undo step each ---
+    const bridgeHandlerRef = useRef<(tool: string, args: unknown) => unknown | Promise<unknown>>(() => undefined);
+    bridgeHandlerRef.current = (tool: string, args: unknown) => {
+        if (tool === 'undo') {
+            if (!canUndo) throw new BridgeError('Nothing to undo.');
+            undo();
+            return { undone: true };
+        }
+        if (tool === 'get_plan_image') {
+            const a = (args || {}) as { floor?: number; ghostFloor?: number; width?: number; showSite?: boolean; showUnderlay?: boolean };
+            const floor = a.floor ?? currentFloor;
+            if (!floors.some(f => f.id === floor)) throw new BridgeError(`Floor ${floor} does not exist. Floors: ${floors.map(f => f.id).join(', ')}.`);
+            const plan = renderPlanSvg(
+                { projectName, rooms, floors, siteProperties, referenceImages, appSettings },
+                {
+                    floor, ghostFloor: a.ghostFloor, width: a.width, showSite: a.showSite, showUnderlay: a.showUnderlay, dark: darkMode,
+                    zoneColor: zone => ({ fill: getHexColorForZone(zone, zoneColors), stroke: getHexBorderForZone(zone, zoneColors) }),
+                    pxPerMeter: PIXELS_PER_METER,
+                },
+            );
+            if (!plan) throw new BridgeError(`Nothing to show on floor ${floor}: no placed spaces and no site boundary.`);
+            return svgToPngBase64(plan.svg, plan.width, plan.height).then(image => ({
+                image, mimeType: 'image/png', width: plan.width, height: plan.height, floor, spaces: plan.spaces,
+                ...(a.showUnderlay ? { underlays: plan.underlays } : {}),
+                bounds: Object.fromEntries(Object.entries(plan.bounds).map(([k, v]) => [k, Number(v.toFixed(2))])),
+            }));
+        }
+        if (tool === 'get_planning_rules') return PLANNING_RULES;
+        if (tool === 'check_layout') {
+            return checkProject(getProjectData(), { projectName, rooms, floors, currentFloor, zoneColors, siteProperties, appSettings });
+        }
+        const outcome = runBridgeCommand(tool, args, { projectName, rooms, floors, currentFloor, zoneColors, siteProperties, appSettings });
+        const c = outcome.changes;
+        if (c) {
+            if (outcome.undoable) addToHistory();
+            if (c.rooms) setRooms(c.rooms);
+            if (c.floors) setFloors(c.floors);
+            if (c.siteProperties) setSiteProperties(c.siteProperties);
+            if (c.currentFloor !== undefined) { setCurrentFloor(c.currentFloor); setViewMode('CANVAS'); }
+            if (c.newZones?.length) {
+                setZoneColors(prev => {
+                    const next = { ...prev };
+                    c.newZones!.forEach((z, i) => { if (!next[z]) next[z] = COLOR_PALETTE[(Object.keys(prev).length + i) % COLOR_PALETTE.length]; });
+                    return next;
+                });
+            }
+            // Placed spaces are easier to follow on the canvas
+            if (tool === 'place_spaces') setViewMode(prev => (prev === 'EDITOR' ? 'CANVAS' : prev));
+        }
+        return outcome.result;
+    };
+    useEffect(() => {
+        bridge.setHandler((tool, args) => bridgeHandlerRef.current(tool, args));
+        bridge.start();
+        return () => bridge.setHandler(null);
+    }, []);
+
     const closeSiteMode = () => {
         setIsSiteMode(false);
         setSiteSelection(null);
@@ -2560,6 +2623,16 @@ export default function App() {
                                 {darkMode ? <Moon size={14} /> : <Sun size={14} />}
                             </button>
                             <button
+                                onClick={() => setShowBridgesModal(true)}
+                                className={`relative w-8 h-8 rounded-lg flex items-center justify-center ${bridgeState.settings.enabled ? 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5' : 'text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-white/5'}`}
+                                title="AI Bridges: connect Claude, Gemini or ChatGPT (MCP)"
+                            >
+                                <Plug size={14} />
+                                {bridgeState.settings.enabled && (
+                                    <span className={`absolute top-1 right-1 w-1.5 h-1.5 rounded-full ${bridgeState.status === 'connected' ? (bridgeState.sessions.length ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500') : bridgeState.status === 'connecting' ? 'bg-amber-400' : 'bg-red-500'}`} />
+                                )}
+                            </button>
+                            <button
                                 onClick={() => setShowApiKeyModal(true)}
                                 className={`w-8 h-8 rounded-lg flex items-center justify-center ${apiKey ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-white/5' : 'text-orange-500 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 shadow-lg shadow-orange-100'}`}
                                 title="Gemini API Key Settings"
@@ -2658,6 +2731,13 @@ export default function App() {
                                     className={`h-10 rounded-xl flex items-center justify-center ${apiKey ? 'bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}
                                 >
                                     <Key size={16} />
+                                </button>
+                                <button
+                                    onClick={() => { setShowBridgesModal(true); setIsMobileMenuOpen(false); }}
+                                    className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300"
+                                    title="AI Bridges"
+                                >
+                                    <Plug size={16} />
                                 </button>
                                 <button
                                     onClick={() => { setShowSettingsModal(true); setIsMobileMenuOpen(false); }}
@@ -4139,6 +4219,9 @@ export default function App() {
                     isLoading={isAiLayoutLoading}
                 />
 
+                {
+                    showBridgesModal && <BridgesModal onClose={() => setShowBridgesModal(false)} />
+                }
                 {
                     showSitePropertiesModal && (
                         <SitePropertiesModal

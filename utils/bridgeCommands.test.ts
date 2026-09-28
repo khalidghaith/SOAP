@@ -1,0 +1,117 @@
+import { describe, it, expect } from 'vitest';
+import { runBridgeCommand, classifyClient, BridgeState, BridgeError } from './bridgeCommands';
+import { FLOORS, ZONE_COLORS, Room } from '../types';
+
+const PX = 20;
+const room = (id: string, extra: Partial<Room> = {}): Room => ({
+    id, name: id, area: 20, zone: 'Public', isPlaced: false, floor: 0, x: 0, y: 0, width: 4 * PX, height: 5 * PX, ...extra,
+});
+const state = (over: Partial<BridgeState> = {}): BridgeState => ({
+    projectName: 'Test',
+    rooms: [room('a'), room('b', { isPlaced: true, x: 2 * PX, y: 3 * PX })],
+    floors: FLOORS,
+    currentFloor: 0,
+    zoneColors: ZONE_COLORS,
+    siteProperties: { locationName: 'X', latitude: 0, longitude: 0, northAngle: 0 },
+    ...over,
+});
+
+describe('classifyClient', () => {
+    it('maps reported client names to switches', () => {
+        expect(classifyClient('claude-ai')).toBe('claude');
+        expect(classifyClient('claude-code')).toBe('claude');
+        expect(classifyClient('gemini-cli-mcp-client')).toBe('gemini');
+        expect(classifyClient('openai-mcp')).toBe('chatgpt');
+        expect(classifyClient('cursor-vscode')).toBe('other');
+        expect(classifyClient(undefined)).toBe('other');
+    });
+});
+
+describe('get_project', () => {
+    it('describes spaces in meters', () => {
+        const { result, changes } = runBridgeCommand('get_project', {}, state()) as { result: any; changes?: unknown };
+        expect(changes).toBeUndefined();
+        const b = result.spaces.find((s: any) => s.id === 'b');
+        expect(b).toMatchObject({ placed: true, floor: 0, x: 2, y: 3, width: 4, height: 5, drawnArea: 20 });
+        expect(result.spaces.find((s: any) => s.id === 'a')).toEqual({ id: 'a', name: 'a', zone: 'Public', programArea: 20, placed: false });
+        expect(result.zones).not.toContain('Default');
+    });
+});
+
+describe('add_spaces', () => {
+    it('adds unplaced spaces, matching zones case-insensitively and creating new ones', () => {
+        const out = runBridgeCommand('add_spaces', { spaces: [
+            { name: 'Kitchen', area: 16, zone: 'service' },
+            { name: 'Studio', area: 25, zone: 'Workshop' },
+            { name: 'Stair', area: 9, vcType: 'stair' },
+        ] }, state());
+        const rooms = out.changes!.rooms!;
+        expect(out.undoable).toBe(true);
+        expect(rooms).toHaveLength(5);
+        const [k, st, stair] = rooms.slice(2);
+        expect(k).toMatchObject({ name: 'Kitchen', zone: 'Service', isPlaced: false, width: 80, height: 80 });
+        expect(st.zone).toBe('Workshop');
+        expect(stair).toMatchObject({ spaceType: 'verticalConnection', vcType: 'stair', zone: 'Default' });
+        expect(out.changes!.newZones).toEqual(['Workshop']);
+        expect(new Set(rooms.map(r => r.id)).size).toBe(5);
+    });
+});
+
+describe('place_spaces', () => {
+    it('places rectangles in meters and replaces polygon outlines', () => {
+        const s = state({ rooms: [room('a', { polygon: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }], shape: 'polygon' })] });
+        const out = runBridgeCommand('place_spaces', { placements: [{ id: 'a', floor: 1, x: 1.5, y: 2, width: 4, height: 3 }] }, s);
+        const a = out.changes!.rooms![0];
+        expect(a).toMatchObject({ isPlaced: true, floor: 1, x: 30, y: 40, width: 80, height: 60, shape: 'rect', rotation: 0 });
+        expect(a.polygon).toBeUndefined();
+    });
+
+    it('reports site problems for the placed spaces', () => {
+        const s = state({ siteProperties: {
+            locationName: '', latitude: 0, longitude: 0, northAngle: 0,
+            boundary: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], constraints: { defaultSetback: 2 },
+        } });
+        const out = runBridgeCommand('place_spaces', { placements: [{ id: 'a', floor: 0, x: 0, y: 0, width: 4, height: 4 }] }, s) as any;
+        expect(out.result.siteViolations).toEqual([{ space: 'a', problem: 'outsideSetback' }]);
+    });
+
+    it('rejects unknown ids and floors with a helpful message', () => {
+        expect(() => runBridgeCommand('place_spaces', { placements: [{ id: 'zz', floor: 0, x: 0, y: 0, width: 1, height: 1 }] }, state())).toThrow(/get_project/);
+        expect(() => runBridgeCommand('place_spaces', { placements: [{ id: 'a', floor: 9, x: 0, y: 0, width: 1, height: 1 }] }, state())).toThrow(BridgeError);
+    });
+});
+
+describe('other edits', () => {
+    it('updates, unplaces and removes spaces', () => {
+        const up = runBridgeCommand('update_spaces', { updates: [{ id: 'a', name: 'Lounge', area: 30 }] }, state());
+        expect(up.changes!.rooms![0]).toMatchObject({ name: 'Lounge', area: 30 });
+        expect(runBridgeCommand('unplace_spaces', { ids: ['b'] }, state()).changes!.rooms![1].isPlaced).toBe(false);
+        expect(runBridgeCommand('remove_spaces', { ids: ['a'] }, state()).changes!.rooms!.map(r => r.id)).toEqual(['b']);
+    });
+
+    it('updates floors and switches the visible floor without an undo step', () => {
+        expect(runBridgeCommand('update_floors', { floors: [{ id: 1, height: 3.2 }] }, state()).changes!.floors!.find(f => f.id === 1)!.height).toBe(3.2);
+        const show = runBridgeCommand('show_floor', { floor: 1 }, state());
+        expect(show.changes).toEqual({ currentFloor: 1 });
+        expect(show.undoable).toBeFalsy();
+    });
+
+    it('sets the site, resetting per-edge setbacks when the boundary changes', () => {
+        const s = state({ siteProperties: { locationName: '', latitude: 0, longitude: 0, northAngle: 0, constraints: { defaultSetback: 3, edgeSetbacks: [1, 2, 3, 4] } } });
+        const out = runBridgeCommand('set_site', {
+            boundary: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }],
+            northAngle: -30,
+            constraints: { maxFAR: 1.5 },
+            noBuildZones: [{ name: 'Easement', points: [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 2, y: 2 }] }],
+        }, s) as any;
+        const site = out.changes.siteProperties;
+        expect(site.northAngle).toBe(330);
+        expect(site.constraints).toEqual({ defaultSetback: 3, edgeSetbacks: [], maxFAR: 1.5 });
+        expect(site.zones[0].name).toBe('Easement');
+        expect(out.result.siteArea).toBe(200);
+    });
+
+    it('rejects unknown commands', () => {
+        expect(() => runBridgeCommand('format_disk', {}, state())).toThrow(/Unknown command/);
+    });
+});

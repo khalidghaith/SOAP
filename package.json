@@ -22,12 +22,14 @@
     "react-dom": "^19.2.3",
     "svg2pdf.js": "^2.7.0",
     "three": "^0.182.0",
-    "three-stdlib": "^2.36.1"
+    "three-stdlib": "^2.36.1",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",

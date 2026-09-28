@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Checks a SOAP project layout against the soap-space-planning rules.
 // Usage: node check_layout.mjs <project.json> [--grid 0.5] [--tolerance 0.15] [--dead-end 2]
 // Exits 1 if any errors are found.
@@ -10,7 +9,7 @@
 // - Subordinate rooms (may be reached through another room): ensuite, walk-in, closet, pantry, wardrobe,
 //   store/storage, plant, cleaner, ablutions, bins.
 
-import { readFileSync } from 'node:fs';
+// Also imported by the SOAP app (AI bridge check_layout), so node-only code stays inside the CLI block below.
 
 const PX = 20;            // SOAP stores geometry in pixels; 20 px = 1 m
 const DOOR = 0.9;         // minimum shared wall (m) to count as a connection
@@ -233,7 +232,8 @@ function checkSite(project, rooms) {
 }
 
 // CLI
-if (process.argv[1]?.endsWith('check_layout.mjs')) {
+if (typeof process !== 'undefined' && process.argv?.[1]?.endsWith('check_layout.mjs')) (async () => {
+    const { readFileSync } = await import('node:fs');
     const args = process.argv.slice(2);
     const file = args.find(a => !a.startsWith('--') && !/^\d/.test(a));
     if (!file) {
@@ -249,4 +249,4 @@ if (process.argv[1]?.endsWith('check_layout.mjs')) {
     for (const w of warnings) console.log(`WARNING  ${w}`);
     console.log(`\n${errors.length} error(s), ${warnings.length} warning(s)`);
     process.exit(errors.length ? 1 : 0);
-}
+})();
