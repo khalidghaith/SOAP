@@ -8,7 +8,7 @@
  */
 
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-export const SERVER_INFO = { name: 'soap', title: 'SOAP', version: '2.0.0' };
+export const SERVER_INFO = { name: 'soap', title: 'SOAP', version: '2.0.1' };
 
 /** Where the SOAP helper listens on the user's computer (127.0.0.1 only): the tab at /soap-bridge, other MCP apps at /mcp. */
 export const HELPER_PORT = 47913;
@@ -19,7 +19,12 @@ export const SERVER_INSTRUCTIONS =
     'After placing spaces, run check_layout and fix every error, and look at get_plan_image to see the plan as the user will. ' +
     'Each change you make is one undo step for the user.';
 
-export interface ClientInfo { name: string; version: string }
+export interface ClientInfo {
+    name: string;
+    version: string;
+    /** Set when the app is known without its name, e.g. SOAP.mcpb only runs in Claude Desktop */
+    kind?: BridgeClientKind;
+}
 
 export interface McpContext {
     createSession(client: ClientInfo): Promise<string>;
@@ -235,7 +240,10 @@ export const initializeResult = (init: Rpc) => {
 
 export const clientOf = (init: Rpc): ClientInfo => {
     const info = init.params?.clientInfo || {};
-    return { name: String(info.name || 'unknown'), version: String(info.version || '') };
+    const client: ClientInfo = { name: String(info.name || 'unknown'), version: String(info.version || '') };
+    // A SOAP helper forwarding its app's calls says which app that is (see mcp/helper.ts)
+    if (CLIENT_KINDS.includes(info.soapKind)) client.kind = info.soapKind;
+    return client;
 };
 
 /** Answers one request (not initialize) from an initialized client. */
@@ -305,9 +313,12 @@ export const handleMcpHttp = async (method: string, sessionId: string | undefine
     return json(200, batch ? responses : responses[0]);
 };
 
-// --- Which switch in SOAP governs a client, from the name it reports ---
+// --- Which switch in SOAP governs a client: known up front, or from the name it reports ---
 
 export type BridgeClientKind = 'claude' | 'gemini' | 'chatgpt' | 'other';
+export const CLIENT_KINDS: BridgeClientKind[] = ['claude', 'gemini', 'chatgpt', 'other'];
+
+export const kindOf = (client: ClientInfo): BridgeClientKind => client.kind ?? classifyClient(client.name);
 
 export const classifyClient = (name: string | undefined): BridgeClientKind => {
     const n = (name || '').toLowerCase();
@@ -339,7 +350,7 @@ export class TabCalls {
                 reject(new Error('SOAP did not answer in time. Is the SOAP tab still open?'));
             }, this.timeoutMs);
             this.pending.set(id, { resolve, reject, timer });
-            if (!this.send({ type: 'call', id, tool, args, client: { ...client, kind: classifyClient(client.name) } })) {
+            if (!this.send({ type: 'call', id, tool, args, client: { ...client, kind: kindOf(client) } })) {
                 clearTimeout(timer);
                 this.pending.delete(id);
                 reject(new Error(this.notConnected));

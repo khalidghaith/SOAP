@@ -45,7 +45,7 @@ describe('Claude Desktop bundle', () => {
         expect(manifest).toMatchObject({
             manifest_version: '0.3',
             name: 'soap',
-            server: { type: 'node', entry_point: 'server/index.js', mcp_config: { command: 'node', args: ['${__dirname}/server/index.js'], env: { SOAP_ORIGINS: 'https://soap.example.com' } } },
+            server: { type: 'node', entry_point: 'server/index.js', mcp_config: { command: 'node', args: ['${__dirname}/server/index.js'], env: { SOAP_ORIGINS: 'https://soap.example.com', SOAP_CLIENT_KIND: 'claude' } } },
         });
         expect(manifest.tools.map((t: { name: string }) => t.name)).toEqual(TOOLS.map(t => t.name));
         expect(files['server/index.js']).toContain('SOAP_ORIGINS');

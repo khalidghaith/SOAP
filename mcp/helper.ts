@@ -7,13 +7,15 @@
  * calls to the listening helper over HTTP (/mcp) and takes over the port when that one exits.
  *
  * Environment: SOAP_ORIGINS — comma-separated SOAP sites whose tab may connect (baked in by SOAP);
- * SOAP_HELPER_PORT — another port (tests).
+ * SOAP_CLIENT_KIND — which SOAP switch governs our app (SOAP.mcpb sets claude: Claude Desktop's reported
+ * name doesn't say so); SOAP_HELPER_PORT — another port (tests).
  */
 import http from 'node:http';
 import { createHub, MCP_PATH } from './hub';
-import { HELPER_PORT, SERVER_INFO, initializeResult, clientOf, handleRpc, Rpc, ClientInfo } from './core';
+import { HELPER_PORT, SERVER_INFO, CLIENT_KINDS, BridgeClientKind, initializeResult, clientOf, handleRpc, Rpc, ClientInfo } from './core';
 
 const port = Number(process.env.SOAP_HELPER_PORT) || HELPER_PORT;
+const clientKind = CLIENT_KINDS.find(k => k === process.env.SOAP_CLIENT_KIND) as BridgeClientKind | undefined;
 const origins = (process.env.SOAP_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
 const site = origins.find(o => !/\/\/(localhost|127\.0\.0\.1)(:|$)/.test(o)) || origins[0];
 const hostUrl = `http://127.0.0.1:${port}${MCP_PATH}`;
@@ -79,7 +81,9 @@ const postToHost = async (msg: Rpc): Promise<{ status: number; data: any }> => {
 
 const forward = async (msg: Rpc, retry = true): Promise<unknown> => {
     if (!peerSession) {
-        await postToHost({ ...(initMessage || { params: { clientInfo: client } }), jsonrpc: '2.0', method: 'initialize', id: 'soap-peer-init' });
+        // Our app, as SOAP should see it (soapKind: see clientOf)
+        const clientInfo = { ...initMessage?.params?.clientInfo, ...client, soapKind: client?.kind };
+        await postToHost({ jsonrpc: '2.0', method: 'initialize', id: 'soap-peer-init', params: { ...initMessage?.params, clientInfo } });
         await postToHost({ jsonrpc: '2.0', method: 'notifications/initialized' });
     }
     const { status, data } = await postToHost(msg);
@@ -93,7 +97,7 @@ const forward = async (msg: Rpc, retry = true): Promise<unknown> => {
 const handle = async (msg: Rpc) => {
     if (msg.method === 'initialize') {
         initMessage = msg;
-        client = clientOf(msg);
+        client = { ...clientOf(msg), ...(clientKind ? { kind: clientKind } : {}) };
         if (hosting && !localSession) localSession = hub.addSession(client);
         write(initializeResult(msg));
         return;

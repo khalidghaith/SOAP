@@ -102,7 +102,8 @@ export const claudeManifest = (origins: string[], hasIcon: boolean) => ({
         mcp_config: {
             command: 'node',
             args: ['${__dirname}/server/index.js'],
-            env: { SOAP_ORIGINS: origins.join(',') },
+            // SOAP_CLIENT_KIND: Claude Desktop doesn't name itself "claude" to MCP servers, and only Claude runs this bundle
+            env: { SOAP_ORIGINS: origins.join(','), SOAP_CLIENT_KIND: 'claude' },
         },
     },
     tools: TOOLS.map(t => ({ name: t.name, description: t.description })),

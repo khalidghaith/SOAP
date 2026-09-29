@@ -38,8 +38,8 @@ class Helper {
     stderr = '';
     private buf = '';
     private seq = 0;
-    constructor(name = 'claude-ai') {
-        this.proc = spawn(process.execPath, [script], { env: { ...process.env, SOAP_HELPER_PORT: String(PORT), SOAP_ORIGINS: SITE } });
+    constructor(name = 'claude-ai', env: Record<string, string> = {}) {
+        this.proc = spawn(process.execPath, [script], { env: { ...process.env, SOAP_HELPER_PORT: String(PORT), SOAP_ORIGINS: SITE, ...env } });
         this.proc.stdout.setEncoding('utf8');
         this.proc.stdout.on('data', (c: string) => {
             this.buf += c;
@@ -80,7 +80,7 @@ class Tab {
         this.ws.on('message', data => {
             const msg = JSON.parse(String(data));
             this.messages.push(msg);
-            if (msg.type === 'call') this.ws.send(JSON.stringify({ type: 'result', id: msg.id, ok: true, result: { project: 'Test', caller: msg.client.name } }));
+            if (msg.type === 'call') this.ws.send(JSON.stringify({ type: 'result', id: msg.id, ok: true, result: { project: 'Test', caller: msg.client.name, kind: msg.client.kind } }));
         });
         this.ws.on('close', code => { this.closeCode = code; });
         this.ws.on('error', () => {});
@@ -90,7 +90,7 @@ class Tab {
 
 const running: Helper[] = [];
 const tabs: Tab[] = [];
-const helper = (name?: string) => { const h = new Helper(name); running.push(h); return h; };
+const helper = (name?: string, env?: Record<string, string>) => { const h = new Helper(name, env); running.push(h); return h; };
 const tab = (origin?: string) => { const t = new Tab(origin); tabs.push(t); return t; };
 const listening = (h: Helper) => until(() => h.stderr.includes('Waiting for SOAP'));
 afterEach(async () => {
@@ -119,9 +119,24 @@ describe('SOAP helper', () => {
         await until(() => t.last('sessions')?.sessions.length === 1);
         expect(t.last('sessions').sessions[0]).toMatchObject({ name: 'claude-ai', kind: 'claude' });
         const call = await h.callTool('get_project');
-        expect(JSON.parse(call.result.content[0].text)).toEqual({ project: 'Test', caller: 'claude-ai' });
+        expect(JSON.parse(call.result.content[0].text)).toEqual({ project: 'Test', caller: 'claude-ai', kind: 'claude' });
         const bad = await h.callTool('place_spaces', { placements: [] });
         expect(bad.result.content[0].text).toContain('Invalid arguments');
+    }, 15000);
+
+    it('counts as Claude when SOAP.mcpb says so, whatever name the app reports', async () => {
+        // Claude Desktop reports a name without "claude"; SOAP.mcpb sets SOAP_CLIENT_KIND=claude
+        const first = helper('mcp-host', { SOAP_CLIENT_KIND: 'claude' });
+        await listening(first);
+        const t = tab();
+        await until(() => t.last('sessions')?.sessions.length === 1);
+        expect(t.last('sessions').sessions[0]).toMatchObject({ name: 'mcp-host', kind: 'claude' });
+        expect(JSON.parse((await first.callTool('get_project')).result.content[0].text).kind).toBe('claude');
+
+        // Also when it forwards through another helper (Claude restarting while the old one still listens)
+        const second = helper('mcp-host', { SOAP_CLIENT_KIND: 'claude' });
+        await until(() => second.stderr.includes('sharing it'));
+        expect(JSON.parse((await second.callTool('get_project')).result.content[0].text).kind).toBe('claude');
     }, 15000);
 
     it('refuses a tab from another website', async () => {

@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
-import { handleMcpHttp, TabCalls, classifyClient, ClientInfo, TAB_NOT_CONNECTED } from './core';
+import { handleMcpHttp, TabCalls, kindOf, ClientInfo, TAB_NOT_CONNECTED } from './core';
 
 export const MCP_PATH = '/mcp';
 export const BRIDGE_WS_PATH = '/soap-bridge';
@@ -61,12 +61,12 @@ export const createHub = (opts: HubOptions = {}) => {
         return true;
     };
     const calls = new TabCalls(send, undefined, opts.notConnectedMessage || TAB_NOT_CONNECTED);
-    const broadcastSessions = () => send({ type: 'sessions', sessions: [...sessions].map(([id, c]) => ({ id, ...c, kind: classifyClient(c.name) })) });
+    const broadcastSessions = () => send({ type: 'sessions', sessions: [...sessions].map(([id, c]) => ({ id, ...c, kind: kindOf(c) })) });
 
     const addSession = (client: ClientInfo) => {
         const id = randomUUID();
         sessions.set(id, client);
-        log(`${client.name} connected (${classifyClient(client.name)})`);
+        log(`${client.name} connected (${kindOf(client)})`);
         broadcastSessions();
         return id;
     };
