@@ -1,5 +1,5 @@
 import { Room, Floor, SiteProperties, SiteConstraints, SpaceType, VCType, ZoneColor, AppSettings, Point } from '../types';
-import { analyzeSite, roomWorldPolygon, polygonArea } from './site';
+import { analyzeSite, roomWorldPolygon, polygonArea, recenterShape } from './site';
 export { classifyClient, type BridgeClientKind } from '../mcp/core';
 import { checkLayout } from '../.claude/skills/soap-space-planning/scripts/check_layout.mjs';
 import planningRulesMd from '../.claude/skills/soap-space-planning/SKILL.md?raw';
@@ -87,7 +87,9 @@ export const describeRoom = (r: Room) => {
         shape: 'rect',
         drawnArea: round(polygonArea(outline), 2),
     };
-    // Drawn shapes: the stored width/height is the rectangle the room started as, so describe what was drawn
+    // Drawn shapes: the stored width/height is the rectangle the room started as, so describe what was drawn.
+    // `outline` is a polygon's corners or a bubble's points (what draw_spaces takes); extent and area follow the curve.
+    const points = roomWorldPolygon(r, PX, { points: true });
     const xs = outline.map(p => p.x), ys = outline.map(p => p.y);
     const minX = Math.min(...xs), minY = Math.min(...ys);
     return {
@@ -95,7 +97,7 @@ export const describeRoom = (r: Room) => {
         x: round(minX), y: round(minY),
         width: round(Math.max(...xs) - minX), height: round(Math.max(...ys) - minY),
         shape: r.shape === 'bubble' ? 'bubble' : 'polygon',
-        outline: outline.map(p => ({ x: round(p.x), y: round(p.y) })),
+        outline: points.map(p => ({ x: round(p.x), y: round(p.y) })),
         drawnArea: round(polygonArea(outline), 2),
     };
 };
@@ -135,6 +137,7 @@ export const describeProject = (s: BridgeState) => {
 export interface NewSpace { name: string; area: number; zone?: string; description?: string; spaceType?: SpaceType; vcType?: VCType }
 export interface SpaceUpdate { id: string; name?: string; area?: number; zone?: string; description?: string; spaceType?: SpaceType }
 export interface Placement { id: string; floor: number; x: number; y: number; width: number; height: number; rotation?: number }
+export interface Drawing { id: string; floor: number; shape: 'polygon' | 'bubble'; outline: Point[] }
 export interface FloorUpdate { id: number; label?: string; height?: number }
 export interface SiteUpdate {
     boundary?: Point[];
@@ -142,6 +145,28 @@ export interface SiteUpdate {
     constraints?: Partial<SiteConstraints>;
     noBuildZones?: { name: string; points: Point[] }[];
 }
+
+/** An outline without repeated points (including a closing repeat of the first). */
+const cleanOutline = (pts: Point[]) => pts
+    .map(p => ({ x: p.x, y: p.y }))
+    .filter((p, i, all) => { const q = all[(i + 1) % all.length]; return Math.hypot(q.x - p.x, q.y - p.y) > 1e-6; });
+
+/** Whether any two edges of a closed outline that aren't neighbours touch or cross. */
+const selfCrossing = (pts: Point[]) => {
+    const o = (a: Point, b: Point, c: Point) => { const v = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); return Math.abs(v) < 1e-9 ? 0 : Math.sign(v); };
+    const on = (a: Point, b: Point, p: Point) => Math.min(a.x, b.x) - 1e-9 <= p.x && p.x <= Math.max(a.x, b.x) + 1e-9 && Math.min(a.y, b.y) - 1e-9 <= p.y && p.y <= Math.max(a.y, b.y) + 1e-9;
+    const meet = (a: Point, b: Point, c: Point, d: Point) => {
+        const [o1, o2, o3, o4] = [o(a, b, c), o(a, b, d), o(c, d, a), o(c, d, b)];
+        if (o1 !== o2 && o3 !== o4) return true;
+        return (o1 === 0 && on(a, b, c)) || (o2 === 0 && on(a, b, d)) || (o3 === 0 && on(c, d, a)) || (o4 === 0 && on(c, d, b));
+    };
+    const n = pts.length;
+    for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue; // neighbours through the closing edge
+        if (meet(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return true;
+    }
+    return false;
+};
 
 const findRoom = (rooms: Room[], id: string) => {
     const r = rooms.find(x => x.id === id);
@@ -244,6 +269,52 @@ export const runBridgeCommand = (tool: string, args: any, s: BridgeState): Bridg
                     hint: 'Run check_layout to verify circulation and access.',
                 },
                 changes: { rooms: next.rooms },
+                undoable: true,
+            };
+        }
+
+        case 'draw_spaces': {
+            const floorIds = new Set(s.floors.map(f => f.id));
+            const byId = new Map((args.shapes as Drawing[]).map(d => [d.id, d]));
+            const outlines = new Map<string, Point[]>();
+            byId.forEach((d, id) => {
+                const r = findRoom(s.rooms, id);
+                if (!floorIds.has(d.floor)) throw new BridgeError(`Floor ${d.floor} does not exist. Floors: ${[...floorIds].join(', ')}.`);
+                const pts = cleanOutline(d.outline);
+                if (pts.length < 3) throw new BridgeError(`The outline for "${r.name}" needs at least 3 different points.`);
+                if (selfCrossing(pts)) throw new BridgeError(`The outline for "${r.name}" crosses itself; list its points in order around the shape.`);
+                if (polygonArea(pts) < 0.01) throw new BridgeError(`The outline for "${r.name}" encloses no area; list its points in order around the shape.`);
+                outlines.set(id, pts);
+            });
+            const rooms = s.rooms.map(r => {
+                const d = byId.get(r.id);
+                if (!d) return r;
+                // Stored like a shape drawn on the canvas: points in pixels relative to its origin (x, y), which
+                // recenterShape then puts at the centre of gravity so the user can rotate it about its middle
+                const pts = outlines.get(r.id)!;
+                const minX = Math.min(...pts.map(p => p.x)), minY = Math.min(...pts.map(p => p.y));
+                return recenterShape({
+                    ...r,
+                    isPlaced: true,
+                    floor: d.floor,
+                    x: minX * PX, y: minY * PX,
+                    width: (Math.max(...pts.map(p => p.x)) - minX) * PX, height: (Math.max(...pts.map(p => p.y)) - minY) * PX,
+                    rotation: 0,
+                    shape: d.shape,
+                    polygon: pts.map(p => ({ x: (p.x - minX) * PX, y: (p.y - minY) * PX })),
+                    textPos: undefined,
+                });
+            });
+            const report = analyzeSite(s.siteProperties, rooms, s.floors, s.appSettings, PX);
+            return {
+                result: {
+                    drawn: rooms.filter(r => byId.has(r.id)).map(r => ({
+                        id: r.id, name: r.name, shape: r.shape, programArea: r.area, drawnArea: round(polygonArea(roomWorldPolygon(r, PX)), 2),
+                    })),
+                    ...(report ? { siteViolations: report.violations.filter(v => byId.has(v.roomId)).map(v => ({ space: v.roomName, problem: v.reason })) } : {}),
+                    hint: 'Run check_layout to verify circulation and access, and get_plan_image to see the shapes.',
+                },
+                changes: { rooms },
                 undoable: true,
             };
         }

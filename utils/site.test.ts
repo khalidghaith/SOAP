@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { deflateRawSync } from 'node:zlib';
-import { Room, Floor, SiteProperties } from '../types';
+import { Room, Floor, SiteProperties, Point } from '../types';
 import {
     polygonArea, insetPolygon, buildableArea, polygonInside, polygonsOverlap, roomWorldPolygon,
-    analyzeSite, geoToWorld, worldToGeo, parseKml, readKmz, alignEdgeRotation, rotatePoint,
+    analyzeSite, geoToWorld, worldToGeo, parseKml, readKmz, alignEdgeRotation, rotatePoint, recenterShape, polygonCentroid, bubbleCurve,
 } from './site';
 
 const rect = (x: number, y: number, w: number, h: number) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
@@ -13,6 +13,54 @@ const room = (id: string, x: number, y: number, w: number, h: number, extra: Par
     x: x * PX, y: y * PX, width: w * PX, height: h * PX, ...extra,
 });
 const floors: Floor[] = [{ id: -1, label: 'B', height: 3 }, { id: 0, label: 'GF', height: 4 }, { id: 1, label: 'L1', height: 3.5 }, { id: 2, label: 'L2', height: 3.5 }];
+
+describe('recenterShape', () => {
+    // An L drawn with its origin at the top-left corner, as older shapes (and edited ones) have it
+    const L = [{ x: 0, y: 0 }, { x: 160, y: 0 }, { x: 160, y: 80 }, { x: 80, y: 80 }, { x: 80, y: 160 }, { x: 0, y: 160 }];
+    const shape = (extra: Partial<Room> = {}): Room => room('s', 2, 3, 10, 10, { shape: 'polygon', polygon: L, ...extra });
+    const expectSamePlace = (a: Point[], b: Point[]) => a.forEach((p, i) => { expect(p.x).toBeCloseTo(b[i].x, 9); expect(p.y).toBeCloseTo(b[i].y, 9); });
+
+    it('moves the origin to the centre of gravity without moving the shape', () => {
+        for (const rotation of [0, 30, -135]) {
+            const before = shape({ rotation, textPos: { x: 40, y: 40 } });
+            const after = recenterShape(before);
+            expectSamePlace(roomWorldPolygon(after), roomWorldPolygon(before));
+            const c = polygonCentroid(after.polygon!);
+            expect(Math.hypot(c.x, c.y)).toBeLessThan(1e-9);
+            // The label stays where it was on the plan (it sits in the shape's turned frame, like the points)
+            const onPlan = (r: Room, p: Point) => {
+                const a = ((r.rotation || 0) * Math.PI) / 180;
+                return { x: r.x + p.x * Math.cos(a) - p.y * Math.sin(a), y: r.y + p.x * Math.sin(a) + p.y * Math.cos(a) };
+            };
+            expectSamePlace([onPlan(after, after.textPos!)], [onPlan(before, before.textPos!)]);
+            expect(after.width).toBeCloseTo(160, 9);
+            expect(after.height).toBeCloseTo(160, 9);
+        }
+    });
+
+    it('then rotates the shape about its middle', () => {
+        const centred = recenterShape(shape());
+        const centre = polygonCentroid(roomWorldPolygon(centred));
+        for (const rotation of [45, 90, 180]) {
+            const turned = polygonCentroid(roomWorldPolygon({ ...centred, rotation }));
+            expect(turned.x).toBeCloseTo(centre.x, 9);
+            expect(turned.y).toBeCloseTo(centre.y, 9);
+        }
+        // Before, the same turn swung it around its corner
+        const swung = polygonCentroid(roomWorldPolygon(shape({ rotation: 90 })));
+        expect(Math.hypot(swung.x - centre.x, swung.y - centre.y)).toBeGreaterThan(1);
+    });
+
+    it('centres bubbles on their curve, and leaves rects and centred shapes alone', () => {
+        const blob = recenterShape(shape({ shape: 'bubble', polygon: [{ x: 0, y: 0 }, { x: 200, y: 20 }, { x: 120, y: 100 }, { x: 10, y: 80 }] }));
+        const c = polygonCentroid(bubbleCurve(blob.polygon!));
+        expect(Math.hypot(c.x, c.y)).toBeLessThan(1e-9);
+        const r = room('r', 1, 1, 4, 3);
+        expect(recenterShape(r)).toBe(r);
+        const centred = recenterShape(shape());
+        expect(recenterShape(centred)).toBe(centred);
+    });
+});
 
 describe('insetPolygon', () => {
     it('offsets a rectangle by per-edge setbacks, whichever way it winds', () => {

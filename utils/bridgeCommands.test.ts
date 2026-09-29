@@ -75,6 +75,59 @@ describe('add_spaces', () => {
     });
 });
 
+describe('draw_spaces', () => {
+    const L = [{ x: 1, y: 2 }, { x: 9, y: 2 }, { x: 9, y: 6 }, { x: 5, y: 6 }, { x: 5, y: 10 }, { x: 1, y: 10 }];
+    // 8 points around an ellipse 6 × 4 m centred on (10, 10)
+    const ellipse = Array.from({ length: 8 }, (_, i) => ({ x: 10 + 3 * Math.cos((i * Math.PI) / 4), y: 10 + 2 * Math.sin((i * Math.PI) / 4) }));
+
+    it('stores a polygon like one drawn on the canvas and keeps the program area', () => {
+        const s = state({ rooms: [room('a', { area: 50, rotation: 30 })] });
+        const out = runBridgeCommand('draw_spaces', { shapes: [{ id: 'a', floor: 1, shape: 'polygon', outline: L }] }, s) as any;
+        const a = out.changes.rooms[0] as Room;
+        expect(a).toMatchObject({ isPlaced: true, floor: 1, shape: 'polygon', rotation: 0, area: 50, width: 8 * PX, height: 8 * PX });
+        // Origin (the rotation pivot) at the L's centre of gravity: (4⅓, 5⅓) m
+        expect(a.x / PX).toBeCloseTo(13 / 3, 9);
+        expect(a.y / PX).toBeCloseTo(16 / 3, 9);
+        a.polygon!.forEach((p, i) => {
+            expect(a.x + p.x).toBeCloseTo(L[i].x * PX, 9);
+            expect(a.y + p.y).toBeCloseTo(L[i].y * PX, 9);
+        });
+        expect(out.undoable).toBe(true);
+        expect(out.result.drawn).toEqual([{ id: 'a', name: 'a', shape: 'polygon', programArea: 50, drawnArea: 48 }]);
+        // get_project hands the same outline back
+        const { result } = runBridgeCommand('get_project', {}, state({ rooms: [a] })) as any;
+        expect(result.spaces[0]).toMatchObject({ shape: 'polygon', outline: L, drawnArea: 48 });
+    });
+
+    it('draws bubbles as a smooth curve through the points', () => {
+        const s = state({ rooms: [room('g', { area: 18 })] });
+        const out = runBridgeCommand('draw_spaces', { shapes: [{ id: 'g', floor: 0, shape: 'bubble', outline: ellipse }] }, s) as any;
+        const g = out.changes.rooms[0] as Room;
+        expect(g.shape).toBe('bubble');
+        // Close to the ellipse's own area (π·3·2 ≈ 18.85), not the 8-sided polygon's (≈ 16.97)
+        expect(out.result.drawn[0].drawnArea).toBeGreaterThan(18.3);
+        expect(out.result.drawn[0].drawnArea).toBeLessThan(19.2);
+        const { result } = runBridgeCommand('get_project', {}, state({ rooms: [g] })) as any;
+        expect(result.spaces[0].outline).toHaveLength(8);
+        expect(result.spaces[0].outline[0]).toEqual({ x: 13, y: 10 });
+        expect(result.spaces[0].drawnArea).toBe(out.result.drawn[0].drawnArea);
+    });
+
+    it('ignores a repeated closing point', () => {
+        const out = runBridgeCommand('draw_spaces', { shapes: [{ id: 'a', floor: 0, shape: 'polygon', outline: [...L, L[0]] }] }, state()) as any;
+        expect(out.changes.rooms.find((r: Room) => r.id === 'a').polygon).toHaveLength(6);
+    });
+
+    it('refuses outlines that cross themselves, enclose nothing or use unknown floors', () => {
+        const bowtie = [{ x: 0, y: 0 }, { x: 4, y: 4 }, { x: 4, y: 0 }, { x: 0, y: 4 }];
+        const draw = (outline: object[], floor = 0) => () => runBridgeCommand('draw_spaces', { shapes: [{ id: 'a', floor, shape: 'polygon', outline }] }, state());
+        expect(draw(bowtie)).toThrow(/crosses itself/);
+        expect(draw([{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 4, y: 0 }])).toThrow(/encloses no area/);
+        expect(draw([{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 2, y: 2 }])).toThrow(/at least 3 different points/);
+        expect(draw(L, 99)).toThrow(/Floor 99 does not exist/);
+    });
+});
+
 describe('place_spaces', () => {
     it('places rectangles in meters and replaces polygon outlines', () => {
         const s = state({ rooms: [room('a', { polygon: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }], shape: 'polygon' })] });

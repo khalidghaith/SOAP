@@ -8,7 +8,7 @@
  */
 
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-export const SERVER_INFO = { name: 'soap', title: 'SOAP', version: '2.0.1' };
+export const SERVER_INFO = { name: 'soap', title: 'SOAP', version: '2.1.0' };
 
 /** Where the SOAP helper listens on the user's computer (127.0.0.1 only): the tab at /soap-bridge, other MCP apps at /mcp. */
 export const HELPER_PORT = 47913;
@@ -16,6 +16,7 @@ export const HELPER_PORT = 47913;
 export const SERVER_INSTRUCTIONS =
     'SOAP is an architectural programming and space-planning app. Units are meters; x grows east (right), y grows south (down). ' +
     'Start with get_project. Before arranging rooms, read get_planning_rules and follow them (circulation first, no dead-end corridors). ' +
+    'Place rectangles with place_spaces; for a realistic plan also use draw_spaces for shaped rooms (L-shapes, angled walls) and bubbles for gardens, courtyards and landscape. ' +
     'After placing spaces, run check_layout and fix every error, and look at get_plan_image to see the plan as the user will. ' +
     'Each change you make is one undo step for the user.';
 
@@ -61,7 +62,7 @@ export const TOOLS: ToolDef[] = [
     {
         name: 'get_project', title: 'Get project', annotations: readOnly, inputSchema: obj({}),
         description: 'The open SOAP project: floors, zones, every space (program area, and position/size in meters if placed) and the site (boundary, setbacks, no-build zones, compliance report). ' +
-            'Spaces the user drew as polygons (e.g. L-shapes) or rotated have an `outline` (corners in meters): that is the real shape, and drawnArea its area; for polygons x/y/width/height are only its bounding box.',
+            "Polygon and bubble spaces (and rotated ones) have an 'outline' in meters: a polygon's corners, or the points a bubble's smooth curve passes through (the same form draw_spaces takes). That is the real shape and drawnArea its area; for these shapes x/y/width/height are only the bounding box.",
     },
     {
         name: 'get_planning_rules', title: 'Get planning rules', annotations: readOnly, inputSchema: obj({}),
@@ -91,7 +92,7 @@ export const TOOLS: ToolDef[] = [
     {
         name: 'place_spaces', title: 'Place spaces', annotations: edit,
         description: 'Places spaces on the plan as rectangles (meters; x,y is the top-left corner). All placements apply as one undo step. Use a 0.5 m grid. ' +
-            'Placing a space the user drew as a polygon replaces its outline with the rectangle, so leave drawn shapes alone unless the user wants them redrawn.',
+            'Placing a space drawn as a polygon or bubble replaces its outline with the rectangle; use draw_spaces for shapes.',
         inputSchema: obj({
             placements: arr(obj({
                 id: str(),
@@ -101,6 +102,21 @@ export const TOOLS: ToolDef[] = [
                 rotation: num('Degrees clockwise about the rectangle centre'),
             }, ['id', 'floor', 'x', 'y', 'width', 'height']), { minItems: 1 }),
         }, ['placements']),
+    },
+    {
+        name: 'draw_spaces', title: 'Draw spaces as shapes', annotations: edit,
+        description: 'Places or reshapes spaces as free shapes instead of rectangles (meters). ' +
+            '"polygon": straight walls through the corners in order, e.g. an L-, T- or U-shaped living area, a room with an angled wall following the site, a stair hall wrapping a core. Keep its corners on the 0.5 m grid. ' +
+            '"bubble": a smooth closed curve through the points, for organic spaces such as gardens, courtyards, pools and landscape, or for zoning diagrams; about 6–12 points, e.g. around an ellipse. ' +
+            'Points go around the outline once (at least 3; do not repeat the first), and the outline must not cross itself. Works on placed and unplaced spaces; all drawings apply as one undo step. The program area is kept: compare the returned drawnArea with it.',
+        inputSchema: obj({
+            shapes: arr(obj({
+                id: str(),
+                floor: int('Floor id from get_project (0 = ground)'),
+                shape: str(undefined, { enum: ['polygon', 'bubble'] }),
+                outline: arr(point, { minItems: 3 }),
+            }, ['id', 'floor', 'shape', 'outline']), { minItems: 1 }),
+        }, ['shapes']),
     },
     {
         name: 'unplace_spaces', title: 'Unplace spaces', annotations: edit,

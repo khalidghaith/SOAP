@@ -47,6 +47,16 @@ describe('project file round trip', () => {
         expect(loaded.floors).toEqual([{ id: 0, label: 'Ground', height: 4 }]);
     });
 
+    it('re-centres shapes saved with their origin in a corner', () => {
+        const L = [{ x: 0, y: 0 }, { x: 160, y: 0 }, { x: 160, y: 80 }, { x: 80, y: 80 }, { x: 80, y: 160 }, { x: 0, y: 160 }];
+        const old = { id: 'l', name: 'L', area: 48, zone: 'Public', isPlaced: true, floor: 0, x: 40, y: 60, width: 200, height: 200, shape: 'polygon', polygon: L };
+        const [room] = parseProjectData({ rooms: [old] }).rooms;
+        // Centre of gravity of the L: 66⅔ px right of and below the old corner origin
+        expect(room.x).toBeCloseTo(40 + 200 / 3, 9);
+        expect(room.y).toBeCloseTo(60 + 200 / 3, 9);
+        room.polygon!.forEach((p, i) => { expect(room.x + p.x).toBeCloseTo(40 + L[i].x, 9); expect(room.y + p.y).toBeCloseTo(60 + L[i].y, 9); });
+    });
+
     it('rejects files that are not projects', () => {
         expect(() => parseProjectData({ foo: 1 })).toThrow();
         expect(() => parseProjectData(null)).toThrow();

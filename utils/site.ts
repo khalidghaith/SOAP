@@ -188,15 +188,39 @@ export const alignEdgeRotation = (boundary: Point[], edge: number): number => {
 // --- Rooms ---
 
 /**
- * A placed room's outline in world meters (rect or polygon, with rotation).
+ * The smooth closed curve a bubble room is drawn as (components/Bubble.tsx: Catmull-Rom through its points),
+ * as a polygon with `steps` segments between neighbouring points.
+ */
+export const bubbleCurve = (pts: Point[], steps = 8): Point[] => {
+    if (pts.length < 3) return pts;
+    const out: Point[] = [];
+    pts.forEach((p1, i) => {
+        const p0 = pts[(i - 1 + pts.length) % pts.length], p2 = pts[(i + 1) % pts.length], p3 = pts[(i + 2) % pts.length];
+        const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+        const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+        for (let j = 0; j < steps; j++) {
+            const t = j / steps, u = 1 - t;
+            out.push({
+                x: u * u * u * p1.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p2.x,
+                y: u * u * u * p1.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p2.y,
+            });
+        }
+    });
+    return out;
+};
+
+/**
+ * A placed room's outline in world meters (rect, polygon or bubble curve, with rotation).
  * Matches the canvas (Bubble): the room's box is CSS-rotated about its centre, and polygon/bubble
  * rooms have a zero-size box, so they rotate about their origin (room.x, room.y).
+ * `points: true` gives a bubble's points instead of its curve (what the user drags on the canvas).
  */
-export const roomWorldPolygon = (r: Room, pxPerMeter = SITE_PX_PER_METER): Point[] => {
+export const roomWorldPolygon = (r: Room, pxPerMeter = SITE_PX_PER_METER, { points = false } = {}): Point[] => {
     const isPoly = (r.polygon && r.polygon.length >= 3) || r.shape === 'bubble';
-    const local = r.polygon && r.polygon.length >= 3
+    const corners = r.polygon && r.polygon.length >= 3
         ? r.polygon
         : [{ x: 0, y: 0 }, { x: r.width, y: 0 }, { x: r.width, y: r.height }, { x: 0, y: r.height }];
+    const local = r.shape === 'bubble' && !points ? bubbleCurve(corners) : corners;
     const pivot = isPoly ? { x: 0, y: 0 } : { x: r.width / 2, y: r.height / 2 };
     const rad = ((r.rotation || 0) * Math.PI) / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
@@ -207,6 +231,30 @@ export const roomWorldPolygon = (r: Room, pxPerMeter = SITE_PX_PER_METER): Point
             y: (r.y + pivot.y + dx * sin + dy * cos) / pxPerMeter,
         };
     });
+};
+
+/**
+ * Moves a polygon/bubble room's origin (room.x, room.y, which it rotates about) to its centre of gravity,
+ * shifting its points (and label) so nothing moves on the plan. After that, rotating turns the shape about
+ * its middle. Rect rooms, and shapes already centred, are returned unchanged.
+ */
+export const recenterShape = (r: Room): Room => {
+    if (!(r.polygon && r.polygon.length >= 3) || (r.shape !== 'polygon' && r.shape !== 'bubble')) return r;
+    const c = polygonCentroid(r.shape === 'bubble' ? bubbleCurve(r.polygon) : r.polygon);
+    if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || Math.hypot(c.x, c.y) < 0.01) return r;
+    const rad = ((r.rotation || 0) * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const polygon = r.polygon.map(p => ({ x: p.x - c.x, y: p.y - c.y }));
+    const xs = polygon.map(p => p.x), ys = polygon.map(p => p.y);
+    return {
+        ...r,
+        x: r.x + c.x * cos - c.y * sin,
+        y: r.y + c.x * sin + c.y * cos,
+        polygon,
+        width: Math.max(...xs) - Math.min(...xs),
+        height: Math.max(...ys) - Math.min(...ys),
+        ...(r.textPos ? { textPos: { x: r.textPos.x - c.x, y: r.textPos.y - c.y } } : {}),
+    };
 };
 
 const floorRange = (r: Room): [number, number] => {

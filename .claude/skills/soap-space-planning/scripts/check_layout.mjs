@@ -35,11 +35,25 @@ const signedArea = pts => pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.
 const polygonArea = pts => Math.abs(signedArea(pts));
 const round2 = v => Math.round(v * 100) / 100;
 
+// A bubble room is the smooth closed curve through its points (mirrors bubbleCurve in utils/site.ts)
+const bubbleCurve = (pts, steps = 8) => pts.length < 3 ? pts : pts.flatMap((p1, i) => {
+    const p0 = pts[(i - 1 + pts.length) % pts.length], p2 = pts[(i + 1) % pts.length], p3 = pts[(i + 2) % pts.length];
+    const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 }, c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    return Array.from({ length: steps }, (_, j) => {
+        const t = j / steps, u = 1 - t;
+        return {
+            x: u * u * u * p1.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p2.x,
+            y: u * u * u * p1.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p2.y,
+        };
+    });
+});
+
 /** A room's outline as drawn on the canvas (mirrors roomWorldPolygon in utils/site.ts): rect rooms rotate about
- *  their centre, polygon/bubble rooms (points relative to x, y) about their origin. */
+ *  their centre, polygon/bubble rooms (points relative to x, y) about their origin; bubbles follow their curve. */
 export const roomOutline = r => {
     const isPoly = r.polygon?.length >= 3 || r.shape === 'bubble';
-    const local = r.polygon?.length >= 3 ? r.polygon : [{ x: 0, y: 0 }, { x: r.width, y: 0 }, { x: r.width, y: r.height }, { x: 0, y: r.height }];
+    const corners = r.polygon?.length >= 3 ? r.polygon : [{ x: 0, y: 0 }, { x: r.width, y: 0 }, { x: r.width, y: r.height }, { x: 0, y: r.height }];
+    const local = r.shape === 'bubble' ? bubbleCurve(corners) : corners;
     const piv = isPoly ? { x: 0, y: 0 } : { x: r.width / 2, y: r.height / 2 };
     const rad = ((r.rotation || 0) * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
     return local.map(p => {
@@ -184,8 +198,8 @@ export function checkLayout(project, { grid = 0.5, tolerance = 0.15, deadEnd = 2
     for (const r of rooms) {
         const pts = shape(r), g = rect(r), b = box(r);
         const onGrid = v => Math.abs(v / grid - Math.round(v / grid)) <= 1e-6;
-        // Rooms turned to an angle can't sit on the grid; everything else must, corner by corner
-        if ((r.rotation || 0) % 90 === 0) {
+        // Rooms turned to an angle and curved (bubble) rooms can't sit on the grid; everything else must, corner by corner
+        if ((r.rotation || 0) % 90 === 0 && r.shape !== 'bubble') {
             const off = pts.find(p => !onGrid(p.x) || !onGrid(p.y));
             if (off) errors.push(g
                 ? `${r.name}: not on the ${grid} m grid (${round2(g.x)}, ${round2(g.y)}, ${round2(g.w)} × ${round2(g.h)})`

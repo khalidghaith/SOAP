@@ -12,6 +12,8 @@ interface BubbleProps {
     room: Room;
     zoomScale: number;
     updateRoom: (id: string, updates: Partial<Room>) => void;
+    /** A polygon/bubble edit finished: re-centres the shape's origin (its rotation pivot). */
+    onShapeEdited?: (id: string) => void;
     isSelected: boolean;
     onSelect: (id: string, multi: boolean) => void;
     diagramStyle: DiagramStyle;
@@ -187,7 +189,7 @@ const RenderCorner = ({ cursor, pos, zoomScale, onPointerDown }: { cursor: strin
 const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='filter: drop-shadow(1px 1px 0px white);'><path d='M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3'/></svg>") 12 12, auto`;
 
 const BubbleComponent: React.FC<BubbleProps> = ({
-    room, zoomScale, updateRoom, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
+    room, zoomScale, updateRoom, onShapeEdited, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
     getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false, isGrayedOut = false, guides
 }) => {
     const pointerClass = isSketchMode || isOverlay || isGrayedOut ? 'pointer-events-none' : 'pointer-events-auto';
@@ -389,13 +391,14 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
                 const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
+                onShapeEdited?.(room.id);
                 setSelectedVertices(new Set());
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedVertices, activePoints, room.id, updateRoom, room.shape, pixelsPerMeter]);
+    }, [selectedVertices, activePoints, room.id, updateRoom, onShapeEdited, room.shape, pixelsPerMeter]);
 
     const handleRotateStart = (e: React.PointerEvent) => {
         e.stopPropagation();
@@ -1117,6 +1120,8 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             if (draggedVertex !== null && room.shape === 'bubble') {
                 setWobbleTime(1.0);
             }
+            // The shape changed: keep its rotation pivot at its centre
+            if (draggedVertex !== null || draggedEdge !== null || isExtruding) onShapeEdited?.(room.id);
             setIsDragging(false);
             setIsTextDragging(false);
             setIsRotating(false);
@@ -1140,7 +1145,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             window.removeEventListener('pointerup', handlePointerUp);
             window.removeEventListener('pointercancel', handlePointerUp);
         };
-    }, [isDragging, isRotating, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, isTextDragging, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd, onMove, isSelected, onSelect, otherRooms, appSettings.snapToObjects, appSettings.snapTolerance, appSettings.snapToGrid, room.x, room.y, room.shape, room.area, pixelsPerMeter, appSettings.incrementalScalingEnabled, appSettings.incrementalScaleAmount, appSettings.unitSystem, guides, appSettings.snapToGuides]);
+    }, [onShapeEdited, isDragging, isRotating, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, isTextDragging, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd, onMove, isSelected, onSelect, otherRooms, appSettings.snapToObjects, appSettings.snapTolerance, appSettings.snapToGrid, room.x, room.y, room.shape, room.area, pixelsPerMeter, appSettings.incrementalScalingEnabled, appSettings.incrementalScaleAmount, appSettings.unitSystem, guides, appSettings.snapToGuides]);
 
     const handleResizeStart = (e: React.PointerEvent, handle: string) => {
         e.stopPropagation();
@@ -1269,6 +1274,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
 
             updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
+            onShapeEdited?.(room.id);
             setSelectedVertices(new Set());
         }
     };
@@ -1330,6 +1336,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
             }
 
+            onShapeEdited?.(room.id);
             // Select the new vertex
             setSelectedVertices(new Set([index + 1]));
             return;

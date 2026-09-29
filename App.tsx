@@ -42,7 +42,7 @@ import { BridgesModal } from './components/BridgesModal';
 import { bridge, useBridge } from './services/bridgeClient';
 import { runBridgeCommand, BridgeError, checkProject, PLANNING_RULES } from './utils/bridgeCommands';
 import { renderPlanSvg, svgToPngBase64 } from './utils/planRender';
-import { analyzeSite, readGoogleEarthFile, shapeToBoundary, polygonCentroid, rotatePoint, roomWorldPolygon, worldToGeo, geoToWorld, imageryBox, fetchSiteImagery, IMAGERY_ATTRIBUTION, KmlShape } from './utils/site';
+import { analyzeSite, recenterShape, readGoogleEarthFile, shapeToBoundary, polygonCentroid, rotatePoint, roomWorldPolygon, worldToGeo, geoToWorld, imageryBox, fetchSiteImagery, IMAGERY_ATTRIBUTION, KmlShape } from './utils/site';
 import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
 import { Rulers, getRulerTickInterval } from './components/Rulers';
@@ -1721,6 +1721,11 @@ export default function App() {
         }));
     }, []);
 
+    // After a polygon/bubble edit, move its origin (its rotation pivot) to the shape's centre; nothing moves on the plan
+    const recenterRoomShape = useCallback((id: string) => {
+        setRooms(prev => prev.map(r => (r.id === id ? recenterShape(r) : r)));
+    }, []);
+
     // Property-panel edits are undoable. Consecutive edits to the same fields of the same space
     // (e.g. typing a name) within a second are grouped into one undo step.
     const lastPanelEditRef = useRef<{ key: string; time: number } | null>(null);
@@ -2033,7 +2038,7 @@ export default function App() {
                 });
             }
             // Placed spaces are easier to follow on the canvas
-            if (tool === 'place_spaces') setViewMode(prev => (prev === 'EDITOR' ? 'CANVAS' : prev));
+            if (tool === 'place_spaces' || tool === 'draw_spaces') setViewMode(prev => (prev === 'EDITOR' ? 'CANVAS' : prev));
         }
         return outcome.result;
     };
@@ -2426,7 +2431,12 @@ export default function App() {
             } else {
                 let points = r.polygon;
                 if (!points || points.length === 0) {
-                    points = [{ x: 0, y: 0 }, { x: r.width, y: 0 }, { x: r.width, y: r.height }, { x: 0, y: r.height }];
+                    // A rect turns about its centre; start the shape with its origin there too, so it doesn't jump
+                    const hw = r.width / 2, hh = r.height / 2;
+                    points = [{ x: -hw, y: -hh }, { x: hw, y: -hh }, { x: hw, y: hh }, { x: -hw, y: hh }];
+                    newRoom.x = r.x + hw;
+                    newRoom.y = r.y + hh;
+                    if (r.textPos) newRoom.textPos = { x: r.textPos.x - hw, y: r.textPos.y - hh };
                 }
                 if (shape === 'bubble') {
                     const targetAreaPx = r.area * (PIXELS_PER_METER * PIXELS_PER_METER);
@@ -2442,7 +2452,8 @@ export default function App() {
                 }
                 newRoom.polygon = points;
             }
-            return newRoom;
+            // Polygon ↔ bubble moves the centre of gravity slightly: keep the rotation pivot on it
+            return shape === 'rect' ? newRoom : recenterShape(newRoom);
         }));
     };
 
@@ -3218,6 +3229,7 @@ export default function App() {
                                             room={room}
                                             zoomScale={scale}
                                             updateRoom={updateRoom}
+                                            onShapeEdited={recenterRoomShape}
                                             isGrayedOut={room.spaceType === 'multistory' && room.floor !== currentFloor}
                                             onMove={(x, y) => handleMoveRoom(room.id, x, y)}
                                             isSelected={selectedRoomIds.has(room.id)}

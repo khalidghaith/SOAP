@@ -66,7 +66,7 @@ Claude can read and edit the open project through the [Model Context Protocol](h
 
 Adding Claude also turns on AI access. Keep SOAP open while Claude works; every change it makes is one undo step (Ctrl+Z). **More options** in the panel shows the activity log, per-assistant switches, and setup for other MCP apps (Codex, Claude Code, Antigravity), which can use the helper at `http://127.0.0.1:47913/mcp` while Claude Desktop is open.
 
-Tools: `get_project`, `get_planning_rules`, `add_spaces`, `update_spaces`, `place_spaces`, `unplace_spaces`, `remove_spaces`, `update_floors`, `set_site`, `check_layout`, `get_plan_image` (a labelled picture of any floor with a meter grid, site and rule breaks), `show_floor`, `undo`.
+Tools: `get_project`, `get_planning_rules`, `add_spaces`, `update_spaces`, `place_spaces` (rectangles), `draw_spaces` (polygon rooms such as L-shapes, and bubbles for gardens and landscape), `unplace_spaces`, `remove_spaces`, `update_floors`, `set_site`, `check_layout`, `get_plan_image` (a labelled picture of any floor with a meter grid, site and rule breaks), `show_floor`, `undo`.
 
 Other ways to connect (More options → Connection): `npm run dev` serves a bridge at `http://localhost:3000/mcp` (**Dev server**), and the optional Cloudflare relay reaches SOAP from AI apps on other computers (**Online relay**; see [relay/README.md](relay/README.md)).
 

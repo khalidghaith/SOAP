@@ -65,6 +65,21 @@ describe('check_layout with drawn shapes', () => {
         expect(check([poly('Even', 0, 0, L, 48)]).errors.filter(e => e.includes('grid'))).toEqual([]);
     });
 
+    it('measures bubbles along their curve and skips the grid for them', () => {
+        // 8 points around a circle of radius 3 m (28.27 m²); the 8-sided polygon through them is only 25.46 m²
+        const circle = Array.from({ length: 8 }, (_, i) => ({ x: 3 + 3 * Math.cos((i * Math.PI) / 4), y: 3 + 3 * Math.sin((i * Math.PI) / 4) }));
+        const garden = poly('Garden', 0, 0, circle, 28, 6, { shape: 'bubble', zone: 'Outdoor', spaceType: 'outdoor' });
+        const { errors, warnings } = check([garden]);
+        expect(errors.filter(e => e.includes('grid'))).toEqual([]);
+        expect(warnings.filter(w => w.includes('program'))).toEqual([]);
+        // Small squares at 22.5°, where the curve bulges furthest past the straight lines (radius 2.77 m there):
+        // one in that gap overlaps the garden, one just beyond the circle doesn't
+        const at = (radius: number) => rect('Shed', 3 + radius * Math.cos(Math.PI / 8) - 0.05, 3 + radius * Math.sin(Math.PI / 8) - 0.05, 0.1, 0.1);
+        const overlapsGarden = (radius: number) => check([garden, at(radius)]).errors.some(e => e.includes('Garden overlaps Shed'));
+        expect(overlapsGarden(2.88)).toBe(true);
+        expect(overlapsGarden(3.1)).toBe(false);
+    });
+
     it('says when an L-shaped corridor could not be checked for dead ends', () => {
         const corridor = poly('Corridor', 0, 0, [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 1.5 }, { x: 1.5, y: 1.5 }, { x: 1.5, y: 4 }, { x: 0, y: 4 }], 18.75, 10, { zone: 'Circulation' });
         expect(check([corridor]).warnings).toContain("Corridor: not a plain rectangle, so its ends weren't checked for dead ends (bounding box 10 × 4 m)");

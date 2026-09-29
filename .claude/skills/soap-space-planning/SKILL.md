@@ -44,8 +44,17 @@ Treat the program's areas as targets, and movement through the building as the t
 
 ### Geometry
 
-- Units are meters on a **0.5 m grid**; every x, y, width and height is a multiple of 0.5.
-- Rectangles only, no overlaps on a floor, no internal gaps. Upper floors may have a smaller or notched footprint (roof below), but never holes inside the plan.
+- Units are meters on a **0.5 m grid**; every x, y, width and height — and every polygon corner — is a multiple of 0.5.
+- No overlaps on a floor, no internal gaps. Upper floors may have a smaller or notched footprint (roof below), but never holes inside the plan.
+
+### Shapes
+
+Rooms default to rectangles, but a realistic plan is rarely all boxes. Use shapes where they make the plan better, not for decoration:
+
+- **Polygons** (straight walls through listed corners) for rooms that really are shaped: an L-shaped living/dining that wraps a kitchen, a T- or U-shaped hall that serves several wings, a room with one angled wall following a non-orthogonal site edge or view, a foyer that widens toward the entrance. Keep walls orthogonal unless there is a reason (site geometry, view, sun), keep corners on the grid, and make neighbouring rooms share the same wall line so doors (≥ 0.9 m of shared wall) still work.
+- **Bubbles** (a smooth curve through points) for spaces without walls: gardens, lawns, courtyards, pools, planting and landscape areas, and for early zoning diagrams. Not for enclosed rooms — a curved wall needs a polygon with several short segments.
+- One shaped room usually replaces two awkward rectangles; if a shape leaves leftover slivers that no room can use, go back to rectangles.
+- Report shaped rooms by their drawn area. The checker measures polygons and bubbles as drawn (see below).
 - Minimum usable dimensions: bedrooms ≥ 3 m, bathrooms ≥ 1.5 m, WC ≥ 1.5 × 2 m, corridors ≥ 1.0 m.
 - Areas within about ±10–15 % of the program. Larger deviations are acceptable only with a stated reason (e.g. keeping a WC at a usable 1.5 m width). Circulation may be smaller than programmed.
 - Stair size: a U-shaped stair for ~3.5–4 m floor-to-floor fits roughly 2.5–3 m × 3–4 m. Set `stairParams.config` to match the shape you drew.
@@ -64,13 +73,13 @@ Treat the program's areas as targets, and movement through the building as the t
 node .claude/skills/soap-space-planning/scripts/check_layout.mjs path/to/project.json
 ```
 
-It checks each room **as drawn**: polygon rooms (L-shapes and other outlines in `polygon`, relative to `x`, `y`) and rotated rooms use their real outline for area, overlaps (reported with the overlapping area), shared walls and grid corners — a polygon room's `width`/`height` is only the rectangle it was drawn from, so never reason from those. Two limits: the narrowest-side warning and the dead-end check only apply to plain rectangles (a non-rectangular corridor gets a warning saying its ends weren't checked), and rooms turned to a non-right angle skip the grid check.
+It checks each room **as drawn**: polygon rooms (L-shapes and other outlines in `polygon`, relative to `x`, `y`), bubble rooms (the smooth curve through their points) and rotated rooms use their real outline for area, overlaps (reported with the overlapping area), shared walls and grid corners — a polygon room's `width`/`height` is only the rectangle it was drawn from, so never reason from those. Two limits: the narrowest-side warning and the dead-end check only apply to plain rectangles (a non-rectangular corridor gets a warning saying its ends weren't checked), and rooms turned to a non-right angle, and bubbles, skip the grid check.
 
 It exits non-zero if there are errors, including site errors (outside the boundary, inside a setback, in a no-build zone) when the project has a site boundary. It identifies circulation by `zone === 'Circulation'` or names containing hall/corridor/landing/foyer/lobby, and subordinate rooms by names containing ensuite/en-suite/walk-in/closet/pantry — rename or set zones accordingly if it misclassifies something. It can also run in the browser: paste the file's `checkLayout` function and call it on the autosave (`JSON.parse(localStorage.getItem('SOAP_PROJECT_AUTOSAVE'))`).
 
 ## Applying a layout in SOAP
 
-- Room geometry in SOAP is stored in **pixels: 20 px = 1 m** (`PIXELS_PER_METER`). Convert when writing `x`, `y`, `width`, `height`; set `isPlaced: true`, `floor`, `shape: 'rect'`, and clear `polygon`/`rotation`.
+- Room geometry in SOAP is stored in **pixels: 20 px = 1 m** (`PIXELS_PER_METER`). Convert when writing `x`, `y`, `width`, `height`; set `isPlaced: true`, `floor`, `shape: 'rect'`, and clear `polygon`/`rotation`. For a shaped room set `shape: 'polygon'` or `'bubble'`, `x`/`y` to the outline's top-left, `polygon` to its points in pixels relative to `x`/`y`, `width`/`height` to its bounding box and `rotation: 0`. Through the AI bridge, `place_spaces` and `draw_spaces` do this for you.
 - A vertical connection (`spaceType: 'verticalConnection'`) is **one room** that appears on every floor from `vcFromFloor` to `vcToFloor`; place it once on its lowest floor.
 - Apply the whole layout as a **single undoable step** by loading it as a project file: build the full project JSON (version 2, see `utils/projectStore.ts`) and feed it to the app's hidden `<input type="file">`, which goes through `loadProject` and records one undo entry. Setting `localStorage` directly bypasses undo and the running app's state.
 - **Save the project JSON to a file** as well (e.g. in the scratchpad). The built-in browser pane's storage can be wiped when the dev server is relaunched — that has already cost one project and a saved API key in this repo.

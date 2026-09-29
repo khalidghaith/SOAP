@@ -1,4 +1,5 @@
 import { Room, Connection, Floor, ZoneColor, AppSettings, Annotation, ReferenceImage, SiteProperties, CanvasGuide } from '../types';
+import { recenterShape } from './site';
 
 // Single source of truth for what a SOAP project contains.
 // Used by the project file save/load and by the browser autosave, so the two can't drift apart.
@@ -33,7 +34,8 @@ export const parseProjectData = (raw: unknown): Partial<ProjectData> & { rooms: 
     if (!Array.isArray(d.rooms)) throw new Error('Project file has no spaces list.');
 
     const isObj = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v);
-    const out: Partial<ProjectData> & { rooms: Room[] } = { rooms: d.rooms };
+    // Shapes drawn before origins were kept centred rotate about a corner: re-centre them (nothing moves)
+    const out: Partial<ProjectData> & { rooms: Room[] } = { rooms: d.rooms.map((r: Room) => (r && typeof r === 'object' ? recenterShape(r) : r)) };
     if (typeof d.projectName === 'string') out.projectName = d.projectName;
     if (Array.isArray(d.connections)) out.connections = d.connections;
     // Older projects could contain floors without a height

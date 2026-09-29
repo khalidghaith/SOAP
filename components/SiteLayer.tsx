@@ -80,7 +80,7 @@ export const SiteLayer: React.FC<SiteLayerProps> = ({
 
     // Snap targets that don't change while the pointer moves
     const roomOutlines = useMemo(
-        () => rooms.filter(r => r.isPlaced && roomOnFloor(r, currentFloor)).map(r => roomWorldPolygon(r, PX)),
+        () => rooms.filter(r => r.isPlaced && roomOnFloor(r, currentFloor)).map(r => roomWorldPolygon(r, PX, { points: true })),
         [rooms, currentFloor, PX]
     );
     const guideLines = useMemo(() => guides.map(guideToLine), [guides]);
