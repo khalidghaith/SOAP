@@ -60,7 +60,8 @@ export interface ToolDef {
 export const TOOLS: ToolDef[] = [
     {
         name: 'get_project', title: 'Get project', annotations: readOnly, inputSchema: obj({}),
-        description: 'The open SOAP project: floors, zones, every space (program area, and position/size in meters if placed) and the site (boundary, setbacks, no-build zones, compliance report).',
+        description: 'The open SOAP project: floors, zones, every space (program area, and position/size in meters if placed) and the site (boundary, setbacks, no-build zones, compliance report). ' +
+            'Spaces the user drew as polygons (e.g. L-shapes) or rotated have an `outline` (corners in meters): that is the real shape, and drawnArea its area; for polygons x/y/width/height are only its bounding box.',
     },
     {
         name: 'get_planning_rules', title: 'Get planning rules', annotations: readOnly, inputSchema: obj({}),
@@ -89,7 +90,8 @@ export const TOOLS: ToolDef[] = [
     },
     {
         name: 'place_spaces', title: 'Place spaces', annotations: edit,
-        description: 'Places spaces on the plan as rectangles (meters; x,y is the top-left corner). All placements apply as one undo step. Use a 0.5 m grid.',
+        description: 'Places spaces on the plan as rectangles (meters; x,y is the top-left corner). All placements apply as one undo step. Use a 0.5 m grid. ' +
+            'Placing a space the user drew as a polygon replaces its outline with the rectangle, so leave drawn shapes alone unless the user wants them redrawn.',
         inputSchema: obj({
             placements: arr(obj({
                 id: str(),

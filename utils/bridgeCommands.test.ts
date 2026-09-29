@@ -36,6 +36,24 @@ describe('get_project', () => {
         expect(result.spaces.find((s: any) => s.id === 'a')).toEqual({ id: 'a', name: 'a', zone: 'Public', programArea: 20, placed: false });
         expect(result.zones).not.toContain('Default');
     });
+
+    it('describes drawn and rotated spaces by their outline', () => {
+        // An L drawn from a 10 × 10 m rectangle: the stored width/height is stale
+        const L = [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 4 }, { x: 4, y: 4 }, { x: 4, y: 8 }, { x: 0, y: 8 }].map(p => ({ x: p.x * PX, y: p.y * PX }));
+        const s = state({ rooms: [
+            room('l', { isPlaced: true, x: 1 * PX, y: 2 * PX, width: 10 * PX, height: 10 * PX, polygon: L, shape: 'polygon' }),
+            room('r', { isPlaced: true, x: 0, y: 0, width: 4 * PX, height: 2 * PX, rotation: 90 }),
+        ] });
+        const { result } = runBridgeCommand('get_project', {}, s) as { result: any };
+        const l = result.spaces.find((x: any) => x.id === 'l');
+        expect(l).toMatchObject({ shape: 'polygon', x: 1, y: 2, width: 8, height: 8, drawnArea: 48 });
+        expect(l.outline).toEqual([{ x: 1, y: 2 }, { x: 9, y: 2 }, { x: 9, y: 6 }, { x: 5, y: 6 }, { x: 5, y: 10 }, { x: 1, y: 10 }]);
+        const r = result.spaces.find((x: any) => x.id === 'r');
+        expect(r).toMatchObject({ shape: 'rect', rotation: 90, drawnArea: 8 });
+        // Turned about its centre (2, 1): now 2 wide and 4 tall
+        const xs = r.outline.map((p: any) => p.x), ys = r.outline.map((p: any) => p.y);
+        expect([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]).toEqual([1, 3, -1, 3]);
+    });
 });
 
 describe('add_spaces', () => {

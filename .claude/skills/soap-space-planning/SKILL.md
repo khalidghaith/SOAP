@@ -64,6 +64,8 @@ Treat the program's areas as targets, and movement through the building as the t
 node .claude/skills/soap-space-planning/scripts/check_layout.mjs path/to/project.json
 ```
 
+It checks each room **as drawn**: polygon rooms (L-shapes and other outlines in `polygon`, relative to `x`, `y`) and rotated rooms use their real outline for area, overlaps (reported with the overlapping area), shared walls and grid corners — a polygon room's `width`/`height` is only the rectangle it was drawn from, so never reason from those. Two limits: the narrowest-side warning and the dead-end check only apply to plain rectangles (a non-rectangular corridor gets a warning saying its ends weren't checked), and rooms turned to a non-right angle skip the grid check.
+
 It exits non-zero if there are errors, including site errors (outside the boundary, inside a setback, in a no-build zone) when the project has a site boundary. It identifies circulation by `zone === 'Circulation'` or names containing hall/corridor/landing/foyer/lobby, and subordinate rooms by names containing ensuite/en-suite/walk-in/closet/pantry — rename or set zones accordingly if it misclassifies something. It can also run in the browser: paste the file's `checkLayout` function and call it on the autosave (`JSON.parse(localStorage.getItem('SOAP_PROJECT_AUTOSAVE'))`).
 
 ## Applying a layout in SOAP

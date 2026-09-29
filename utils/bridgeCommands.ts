@@ -73,15 +73,30 @@ export const describeRoom = (r: Room) => {
     };
     if (!r.isPlaced) return base;
     const isRect = !(r.polygon && r.polygon.length >= 3) && r.shape !== 'bubble';
-    return {
+    const outline = roomWorldPolygon(r, PX);
+    const placed = {
         ...base,
         floor: r.floor,
         ...(roomFloors(r).length > 1 ? { floors: roomFloors(r) } : {}),
+    };
+    if (isRect) return {
+        ...placed,
         x: round(r.x / PX), y: round(r.y / PX),
         width: round(r.width / PX), height: round(r.height / PX),
-        ...(r.rotation ? { rotation: r.rotation } : {}),
-        shape: isRect ? 'rect' : (r.shape || 'polygon'),
-        drawnArea: round(polygonArea(roomWorldPolygon(r, PX)), 2),
+        ...(r.rotation ? { rotation: r.rotation, outline: outline.map(p => ({ x: round(p.x), y: round(p.y) })) } : {}),
+        shape: 'rect',
+        drawnArea: round(polygonArea(outline), 2),
+    };
+    // Drawn shapes: the stored width/height is the rectangle the room started as, so describe what was drawn
+    const xs = outline.map(p => p.x), ys = outline.map(p => p.y);
+    const minX = Math.min(...xs), minY = Math.min(...ys);
+    return {
+        ...placed,
+        x: round(minX), y: round(minY),
+        width: round(Math.max(...xs) - minX), height: round(Math.max(...ys) - minY),
+        shape: r.shape === 'bubble' ? 'bubble' : 'polygon',
+        outline: outline.map(p => ({ x: round(p.x), y: round(p.y) })),
+        drawnArea: round(polygonArea(outline), 2),
     };
 };
 
