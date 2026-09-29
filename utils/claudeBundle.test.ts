@@ -36,24 +36,25 @@ describe('zip', () => {
 });
 
 describe('Claude Desktop bundle', () => {
-    const link = 'https://soap-relay.example.workers.dev/mcp/abcdefghijklmnopqrstuvwxyz012345';
+    const origins = ['https://soap.example.com'];
 
-    it('contains a manifest with the private link and the connector', () => {
-        const files = unzip(buildClaudeBundle(link));
+    it('contains a manifest with the trusted SOAP site and the helper', () => {
+        const files = unzip(buildClaudeBundle(origins));
         expect(Object.keys(files).sort()).toEqual(['manifest.json', 'server/index.js']);
         const manifest = JSON.parse(files['manifest.json']);
         expect(manifest).toMatchObject({
             manifest_version: '0.3',
             name: 'soap',
-            server: { type: 'node', entry_point: 'server/index.js', mcp_config: { command: 'node', args: ['${__dirname}/server/index.js'], env: { SOAP_MCP_URL: link } } },
+            server: { type: 'node', entry_point: 'server/index.js', mcp_config: { command: 'node', args: ['${__dirname}/server/index.js'], env: { SOAP_ORIGINS: 'https://soap.example.com' } } },
         });
         expect(manifest.tools.map((t: { name: string }) => t.name)).toEqual(TOOLS.map(t => t.name));
-        expect(files['server/index.js']).toContain('SOAP_MCP_URL');
+        expect(files['server/index.js']).toContain('SOAP_ORIGINS');
+        expect(files['server/index.js']).not.toMatch(/\brequire\("ws"\)/); // ws is bundled in
     });
 
     it('includes the icon only when given one', () => {
-        expect(claudeManifest(link, false)).not.toHaveProperty('icon');
-        const files = unzip(buildClaudeBundle(link, new Uint8Array([137, 80, 78, 71])));
+        expect(claudeManifest(origins, false)).not.toHaveProperty('icon');
+        const files = unzip(buildClaudeBundle(origins, new Uint8Array([137, 80, 78, 71])));
         expect(Object.keys(files)).toContain('icon.png');
         expect(JSON.parse(files['manifest.json']).icon).toBe('icon.png');
     });

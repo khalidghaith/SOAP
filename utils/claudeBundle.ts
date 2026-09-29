@@ -1,9 +1,9 @@
-import connectorSource from '../mcp/connector/index.js?raw';
-import { TOOLS, SERVER_INFO } from '../mcp/core';
+import helperSource from 'virtual:soap-helper';
+import { TOOLS, SERVER_INFO, HELPER_PORT } from '../mcp/core';
 
-// Builds a personal Claude Desktop extension (SOAP.mcpb) in the browser: a zip with a manifest and the
-// dependency-free connector, with the user's private SOAP link baked in. Opening the file in Claude
-// Desktop installs it; Claude ships its own Node.js, so nothing else is needed.
+// Builds the Claude Desktop extension (SOAP.mcpb) in the browser: a zip with a manifest and the SOAP helper
+// (mcp/helper.ts), with the SOAP site the user added it from baked in as the only site allowed to connect.
+// Opening the file in Claude Desktop installs it; Claude ships its own Node.js, so nothing else is needed.
 
 // --- Minimal zip writer (stored entries, no compression) ---
 
@@ -83,7 +83,7 @@ export const zip = (files: { name: string; data: Uint8Array }[]): Uint8Array => 
 
 // --- The bundle ---
 
-export const claudeManifest = (mcpUrl: string, hasIcon: boolean) => ({
+export const claudeManifest = (origins: string[], hasIcon: boolean) => ({
     manifest_version: '0.3',
     name: 'soap',
     display_name: 'SOAP',
@@ -91,6 +91,7 @@ export const claudeManifest = (mcpUrl: string, hasIcon: boolean) => ({
     description: 'Lets Claude read and edit your open SOAP project: place spaces, check the layout and see the plan.',
     long_description:
         'Connects Claude to SOAP, the architectural programming and space-planning app, while SOAP is open in your browser with AI access on. ' +
+        `SOAP connects to this extension on your computer (port ${HELPER_PORT}); nothing goes through a server. ` +
         'Claude can read the program and site, add and place spaces, run the planning-rule check and look at a picture of each floor. ' +
         'Every change is one undo step in SOAP.',
     author: { name: 'SOAP' },
@@ -101,7 +102,7 @@ export const claudeManifest = (mcpUrl: string, hasIcon: boolean) => ({
         mcp_config: {
             command: 'node',
             args: ['${__dirname}/server/index.js'],
-            env: { SOAP_MCP_URL: mcpUrl },
+            env: { SOAP_ORIGINS: origins.join(',') },
         },
     },
     tools: TOOLS.map(t => ({ name: t.name, description: t.description })),
@@ -111,11 +112,12 @@ export const claudeManifest = (mcpUrl: string, hasIcon: boolean) => ({
     },
 });
 
-export const buildClaudeBundle = (mcpUrl: string, iconPng?: Uint8Array): Uint8Array => {
+/** `origins`: the SOAP sites allowed to connect, normally just location.origin. */
+export const buildClaudeBundle = (origins: string[], iconPng?: Uint8Array): Uint8Array => {
     const enc = new TextEncoder();
     const files = [
-        { name: 'manifest.json', data: enc.encode(JSON.stringify(claudeManifest(mcpUrl, !!iconPng), null, 2)) },
-        { name: 'server/index.js', data: enc.encode(connectorSource) },
+        { name: 'manifest.json', data: enc.encode(JSON.stringify(claudeManifest(origins, !!iconPng), null, 2)) },
+        { name: 'server/index.js', data: enc.encode(helperSource) },
     ];
     if (iconPng) files.push({ name: 'icon.png', data: iconPng });
     return zip(files);

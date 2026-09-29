@@ -1,13 +1,17 @@
 /**
- * SOAP's MCP server, protocol side. Dependency-free so it runs both in the local dev bridge (Node, mcp/hub.ts)
- * and in the cloud relay (Cloudflare Worker, relay/src/worker.ts).
+ * SOAP's MCP server, protocol side. Dependency-free so it runs in the SOAP helper that Claude Desktop starts
+ * (mcp/helper.ts), the dev-server bridge (mcp/hub.ts) and the cloud relay (relay/src/worker.ts).
  *
- * Implements MCP Streamable HTTP with JSON responses (no server-initiated streams). All tools are relayed
- * to the open SOAP tab, which does the work and enforces the per-client switches.
+ * Speaks MCP over stdio (one JSON message per line, handleRpc) and Streamable HTTP with JSON responses
+ * (handleMcpHttp; no server-initiated streams). All tools are relayed to the open SOAP tab, which does the
+ * work and enforces the per-client switches.
  */
 
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-export const SERVER_INFO = { name: 'soap', title: 'SOAP', version: '1.1.0' };
+export const SERVER_INFO = { name: 'soap', title: 'SOAP', version: '2.0.0' };
+
+/** Where the SOAP helper listens on the user's computer (127.0.0.1 only): the tab at /soap-bridge, other MCP apps at /mcp. */
+export const HELPER_PORT = 47913;
 
 export const SERVER_INSTRUCTIONS =
     'SOAP is an architectural programming and space-planning app. Units are meters; x grows east (right), y grows south (down). ' +
@@ -208,7 +212,7 @@ const json = (status: number, payload: unknown, headers: Record<string, string> 
     ({ status, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(payload) });
 const rpcError = (id: unknown, code: number, message: string) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
 
-type Rpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: any };
+export type Rpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: any };
 
 const toolResult = (tool: ToolDef, value: unknown) => {
     if (tool.image && value && typeof value === 'object' && typeof (value as any).image === 'string') {
@@ -219,7 +223,23 @@ const toolResult = (tool: ToolDef, value: unknown) => {
 };
 const toolError = (message: string) => ({ content: [{ type: 'text', text: message }], isError: true });
 
-const handleRequest = async (msg: Rpc, client: ClientInfo, ctx: McpContext): Promise<unknown> => {
+/** The reply to `initialize`. */
+export const initializeResult = (init: Rpc) => {
+    const requested = init.params?.protocolVersion;
+    const protocolVersion = PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
+    return {
+        jsonrpc: '2.0', id: init.id,
+        result: { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO, instructions: SERVER_INSTRUCTIONS },
+    };
+};
+
+export const clientOf = (init: Rpc): ClientInfo => {
+    const info = init.params?.clientInfo || {};
+    return { name: String(info.name || 'unknown'), version: String(info.version || '') };
+};
+
+/** Answers one request (not initialize) from an initialized client. */
+export const handleRpc = async (msg: Rpc, client: ClientInfo, ctx: Pick<McpContext, 'callTab'>): Promise<unknown> => {
     switch (msg.method) {
         case 'ping':
             return { jsonrpc: '2.0', id: msg.id, result: {} };
@@ -270,15 +290,8 @@ export const handleMcpHttp = async (method: string, sessionId: string | undefine
     // Initialization opens a session and must come alone
     const init = messages.find(m => m.method === 'initialize');
     if (init) {
-        const info = init.params?.clientInfo || {};
-        const client: ClientInfo = { name: String(info.name || 'unknown'), version: String(info.version || '') };
-        const id = await ctx.createSession(client);
-        const requested = init.params?.protocolVersion;
-        const protocolVersion = PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-        const result = {
-            jsonrpc: '2.0', id: init.id,
-            result: { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO, instructions: SERVER_INSTRUCTIONS },
-        };
+        const id = await ctx.createSession(clientOf(init));
+        const result = initializeResult(init);
         return json(200, batch ? [result] : result, { 'Mcp-Session-Id': id });
     }
 
@@ -288,7 +301,7 @@ export const handleMcpHttp = async (method: string, sessionId: string | undefine
 
     const requests = messages.filter(m => m.method && m.id !== undefined && m.id !== null);
     if (!requests.length) return { status: 202, headers: {} }; // notifications / responses only
-    const responses = await Promise.all(requests.map(m => handleRequest(m, client, ctx)));
+    const responses = await Promise.all(requests.map(m => handleRpc(m, client, ctx)));
     return json(200, batch ? responses : responses[0]);
 };
 
@@ -316,7 +329,7 @@ export class TabCalls {
     private seq = 0;
 
     /** `send` returns false when no tab is connected. */
-    constructor(private send: (msg: unknown) => boolean, private timeoutMs = 25000) {}
+    constructor(private send: (msg: unknown) => boolean, private timeoutMs = 25000, private notConnected = TAB_NOT_CONNECTED) {}
 
     call(tool: string, args: unknown, client: ClientInfo): Promise<unknown> {
         return new Promise((resolve, reject) => {
@@ -329,7 +342,7 @@ export class TabCalls {
             if (!this.send({ type: 'call', id, tool, args, client: { ...client, kind: classifyClient(client.name) } })) {
                 clearTimeout(timer);
                 this.pending.delete(id);
-                reject(new Error(TAB_NOT_CONNECTED));
+                reject(new Error(this.notConnected));
             }
         });
     }

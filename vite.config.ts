@@ -2,6 +2,23 @@ import path from 'path';
 import { defineConfig, type Plugin, type ViteDevServer, type PreviewServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { createHub, MCP_PATH } from './mcp/hub';
+import { buildHelper } from './mcp/buildHelper';
+
+// `import helperSource from 'virtual:soap-helper'`: the SOAP helper bundled into one script (mcp/buildHelper.ts)
+const soapHelperSource = (): Plugin => {
+    const id = 'virtual:soap-helper';
+    const resolved = '\0' + id;
+    return {
+        name: 'soap-helper-source',
+        resolveId: source => (source === id ? resolved : undefined),
+        async load(loadId) {
+            if (loadId !== resolved) return;
+            const { source, inputs } = await buildHelper();
+            inputs.forEach(f => this.addWatchFile(f));
+            return `export default ${JSON.stringify(source)};`;
+        },
+    };
+};
 
 // Serves the SOAP MCP bridge (AI clients at /mcp, the SOAP tab at /soap-bridge) from the dev/preview server
 const soapMcpBridge = (): Plugin => {
@@ -25,13 +42,13 @@ const soapMcpBridge = (): Plugin => {
 export default defineConfig(() => {
     return {
       server: {
-        port: 3000,
+        port: Number(process.env.PORT) || 3000,
         host: '0.0.0.0',
       },
       preview: {
-        port: 3000,
+        port: Number(process.env.PORT) || 3000,
       },
-      plugins: [react(), soapMcpBridge()],
+      plugins: [react(), soapMcpBridge(), soapHelperSource()],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

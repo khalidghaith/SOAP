@@ -2625,11 +2625,12 @@ export default function App() {
                             <button
                                 onClick={() => setShowBridgesModal(true)}
                                 className={`relative w-8 h-8 rounded-lg flex items-center justify-center ${bridgeState.settings.enabled ? 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5' : 'text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-white/5'}`}
-                                title="AI Bridges: connect Claude, Gemini or ChatGPT (MCP)"
+                                title="Connect an AI assistant (Claude)"
                             >
                                 <Plug size={14} />
                                 {bridgeState.settings.enabled && (
-                                    <span className={`absolute top-1 right-1 w-1.5 h-1.5 rounded-full ${bridgeState.status === 'connected' ? (bridgeState.sessions.length ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500') : bridgeState.status === 'connecting' ? 'bg-amber-400' : 'bg-red-500'}`} />
+                                    // Waiting for Claude Desktop to open is normal (amber); red means something needs fixing
+                                    <span className={`absolute top-1 right-1 w-1.5 h-1.5 rounded-full ${bridgeState.status === 'connected' ? (bridgeState.sessions.length ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500') : bridgeState.problem || (bridgeState.status === 'unavailable' && bridgeState.settings.connection !== 'helper') ? 'bg-red-500' : 'bg-amber-400'}`} />
                                 )}
                             </button>
                             <button

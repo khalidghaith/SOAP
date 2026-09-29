@@ -59,16 +59,16 @@ SOAP is a web-based architectural programming and spatial layout tool. It allows
 - **Site Check**: Live report of site area, buildable area, coverage, FAR and height, with spaces that break the rules outlined in red.
 - **Satellite Underlay**: Adds an aerial photo of the site as a locked, scaled reference image (Esri World Imagery).
 
-### 7. Connect an AI Assistant (Claude, Codex)
-Claude and Codex can read and edit the open project through the [Model Context Protocol](https://modelcontextprotocol.io). Connecting takes two steps — click the **plug** icon in the top bar, then:
-- **Claude Desktop**: click **Add to Claude**, then open the downloaded `SOAP.mcpb` and click **Install**. (SOAP builds a personal Claude Desktop extension with your private link inside; Claude ships its own Node.js, so nothing else is needed.)
-- **Codex**: click **Copy command**, then paste it into a terminal (`codex mcp add soap --url <your link>`).
+### 7. Connect an AI Assistant (Claude)
+Claude can read and edit the open project through the [Model Context Protocol](https://modelcontextprotocol.io). Connecting takes two steps — click the **plug** icon in the top bar, click **Add to Claude**, then open the downloaded `SOAP.mcpb` and click **Install** in Claude Desktop.
 
-The first click also turns on AI access for that assistant. Keep SOAP open while the assistant works; every change it makes is one undo step (Ctrl+Z), and **More options** in the panel shows the activity log, per-assistant switches, your private link (with **Reset**) and manual setup for other apps such as Antigravity.
+`SOAP.mcpb` is a Claude Desktop extension holding the SOAP helper ([mcp/helper.ts](mcp/helper.ts)), which runs on Claude's built-in Node.js while Claude Desktop is open. SOAP, in your browser, connects to it on this computer (`127.0.0.1:47913`), so no server or setup is needed, and your project never leaves your computer except to reach Claude. The helper only accepts the SOAP site you added it from (and pages on this computer). Chrome and Edge may ask once to let SOAP **access devices on your local network**: click **Allow**.
+
+Adding Claude also turns on AI access. Keep SOAP open while Claude works; every change it makes is one undo step (Ctrl+Z). **More options** in the panel shows the activity log, per-assistant switches, and setup for other MCP apps (Codex, Claude Code, Antigravity), which can use the helper at `http://127.0.0.1:47913/mcp` while Claude Desktop is open.
 
 Tools: `get_project`, `get_planning_rules`, `add_spaces`, `update_spaces`, `place_spaces`, `unplace_spaces`, `remove_spaces`, `update_floors`, `set_site`, `check_layout`, `get_plan_image` (a labelled picture of any floor with a meter grid, site and rule breaks), `show_floor`, `undo`.
 
-**Site owner, once:** AI apps reach the hosted SOAP through a small relay on Cloudflare's free plan. Deploy it and set `VITE_SOAP_RELAY_URL` in Vercel — see [relay/README.md](relay/README.md). While developing, `npm run dev` also serves a bridge at `http://localhost:3000/mcp` (choose **This computer (dev server)** under More options).
+Other ways to connect (More options → Connection): `npm run dev` serves a bridge at `http://localhost:3000/mcp` (**Dev server**), and the optional Cloudflare relay reaches SOAP from AI apps on other computers (**Online relay**; see [relay/README.md](relay/README.md)).
 
 ### 8. AI Assistance
 - **Generative Layout**: Powered by Google Gemini, the app can suggest spatial arrangements based on your program data and zoning (requires API Key).
@@ -101,7 +101,7 @@ Tools: `get_project`, `get_planning_rules`, `add_spaces`, `update_spaces`, `plac
 1. Install dependencies:
    `npm install`
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-   (Optional) Set `VITE_SOAP_RELAY_URL` to your deployed relay for AI Bridges — see [relay/README.md](relay/README.md)
+   (Optional) Set `VITE_SOAP_RELAY_URL` to a deployed relay — only for AI apps on other computers, see [relay/README.md](relay/README.md)
 3. Run the app:
    `npm run dev`
 
