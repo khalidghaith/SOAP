@@ -59,19 +59,16 @@ SOAP is a web-based architectural programming and spatial layout tool. It allows
 - **Site Check**: Live report of site area, buildable area, coverage, FAR and height, with spaces that break the rules outlined in red.
 - **Satellite Underlay**: Adds an aerial photo of the site as a locked, scaled reference image (Esri World Imagery).
 
-### 7. AI Bridges (MCP)
-Claude, ChatGPT, Gemini and other AI apps can read and edit the open project through the [Model Context Protocol](https://modelcontextprotocol.io).
-- **Your AI link**: Click the **plug** icon in the top bar and turn on **AI access**. SOAP shows a private link; paste it into your AI app. It works with the hosted SOAP through a small cloud relay (see [relay/README.md](relay/README.md) to deploy it once on Cloudflare's free plan).
-- **Switches**: Choose which assistants are allowed (Claude, Gemini, ChatGPT, other apps). Switched-off assistants are refused.
-- **Safe to try**: Every AI change is one undo step (Ctrl+Z), and the panel logs every call. The link works like a password; **Reset** it to cut off old copies.
-- **Tools**: `get_project`, `get_planning_rules`, `add_spaces`, `update_spaces`, `place_spaces`, `unplace_spaces`, `remove_spaces`, `update_floors`, `set_site`, `check_layout`, `get_plan_image`, `show_floor`, `undo`.
-- **Plan images**: `get_plan_image` gives the AI a picture of any floor — spaces labelled with name and area, a meter grid matching the coordinates, the site and setbacks, rule breaks in red, and optionally a faint outline of another floor or the satellite underlay — so it can check its work visually.
+### 7. Connect an AI Assistant (Claude, Codex)
+Claude and Codex can read and edit the open project through the [Model Context Protocol](https://modelcontextprotocol.io). Connecting takes two steps — click the **plug** icon in the top bar, then:
+- **Claude Desktop**: click **Add to Claude**, then open the downloaded `SOAP.mcpb` and click **Install**. (SOAP builds a personal Claude Desktop extension with your private link inside; Claude ships its own Node.js, so nothing else is needed.)
+- **Codex**: click **Copy command**, then paste it into a terminal (`codex mcp add soap --url <your link>`).
 
-Connecting (the panel shows these with your link filled in):
-- **Claude** (claude.ai / desktop): Settings → Connectors → Add custom connector → paste your link. **Claude Code**: `claude mcp add --transport http soap <your link>`.
-- **ChatGPT**: Settings → Apps & Connectors → Advanced → Developer mode, then create a connector with your link and no authentication.
-- **Gemini CLI**: add `{"mcpServers": {"soap": {"httpUrl": "<your link>"}}}` to `~/.gemini/settings.json`.
-- **Developing locally**: `npm run dev` also serves a bridge at `http://localhost:3000/mcp` — choose **This computer (dev server)** in the panel; no relay needed.
+The first click also turns on AI access for that assistant. Keep SOAP open while the assistant works; every change it makes is one undo step (Ctrl+Z), and **More options** in the panel shows the activity log, per-assistant switches, your private link (with **Reset**) and manual setup for other apps such as Antigravity.
+
+Tools: `get_project`, `get_planning_rules`, `add_spaces`, `update_spaces`, `place_spaces`, `unplace_spaces`, `remove_spaces`, `update_floors`, `set_site`, `check_layout`, `get_plan_image` (a labelled picture of any floor with a meter grid, site and rule breaks), `show_floor`, `undo`.
+
+**Site owner, once:** AI apps reach the hosted SOAP through a small relay on Cloudflare's free plan. Deploy it and set `VITE_SOAP_RELAY_URL` in Vercel — see [relay/README.md](relay/README.md). While developing, `npm run dev` also serves a bridge at `http://localhost:3000/mcp` (choose **This computer (dev server)** under More options).
 
 ### 8. AI Assistance
 - **Generative Layout**: Powered by Google Gemini, the app can suggest spatial arrangements based on your program data and zoning (requires API Key).

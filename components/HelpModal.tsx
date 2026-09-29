@@ -90,11 +90,11 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
             <li><strong>Site check</strong>: Spaces that break the site rules are outlined in red, with a live report in the Site panel.</li>
           </ul>
 
-          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>7. AI Bridges (Claude, ChatGPT, Gemini)</h4>
+          <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>7. Connect an AI assistant (Claude, Codex)</h4>
           <ul>
             <li><strong>What it does</strong>: Lets an AI assistant read your project and place, edit or check spaces for you. Every AI change can be undone with Ctrl+Z.</li>
-            <li><strong>How to start</strong>: Click the <strong>plug</strong> icon in the top bar. The panel walks you through it: turn on AI access, copy your AI link, and add it to your AI app.</li>
-            <li><strong>First time on a site</strong>: the site owner sets up a free relay once; the panel shows the steps.</li>
+            <li><strong>Claude Desktop</strong>: click the <strong>plug</strong> icon → <strong>Add to Claude</strong>, then open the downloaded <code>SOAP.mcpb</code> and click <strong>Install</strong>.</li>
+            <li><strong>Codex</strong>: click the <strong>plug</strong> icon → <strong>Copy command</strong>, then paste it into a terminal.</li>
           </ul>
 
           <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>8. AI Assistance</h4>
@@ -154,7 +154,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
           <p>Click the compass to set the location and true north. Then open <strong>Site</strong> mode and choose <strong>Google Earth (KML/KMZ)</strong> or draw the boundary with <strong>Boundary</strong>. Click the street edge and choose <strong>Align edge to street</strong>, then set setbacks and limits.</p>
 
           <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>Working with an AI Assistant</h4>
-          <p>Click the <strong>plug</strong> icon, follow the three steps, then ask your assistant something like <em>"Look at my SOAP project, arrange the ground floor following the planning rules, and show me the plan."</em> Keep the SOAP tab open while it works; the panel's Activity list shows everything it did.</p>
+          <p>Click the <strong>plug</strong> icon and use <strong>Add to Claude</strong> (or <strong>Copy command</strong> for Codex). Then ask your assistant something like <em>"Look at my SOAP project, arrange the ground floor following the planning rules, and show me the plan."</em> Keep the SOAP tab open while it works.</p>
 
           <h4 style={{ fontWeight: 'bold', marginTop: '1.5rem', marginBottom: '0.5rem' }}>3D Visualization</h4>
           <p>Switch to <strong>Volumes</strong> view to see the massing. Adjust floor heights in the Floor Settings to change extrusion heights.</p>

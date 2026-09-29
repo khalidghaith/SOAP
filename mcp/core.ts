@@ -299,7 +299,7 @@ export type BridgeClientKind = 'claude' | 'gemini' | 'chatgpt' | 'other';
 export const classifyClient = (name: string | undefined): BridgeClientKind => {
     const n = (name || '').toLowerCase();
     if (n.includes('claude') || n.includes('anthropic')) return 'claude';
-    if (n.includes('gemini') || n.includes('google')) return 'gemini';
+    if (n.includes('gemini') || n.includes('google') || n.includes('antigravity')) return 'gemini';
     if (n.includes('openai') || n.includes('chatgpt') || n.includes('codex')) return 'chatgpt';
     return 'other';
 };

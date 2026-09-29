@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { X, Plug, Copy, Check, ChevronDown, ChevronRight, RefreshCw, Trash2, AlertTriangle, ShieldCheck, Cloud, Laptop, KeyRound, Circle, CheckCircle2, ExternalLink, Lightbulb } from 'lucide-react';
+import { X, Plug, Copy, Check, RefreshCw, Trash2, AlertTriangle, Download, Terminal, CheckCircle2, Loader2, Lightbulb, ExternalLink, ChevronRight } from 'lucide-react';
 import { bridge, useBridge, bridgeEndpoints, CLIENT_LABELS, BridgeStatus } from '../services/bridgeClient';
 import type { BridgeClientKind } from '../utils/bridgeCommands';
+import { buildClaudeBundle, downloadClaudeBundle, svgUrlToPng } from '../utils/claudeBundle';
 import { confirmDialog } from './Notifications';
+import SoapLogo from '../lib/symbols/SOAP-Logo.svg';
 
 interface BridgesModalProps {
     onClose: () => void;
@@ -11,7 +13,7 @@ interface BridgesModalProps {
 const STATUS: Record<BridgeStatus, { label: string; tone: string }> = {
     off: { label: 'Off', tone: 'bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-gray-400' },
     connecting: { label: 'Connecting…', tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300' },
-    connected: { label: 'Ready', tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' },
+    connected: { label: 'On', tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' },
     unavailable: { label: 'Not connected', tone: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300' },
 };
 
@@ -22,98 +24,77 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; disab
     </label>
 );
 
-const useCopy = () => {
-    const [copied, setCopied] = useState<string | null>(null);
-    const copy = async (text: string) => {
-        try {
-            await navigator.clipboard.writeText(text);
-            setCopied(text);
-            setTimeout(() => setCopied(c => (c === text ? null : c)), 1500);
-        } catch { /* clipboard blocked */ }
-    };
-    return { copied, copy };
+const copyText = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
 };
 
 const CopyBlock: React.FC<{ text: string }> = ({ text }) => {
-    const { copied, copy } = useCopy();
+    const [done, setDone] = useState(false);
     return (
         <div className="relative">
             <pre className="text-[10px] leading-relaxed font-mono bg-slate-900 text-slate-100 rounded-lg p-2.5 pr-9 overflow-x-auto whitespace-pre">{text}</pre>
-            <button onClick={() => copy(text)} className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/10 text-slate-300 hover:bg-white/20 hover:text-white" title="Copy">
-                {copied === text ? <Check size={12} /> : <Copy size={12} />}
+            <button onClick={async () => { if (await copyText(text)) { setDone(true); setTimeout(() => setDone(false), 1500); } }} className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/10 text-slate-300 hover:bg-white/20 hover:text-white" title="Copy">
+                {done ? <Check size={12} /> : <Copy size={12} />}
             </button>
         </div>
     );
 };
 
+const Step: React.FC<{ n: number; done?: boolean; active?: boolean; children: React.ReactNode }> = ({ n, done, active, children }) => (
+    <div className={`flex items-start gap-2 ${done ? 'text-slate-400' : active ? 'text-slate-800 dark:text-gray-100' : 'text-slate-500 dark:text-gray-400'}`}>
+        <span className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[10px] font-black ${done ? 'bg-emerald-500 text-white' : active ? 'bg-orange-500 text-white' : 'bg-slate-200 dark:bg-white/10'}`}>
+            {done ? <Check size={11} /> : n}
+        </span>
+        <div className="flex-1 min-w-0 pt-0.5">{children}</div>
+    </div>
+);
+
 export const BridgesModal: React.FC<BridgesModalProps> = ({ onClose }) => {
     const { settings, status, sessions, log } = useBridge();
-    const [open, setOpen] = useState<BridgeClientKind | null>(null);
-    const [relayDraft, setRelayDraft] = useState(settings.relayUrl);
-    const [showLink, setShowLink] = useState(false);
-    const { copied, copy } = useCopy();
     const endpoints = bridgeEndpoints(settings);
-    const isRelay = settings.connection === 'relay';
     const link = endpoints?.mcp || '';
-    const shown = link && !showLink && isRelay ? link.replace(settings.room, `${settings.room.slice(0, 4)}••••••••`) : link;
+    const ready = !!endpoints;
+    const [claudeStarted, setClaudeStarted] = useState(false);
+    const [codexStarted, setCodexStarted] = useState(false);
+    const [building, setBuilding] = useState(false);
+    const [relayDraft, setRelayDraft] = useState(settings.relayUrl);
+    const [linkShown, setLinkShown] = useState(false);
 
-    // Remember that the current link was copied (for the checklist)
-    const COPIED_KEY = 'SOAP_AI_LINK_COPIED';
-    const [copiedRoom, setCopiedRoom] = useState(() => { try { return localStorage.getItem(COPIED_KEY) || ''; } catch { return ''; } });
-    const copyLink = () => {
-        copy(link);
-        setCopiedRoom(settings.room);
-        try { localStorage.setItem(COPIED_KEY, settings.room); } catch { /* storage unavailable */ }
+    const connected = (kind: BridgeClientKind) => sessions.some(s => s.kind === kind);
+    const codexCommand = `codex mcp add soap --url ${link}`;
+
+    // The first action also turns AI access on for that app
+    const allow = (kind: BridgeClientKind) => bridge.updateSettings({ enabled: true, clients: { [kind]: true } as Record<BridgeClientKind, boolean> });
+
+    const addToClaude = async () => {
+        if (!link) return;
+        setBuilding(true);
+        try {
+            allow('claude');
+            const icon = await svgUrlToPng(SoapLogo);
+            downloadClaudeBundle(buildClaudeBundle(link, icon));
+            setClaudeStarted(true);
+        } finally {
+            setBuilding(false);
+        }
     };
-    const needsRelay = isRelay && !endpoints;
-    const steps = [
-        { done: settings.enabled && status === 'connected', label: 'Turn on AI access', hint: settings.enabled && status !== 'connected' ? 'Connecting…' : 'Use the button here or the switch below.' },
-        { done: copiedRoom === settings.room && !!link, label: 'Copy your AI link', hint: 'It works like a password — keep it private.' },
-        { done: sessions.length > 0, label: 'Add the link to your AI app', hint: sessions.length ? `Connected: ${[...new Set(sessions.map(x => x.name))].join(', ')}` : 'Pick your app for the exact steps.' },
-    ];
+
+    const copyCodex = async () => {
+        allow('chatgpt');
+        if (await copyText(codexCommand)) setCodexStarted(true);
+    };
 
     const resetLink = async () => {
         const ok = await confirmDialog({
             title: 'Reset your AI link?',
-            message: 'AI apps using the current link will lose access. You will need to paste the new link into each one.',
+            message: 'Apps connected with the current link lose access. Add Claude (or Codex) again afterwards.',
             confirmLabel: 'Reset link',
         });
-        if (ok) bridge.resetLink();
+        if (ok) { bridge.resetLink(); setClaudeStarted(false); setCodexStarted(false); }
     };
 
-    const L = link || '<your link>';
-    const setup: Record<BridgeClientKind, React.ReactNode> = {
-        claude: (
-            <div className="space-y-2">
-                <p><b>Claude (claude.ai or the desktop app)</b>: Settings → Connectors → <b>Add custom connector</b>, name it SOAP and paste your link.</p>
-                <p><b>Claude Code</b>: run once in a terminal:</p>
-                <CopyBlock text={`claude mcp add --transport http soap ${L}`} />
-                <p>Older Claude Desktop without custom connectors: add this to <code>claude_desktop_config.json</code> (needs Node.js), then restart Claude:</p>
-                <CopyBlock text={JSON.stringify({ mcpServers: { soap: { command: 'npx', args: ['-y', 'mcp-remote', L] } } }, null, 2)} />
-            </div>
-        ),
-        gemini: (
-            <div className="space-y-2">
-                <p><b>Gemini CLI</b>: add to <code>~/.gemini/settings.json</code>:</p>
-                <CopyBlock text={JSON.stringify({ mcpServers: { soap: { httpUrl: L } } }, null, 2)} />
-            </div>
-        ),
-        chatgpt: isRelay ? (
-            <div className="space-y-2">
-                <p><b>ChatGPT</b>: Settings → Apps &amp; Connectors → Advanced settings → turn on <b>Developer mode</b>. Then create a connector named SOAP with your link as the server URL and <b>No authentication</b>. (Menu names change from time to time.)</p>
-            </div>
-        ) : (
-            <p>ChatGPT connects from OpenAI's servers and can't reach this computer. Use the <b>Online relay</b> connection instead.</p>
-        ),
-        other: (
-            <div className="space-y-2">
-                <p>Any MCP app that supports Streamable HTTP (Cursor, VS Code, Windsurf…) can use your link as the server URL:</p>
-                <CopyBlock text={L} />
-            </div>
-        ),
-    };
-
-    const kinds: BridgeClientKind[] = ['claude', 'gemini', 'chatgpt', 'other'];
+    const kinds: BridgeClientKind[] = ['claude', 'chatgpt', 'gemini', 'other'];
+    const maskedLink = link && settings.connection === 'relay' && !linkShown ? link.replace(settings.room, `${settings.room.slice(0, 4)}••••••••`) : link;
 
     return (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[250] flex items-center justify-center p-4 animate-in fade-in duration-200" onMouseDown={onClose}>
@@ -125,200 +106,164 @@ export const BridgesModal: React.FC<BridgesModalProps> = ({ onClose }) => {
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-2xl bg-orange-100 dark:bg-orange-950/20 text-orange-600 dark:text-orange-400 flex items-center justify-center"><Plug size={20} /></div>
                         <div>
-                            <h2 className="text-base font-black text-slate-800 dark:text-gray-100 uppercase tracking-tight">AI Bridges</h2>
-                            <p className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">Let Claude, Gemini or ChatGPT read and edit this project through MCP</p>
+                            <h2 className="text-base font-black text-slate-800 dark:text-gray-100 uppercase tracking-tight">Connect an AI assistant</h2>
+                            <p className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">Let Claude or Codex work on this project with you — two steps</p>
                         </div>
                     </div>
                     <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-gray-300 rounded-full hover:bg-slate-100 dark:hover:bg-white/5"><X size={18} /></button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5 text-[11px] text-slate-600 dark:text-gray-300">
-                    {/* Guide */}
-                    {needsRelay ? (
-                        <div className="rounded-2xl border border-orange-200 dark:border-orange-500/30 bg-orange-50/60 dark:bg-orange-500/10 p-4 space-y-3">
-                            <h3 className="text-xs font-black text-slate-800 dark:text-gray-100 uppercase tracking-wide">One-time setup: the relay</h3>
-                            <p>Claude, ChatGPT and Gemini run on their own servers, so they need an internet address to reach SOAP in your browser. A small, free <b>relay</b> on Cloudflare gives them one. It is set up once for this site; after that, everyone just copies their own AI link.</p>
-                            <p className="font-semibold">Not the owner of this site? Ask the owner for the relay address and paste it into <i>Relay address</i> below.</p>
-                            <details className="rounded-xl bg-white/70 dark:bg-black/20 border border-orange-100 dark:border-white/10 p-3" open>
-                                <summary className="cursor-pointer font-bold text-slate-800 dark:text-gray-100">Site owner: set up the relay (about 5 minutes)</summary>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-4 text-[11px] text-slate-600 dark:text-gray-300">
+                    {!ready ? (
+                        // Only the site owner ever needs this (once); then VITE_SOAP_RELAY_URL makes it disappear for everyone
+                        <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-4 space-y-2">
+                            <h3 className="text-xs font-black text-slate-800 dark:text-gray-100">AI connections aren't switched on for this site yet</h3>
+                            <p>The site owner needs to set this up once. After that, connecting takes two clicks.</p>
+                            <details className="rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200/60 dark:border-white/10 p-3">
+                                <summary className="cursor-pointer font-bold text-slate-700 dark:text-gray-200">Site owner: one-time setup</summary>
                                 <ol className="list-decimal pl-4 mt-2 space-y-2">
                                     <li>Create a free Cloudflare account: <a className="text-orange-600 hover:underline inline-flex items-center gap-0.5" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noreferrer">dash.cloudflare.com/sign-up <ExternalLink size={10} /></a></li>
-                                    <li>Install Node.js (the LTS version) if you do not have it: <a className="text-orange-600 hover:underline inline-flex items-center gap-0.5" href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org <ExternalLink size={10} /></a></li>
-                                    <li>Open a terminal in your SOAP code folder and run these one at a time. The login step opens your browser: sign in to Cloudflare and click <b>Allow</b>.
-                                        <CopyBlock text={'cd relay\nnpm install\nnpx wrangler login\nnpx wrangler deploy'} />
-                                    </li>
-                                    <li>The last command prints an address ending in <code>.workers.dev</code>. Paste it into <b>Relay address</b> below.</li>
-                                    <li>So everyone gets it automatically: in Vercel, open the project → <b>Settings → Environment Variables</b>, add <code>VITE_SOAP_RELAY_URL</code> with that address (for Production and Preview), then redeploy.</li>
+                                    <li>In a terminal, in the SOAP code folder (Node.js needed), run:<CopyBlock text={'cd relay\nnpm install\nnpx wrangler login\nnpx wrangler deploy'} /></li>
+                                    <li>In Vercel → project → Settings → Environment Variables, add <code>VITE_SOAP_RELAY_URL</code> = the <code>.workers.dev</code> address it printed, then redeploy.</li>
                                 </ol>
                             </details>
                         </div>
                     ) : (
-                        <div className="rounded-2xl border border-slate-200/60 dark:border-white/10 p-4 space-y-2.5">
-                            <h3 className="text-xs font-black text-slate-800 dark:text-gray-100 uppercase tracking-wide">Connect your AI in 3 steps</h3>
-                            <ol className="space-y-2">
-                                {steps.map((st, i) => (
-                                    <li key={i} className="flex items-start gap-2.5">
-                                        {st.done ? <CheckCircle2 size={16} className="text-emerald-500 shrink-0" /> : <Circle size={16} className="text-slate-300 dark:text-gray-600 shrink-0" />}
-                                        <div className="flex-1 min-w-0">
-                                            <div className={`font-bold ${st.done ? 'text-slate-400 line-through' : 'text-slate-800 dark:text-gray-100'}`}>{i + 1}. {st.label}</div>
-                                            <div className="text-[10px] text-slate-400">{st.hint}</div>
-                                        </div>
-                                        {i === 0 && !settings.enabled && (
-                                            <button onClick={() => bridge.updateSettings({ enabled: true })} className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold">Turn on</button>
-                                        )}
-                                        {i === 1 && (
-                                            <button disabled={!link} onClick={copyLink} className="px-2.5 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-[10px] font-bold flex items-center gap-1">
-                                                {copied === link && link ? <Check size={11} /> : <Copy size={11} />} Copy link
-                                            </button>
-                                        )}
-                                        {i === 2 && (
-                                            <div className="flex gap-1">
-                                                {(['claude', 'chatgpt', 'gemini'] as BridgeClientKind[]).map(k => (
-                                                    <button key={k} onClick={() => setOpen(k)} className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${open === k ? 'border-orange-400 text-orange-600' : 'border-slate-200 dark:border-white/10 text-slate-500 hover:text-orange-600'}`}>{CLIENT_LABELS[k]}</button>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </li>
-                                ))}
-                            </ol>
-                            <p className="flex items-start gap-1.5 text-[10px] text-slate-500 dark:text-gray-400 pt-1 border-t border-slate-100 dark:border-white/5">
+                        <>
+                            <div className="grid sm:grid-cols-2 gap-3">
+                                {/* Claude Desktop */}
+                                <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-4 space-y-3 flex flex-col">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-sm font-black text-slate-800 dark:text-gray-100">Claude Desktop</h3>
+                                        {connected('claude') && <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600"><CheckCircle2 size={12} /> Connected</span>}
+                                    </div>
+                                    <Step n={1} done={claudeStarted || connected('claude')} active={!claudeStarted}>
+                                        <button onClick={addToClaude} disabled={building} className="w-full py-2 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-xs font-black flex items-center justify-center gap-1.5 shadow-sm">
+                                            {building ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Add to Claude
+                                        </button>
+                                    </Step>
+                                    <Step n={2} done={connected('claude')} active={claudeStarted && !connected('claude')}>
+                                        Open <b>SOAP.mcpb</b> from your downloads and click <b>Install</b> in Claude.
+                                    </Step>
+                                    <p className="text-[10px] text-slate-400 mt-auto">No Claude Desktop yet? <a className="text-orange-600 hover:underline" href="https://claude.ai/download" target="_blank" rel="noreferrer">Download it</a></p>
+                                </div>
+
+                                {/* Codex */}
+                                <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-4 space-y-3 flex flex-col">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-sm font-black text-slate-800 dark:text-gray-100">Codex <span className="font-medium text-slate-400">(ChatGPT)</span></h3>
+                                        {connected('chatgpt') && <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600"><CheckCircle2 size={12} /> Connected</span>}
+                                    </div>
+                                    <Step n={1} done={codexStarted || connected('chatgpt')} active={!codexStarted}>
+                                        <button onClick={copyCodex} className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-700 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-black text-xs font-black flex items-center justify-center gap-1.5 shadow-sm">
+                                            {codexStarted ? <Check size={14} /> : <Terminal size={14} />} {codexStarted ? 'Copied' : 'Copy command'}
+                                        </button>
+                                    </Step>
+                                    <Step n={2} done={connected('chatgpt')} active={codexStarted && !connected('chatgpt')}>
+                                        Paste it into a terminal and press <b>Enter</b>. Codex is ready next time you start it.
+                                    </Step>
+                                </div>
+                            </div>
+
+                            <p className="flex items-start gap-1.5 text-[10px] text-slate-500 dark:text-gray-400">
                                 <Lightbulb size={12} className="shrink-0 mt-0.5 text-amber-500" />
-                                <span>Then just ask, e.g. <i>"Look at my SOAP project, arrange the ground floor following the planning rules, and show me the plan."</i> Keep this SOAP tab open while the AI works.</span>
+                                <span>Then ask, for example: <i>"Look at my SOAP project, arrange the ground floor following the planning rules, and show me the plan."</i> Keep SOAP open while the assistant works — every change it makes can be undone with Ctrl+Z.</span>
                             </p>
-                        </div>
+                        </>
                     )}
 
-                    {/* Master switch */}
-                    <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-200/60 dark:border-white/10">
-                        <div className="min-w-0">
+                    {/* Access switches */}
+                    <div className="rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-200/60 dark:border-white/10 p-3 space-y-2.5">
+                        <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
-                                <span className="text-xs font-black text-slate-800 dark:text-gray-100 uppercase tracking-wide">AI access</span>
+                                <span className="text-xs font-black text-slate-800 dark:text-gray-100">AI access</span>
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${STATUS[status].tone}`}>{STATUS[status].label}</span>
-                            </div>
-                            <p className="text-[10px] text-slate-400 mt-1">
-                                {status === 'unavailable'
-                                    ? (isRelay
-                                        ? (endpoints ? 'Could not reach the relay. Check the relay address below and your internet connection.' : 'Enter the relay address below to connect.')
-                                        : 'Could not reach the bridge on this computer. It runs with the dev server: "npm run dev", then open SOAP at localhost.')
-                                    : 'When on, AI apps with your link can read the project and make changes while SOAP is open. Every change is one Ctrl+Z.'}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                            {status === 'unavailable' && endpoints && (
-                                <button onClick={() => bridge.retry()} className="p-1.5 rounded-lg text-slate-400 hover:text-orange-600 hover:bg-white dark:hover:bg-white/10" title="Try again"><RefreshCw size={14} /></button>
-                            )}
-                            <Toggle checked={settings.enabled} onChange={v => bridge.updateSettings({ enabled: v })} label="AI access" />
-                        </div>
-                    </div>
-
-                    {/* Connection */}
-                    <div className="space-y-3">
-                        <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl gap-1">
-                            {([['relay', <Cloud size={13} />, 'Online relay'], ['local', <Laptop size={13} />, 'This computer (dev server)']] as const).map(([value, icon, label]) => (
-                                <button
-                                    key={value}
-                                    onClick={() => bridge.updateSettings({ connection: value })}
-                                    className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all ${settings.connection === value ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-gray-200'}`}
-                                >
-                                    {icon}{label}
-                                </button>
-                            ))}
-                        </div>
-
-                        {isRelay && (
-                            <label className="block space-y-1">
-                                <span className="text-[10px] font-bold text-slate-500">Relay address</span>
-                                <input
-                                    value={relayDraft}
-                                    placeholder="https://soap-relay.your-account.workers.dev"
-                                    onChange={e => setRelayDraft(e.target.value)}
-                                    onBlur={() => relayDraft !== settings.relayUrl && bridge.updateSettings({ relayUrl: relayDraft.trim() })}
-                                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                                    className="w-full text-[11px] font-mono bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-orange-500/40"
-                                />
-                            </label>
-                        )}
-
-                        <div className="space-y-1">
-                            <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5"><KeyRound size={11} /> Your AI link</span>
-                            <div className="flex items-center gap-1.5">
-                                <code className="flex-1 min-w-0 truncate text-[11px] bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-1.5 px-2 select-all" onClick={() => setShowLink(true)} title={isRelay ? 'Click to reveal' : undefined}>
-                                    {shown || 'Enter the relay address first'}
-                                </code>
-                                <button disabled={!link} onClick={copyLink} className="px-2.5 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-[10px] font-bold flex items-center gap-1">
-                                    {copied === link && link ? <Check size={12} /> : <Copy size={12} />} Copy
-                                </button>
-                                {isRelay && (
-                                    <button onClick={resetLink} className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-[10px] font-bold text-slate-500 hover:text-red-600" title="Make a new link; the old one stops working">
-                                        Reset
-                                    </button>
+                                {status === 'unavailable' && ready && (
+                                    <button onClick={() => bridge.retry()} className="p-1 rounded-lg text-slate-400 hover:text-orange-600" title="Try again"><RefreshCw size={12} /></button>
                                 )}
                             </div>
-                            {isRelay && (
-                                <p className="flex items-start gap-1.5 text-[10px] text-amber-700 dark:text-amber-300">
-                                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-                                    Treat this link like a password: anyone who has it can use your open SOAP while AI access is on. Reset it if it leaks.
-                                </p>
-                            )}
+                            <Toggle checked={settings.enabled} onChange={v => bridge.updateSettings({ enabled: v })} label="AI access" />
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-2">
+                            {kinds.map(kind => (
+                                <label key={kind} className={`flex items-center gap-1.5 text-[10px] font-semibold ${settings.enabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                                    <Toggle checked={settings.clients[kind]} disabled={!settings.enabled} onChange={v => bridge.updateSettings({ clients: { [kind]: v } as Record<BridgeClientKind, boolean> })} label={`Allow ${CLIENT_LABELS[kind]}`} />
+                                    {CLIENT_LABELS[kind]}
+                                    {connected(kind) && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Connected" />}
+                                </label>
+                            ))}
                         </div>
                     </div>
 
-                    {/* Per-client switches */}
-                    <div className="space-y-2">
-                        {kinds.map(kind => {
-                            const connected = sessions.filter(s => s.kind === kind);
-                            return (
-                                <div key={kind} className="rounded-2xl border border-slate-200/60 dark:border-white/10 overflow-hidden">
-                                    <div className="flex items-center gap-3 px-4 py-3">
-                                        <button onClick={() => setOpen(open === kind ? null : kind)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-                                            {open === kind ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-                                            <span className="text-xs font-bold text-slate-800 dark:text-gray-100">{CLIENT_LABELS[kind]}</span>
-                                            {connected.length > 0 && (
-                                                <span className="truncate px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" title={connected.map(s => `${s.name} ${s.version}`).join(', ')}>
-                                                    ● {[...new Set(connected.map(s => s.name))].join(', ')}
-                                                </span>
-                                            )}
-                                            <span className="text-[10px] text-slate-400 ml-auto shrink-0">Setup</span>
-                                        </button>
-                                        <Toggle
-                                            checked={settings.clients[kind]}
-                                            disabled={!settings.enabled}
-                                            onChange={v => bridge.updateSettings({ clients: { [kind]: v } as Record<BridgeClientKind, boolean> })}
-                                            label={`Allow ${CLIENT_LABELS[kind]}`}
-                                        />
-                                    </div>
-                                    {open === kind && <div className="px-4 pb-4 pt-1 border-t border-slate-100 dark:border-white/5 space-y-2">{setup[kind]}</div>}
+                    {/* Everything else */}
+                    <details className="group rounded-2xl border border-slate-200/60 dark:border-white/10">
+                        <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-1.5 text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-gray-100">
+                            <ChevronRight size={13} className="transition-transform group-open:rotate-90" /> More options
+                        </summary>
+                        <div className="px-4 pb-4 space-y-4">
+                            <div className="space-y-1">
+                                <span className="text-[10px] font-bold text-slate-500">Your private AI link</span>
+                                <div className="flex items-center gap-1.5">
+                                    <code className="flex-1 min-w-0 truncate text-[11px] bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-1.5 px-2" onClick={() => setLinkShown(true)} title="Click to reveal">
+                                        {maskedLink || '—'}
+                                    </code>
+                                    <button disabled={!link} onClick={() => copyText(link)} className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-[10px] font-bold text-slate-500 hover:text-orange-600 disabled:opacity-40">Copy</button>
+                                    {settings.connection === 'relay' && <button onClick={resetLink} className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-[10px] font-bold text-slate-500 hover:text-red-600">Reset</button>}
                                 </div>
-                            );
-                        })}
-                        <p className="flex items-start gap-1.5 text-[10px] text-slate-400">
-                            <ShieldCheck size={12} className="shrink-0 mt-0.5" />
-                            Your link is what protects access. Apps are then recognised by the name they report, so the switches choose which assistants you're working with; they aren't a password.
-                        </p>
-                    </div>
+                                <p className="flex items-start gap-1.5 text-[10px] text-slate-400">
+                                    <AlertTriangle size={11} className="shrink-0 mt-0.5 text-amber-500" />
+                                    Anyone with this link can use your open SOAP while AI access is on. It belongs to this browser: in another browser, add Claude again. Reset it if it leaks.
+                                </p>
+                            </div>
 
-                    {/* Activity */}
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Activity</h3>
-                            {log.length > 0 && <button onClick={() => bridge.clearLog()} className="text-[10px] text-slate-400 hover:text-red-500 flex items-center gap-1"><Trash2 size={11} /> Clear</button>}
+                            <div className="space-y-1.5">
+                                <span className="text-[10px] font-bold text-slate-500">Other apps (manual setup)</span>
+                                <p><b>Antigravity</b>: Settings → Customizations → Open MCP Config, and add:</p>
+                                <CopyBlock text={JSON.stringify({ mcpServers: { soap: { serverUrl: link || '<your link>' } } }, null, 2)} />
+                                <p><b>Claude Code</b>: <code>claude mcp add --transport http soap {'<your link>'}</code>. <b>Any other MCP app</b>: use your link as the server URL.</p>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <span className="text-[10px] font-bold text-slate-500">Connection</span>
+                                <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl gap-1">
+                                    {([['relay', 'Online relay'], ['local', 'This computer (dev server)']] as const).map(([value, label]) => (
+                                        <button key={value} onClick={() => bridge.updateSettings({ connection: value })}
+                                            className={`flex-1 py-1 rounded-lg text-[10px] font-bold ${settings.connection === value ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm' : 'text-slate-500'}`}>{label}</button>
+                                    ))}
+                                </div>
+                                {settings.connection === 'relay' && (
+                                    <input
+                                        value={relayDraft}
+                                        placeholder="Relay address, e.g. https://soap-relay.your-account.workers.dev"
+                                        onChange={e => setRelayDraft(e.target.value)}
+                                        onBlur={() => relayDraft !== settings.relayUrl && bridge.updateSettings({ relayUrl: relayDraft.trim() })}
+                                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                                        className="w-full text-[11px] font-mono bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-orange-500/40"
+                                    />
+                                )}
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-slate-500">Activity</span>
+                                    {log.length > 0 && <button onClick={() => bridge.clearLog()} className="text-[10px] text-slate-400 hover:text-red-500 flex items-center gap-1"><Trash2 size={11} /> Clear</button>}
+                                </div>
+                                {log.length === 0 ? <p className="text-[10px] text-slate-400">No AI activity yet.</p> : (
+                                    <ul className="divide-y divide-slate-100 dark:divide-white/5 rounded-xl border border-slate-200/60 dark:border-white/10 max-h-40 overflow-y-auto custom-scrollbar">
+                                        {log.map((e, i) => (
+                                            <li key={i} className="flex items-center gap-2 px-3 py-1.5 text-[10px]">
+                                                <span className={e.ok ? 'text-emerald-600' : 'text-red-500'}>{e.ok ? '✓' : '✕'}</span>
+                                                <span className="font-mono text-slate-400 shrink-0">{new Date(e.time).toLocaleTimeString()}</span>
+                                                <span className="font-semibold shrink-0">{e.client}</span>
+                                                <span className="font-mono text-orange-600 dark:text-orange-400 shrink-0">{e.tool}</span>
+                                                {e.message && <span className="truncate text-slate-400" title={e.message}>{e.message}</span>}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
                         </div>
-                        {log.length === 0 ? (
-                            <p className="text-[10px] text-slate-400">No AI activity yet.</p>
-                        ) : (
-                            <ul className="divide-y divide-slate-100 dark:divide-white/5 rounded-xl border border-slate-200/60 dark:border-white/10 max-h-48 overflow-y-auto custom-scrollbar">
-                                {log.map((e, i) => (
-                                    <li key={i} className="flex items-center gap-2 px-3 py-1.5 text-[10px]">
-                                        <span className={e.ok ? 'text-emerald-600' : 'text-red-500'}>{e.ok ? '✓' : '✕'}</span>
-                                        <span className="font-mono text-slate-400 shrink-0">{new Date(e.time).toLocaleTimeString()}</span>
-                                        <span className="font-semibold shrink-0">{e.client}</span>
-                                        <span className="font-mono text-orange-600 dark:text-orange-400 shrink-0">{e.tool}</span>
-                                        {e.message && <span className="truncate text-slate-400" title={e.message}>{e.message}</span>}
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </div>
+                    </details>
                 </div>
             </div>
         </div>

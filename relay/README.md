@@ -32,11 +32,11 @@ In your Vercel (or Netlify) project settings, add the environment variable
 VITE_SOAP_RELAY_URL=https://soap-relay.<your-account>.workers.dev
 ```
 
-and redeploy SOAP. Users can also paste the address into **AI Bridges → Relay address** in SOAP.
+and redeploy SOAP. Users can also paste the address into SOAP under plug icon → **More options** → Connection.
 
 ## Use it
 
-In SOAP, click the plug icon, turn on **AI access**, copy **Your AI link** and add it to your AI app (the panel shows the steps for Claude, ChatGPT and Gemini). The link is a secret: anyone who has it can use your open SOAP while AI access is on. **Reset** makes a new one.
+In SOAP, click the plug icon. **Add to Claude** downloads a personal Claude Desktop extension (open it and click Install); **Copy command** copies the Codex setup command. Both contain the user's private link, which works like a password — **Reset** under More options makes a new one.
 
 ## Develop
 
@@ -44,6 +44,6 @@ In SOAP, click the plug icon, turn on **AI access**, copy **Your AI link** and a
 npm run dev             # relay on http://localhost:8787
 ```
 
-Then in SOAP (AI Bridges → Online relay) set the relay address to `http://localhost:8787`.
+Then in SOAP (plug icon → More options → Online relay) set the relay address to `http://localhost:8787`.
 
 Costs: Workers and SQLite-backed Durable Objects are on Cloudflare's free plan. The tab's connection uses the WebSocket Hibernation API, so an idle SOAP tab costs nothing between AI calls.

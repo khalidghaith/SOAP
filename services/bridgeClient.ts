@@ -40,7 +40,7 @@ export type BridgeHandler = (tool: string, args: unknown, client: BridgeSession)
 
 const SETTINGS_KEY = 'SOAP_AI_BRIDGES';
 const LOG_LIMIT = 50;
-export const CLIENT_LABELS: Record<BridgeClientKind, string> = { claude: 'Claude', gemini: 'Gemini', chatgpt: 'ChatGPT', other: 'Other apps' };
+export const CLIENT_LABELS: Record<BridgeClientKind, string> = { claude: 'Claude', gemini: 'Gemini / Antigravity', chatgpt: 'Codex / ChatGPT', other: 'Other apps' };
 
 // Set when building the hosted app: VITE_SOAP_RELAY_URL=https://soap-relay.<account>.workers.dev
 const DEFAULT_RELAY = ((import.meta as any).env?.VITE_SOAP_RELAY_URL as string | undefined)?.replace(/\/+$/, '') || '';
