@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, COLOR_PALETTE, DIAGRAM_STYLES, DiagramStyle, Point, Floor, VerticalConnection, ZoningTypology, SiteProperties, CanvasGuide } from './types';
+import { Room, COLOR_PALETTE, DIAGRAM_STYLES, DiagramStyle, Point, Floor, VerticalConnection, ZoningTypology, SiteProperties } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { HelpModal } from './components/HelpModal';
@@ -21,12 +21,14 @@ import { validateAiLayout } from './utils/aiLayout';
 import { parseProjectData, parseCsv, parseArea, toCsvField } from './utils/projectStore';
 import { useProjectDocument } from './hooks/useProjectDocument';
 import { useCanvasViewport } from './hooks/useCanvasViewport';
+import { useGuides } from './hooks/useGuides';
+import { GuideLines, GuideActionsPanel } from './components/GuideLayer';
 import { canvasContentBounds } from './utils/canvasBounds';
 import { SpacePropertiesPanel } from './components/SpacePropertiesPanel';
 import { ZonePropertiesPanel } from './components/ZonePropertiesPanel';
 import { NotificationHost, notify, confirmDialog } from './components/Notifications';
 import {
-    Plus, Package, Download, Undo2, Redo2, RotateCcw, TableProperties, PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, Ruler, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, Image as ImageIcon, Box, Layers, Save, Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, LandPlot, Plug
+    Plus, Package, Download, Undo2, Redo2, RotateCcw, TableProperties, PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Ruler, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, Image as ImageIcon, Box, Layers, Save, Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, LandPlot, Plug
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
@@ -42,7 +44,7 @@ import { renderPlanSvg, svgToPngBase64 } from './utils/planRender';
 import { analyzeSite, recenterShape, roomCenter, readGoogleEarthFile, shapeToBoundary, polygonCentroid, rotatePoint, roomWorldPolygon, worldToGeo, geoToWorld, imageryBox, fetchSiteImagery, IMAGERY_ATTRIBUTION, KmlShape } from './utils/site';
 import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
-import { Rulers, getRulerTickInterval } from './components/Rulers';
+import { Rulers } from './components/Rulers';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 
 import { generateSpatialLayout } from './services/geminiService';
@@ -90,8 +92,6 @@ export default function App() {
     const [siteSelection, setSiteSelection] = useState<SiteSelection | null>(null);
     const [fitRequest, setFitRequest] = useState(0);
     const siteModalHistoryRef = useRef(false);
-    const [selectedGuideId, setSelectedGuideId] = useState<string | null>(null);
-    const [draggedGuideId, setDraggedGuideId] = useState<string | null>(null);
 
     // API Key State
     // The .env key is a dev convenience only; it must never be baked into a production bundle
@@ -203,6 +203,11 @@ export default function App() {
     const [gridSizeIndex, setGridSizeIndex] = useState(2); // Default 2m
     const gridSize = GRID_SIZES[gridSizeIndex];
     const currentGridSizeMeters = gridSize * (appSettings.unitSystem === 'imperial' ? 0.3048 : 1.0);
+
+    const {
+        selectedGuideId, setSelectedGuideId,
+        startNewGuide, startDragGuide, toggleLockGuide, rotateGuide, deleteGuide,
+    } = useGuides({ guides, setGuides, addToHistory, toWorld, scale, gridSize, unitSystem: appSettings.unitSystem });
 
     // UI State
     const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
@@ -340,7 +345,7 @@ export default function App() {
         if (!isGuidesMode) {
             setSelectedGuideId(null);
         }
-    }, [isGuidesMode]);
+    }, [isGuidesMode, setSelectedGuideId]);
 
     const handleResetProject = async () => {
         const ok = await confirmDialog({
@@ -492,44 +497,6 @@ export default function App() {
         window.addEventListener('pointermove', handleGlobalPointerMove);
         return () => window.removeEventListener('pointermove', handleGlobalPointerMove);
     }, [isZoneDragging, isBubbleDragging]);
-
-    // Handle guide dragging globally
-    useEffect(() => {
-        if (!draggedGuideId) return;
-
-        const handlePointerMove = (e: PointerEvent) => {
-            const worldPos = toWorld(e.clientX, e.clientY);
-            setGuides(prev => prev.map(g => {
-                if (g.id !== draggedGuideId) return g;
-                
-                const angleRad = ((g.angle || 0) * Math.PI) / 180;
-                let newPos: number;
-                if (g.type === 'h') {
-                    newPos = (-worldPos.x * Math.sin(angleRad) + worldPos.y * Math.cos(angleRad)) / PIXELS_PER_METER;
-                } else {
-                    newPos = (worldPos.x * Math.cos(angleRad) + worldPos.y * Math.sin(angleRad)) / PIXELS_PER_METER;
-                }
-                if (e.shiftKey) {
-                    const isImperial = appSettings.unitSystem === 'imperial';
-                    const { subInterval } = getRulerTickInterval(gridSize, scale, PIXELS_PER_METER, isImperial);
-                    const subIntervalMeters = subInterval * (isImperial ? 0.3048 : 1.0);
-                    newPos = Math.round(newPos / subIntervalMeters) * subIntervalMeters;
-                }
-                return { ...g, position: newPos };
-            }));
-        };
-
-        const handlePointerUp = () => {
-            setDraggedGuideId(null);
-        };
-
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', handlePointerUp);
-        return () => {
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', handlePointerUp);
-        };
-    }, [draggedGuideId, toWorld, gridSize, scale, appSettings.unitSystem, setGuides]);
 
     // --- Core Handlers ---
     const handlePanStart = (e: React.MouseEvent) => {
@@ -1026,50 +993,6 @@ export default function App() {
         reader.readAsText(file);
         e.target.value = '';
     };
-
-    // --- Guide Interaction Handlers ---
-    const handleDragNewGuide = useCallback((type: 'h' | 'v', clientX: number, clientY: number) => {
-        addToHistory();
-        const worldPos = toWorld(clientX, clientY);
-        const newId = `guide-${Date.now()}`;
-        const newGuide: CanvasGuide = {
-            id: newId,
-            type,
-            position: (type === 'h' ? worldPos.y : worldPos.x) / PIXELS_PER_METER,
-            angle: 0,
-            locked: false
-        };
-        setGuides(prev => [...prev, newGuide]);
-        setSelectedGuideId(newId);
-        setDraggedGuideId(newId);
-    }, [addToHistory, toWorld, setGuides]);
-
-    const handleStartDragExistingGuide = useCallback((id: string) => {
-        setSelectedGuideId(id);
-        const guide = guides.find(g => g.id === id);
-        if (guide && !guide.locked) {
-            addToHistory();
-            setDraggedGuideId(id);
-        }
-    }, [guides, addToHistory]);
-
-    const toggleLockGuide = useCallback((id: string) => {
-        addToHistory();
-        setGuides(prev => prev.map(g => g.id === id ? { ...g, locked: !g.locked } : g));
-    }, [addToHistory, setGuides]);
-
-    const rotateGuide = useCallback((id: string, angleDelta: number) => {
-        addToHistory();
-        setGuides(prev => prev.map(g => g.id === id ? { ...g, angle: ((g.angle || 0) + angleDelta) % 360 } : g));
-    }, [addToHistory, setGuides]);
-
-    const deleteGuide = useCallback((id: string) => {
-        addToHistory();
-        setGuides(prev => prev.filter(g => g.id !== id));
-        if (selectedGuideId === id) {
-            setSelectedGuideId(null);
-        }
-    }, [addToHistory, setGuides, selectedGuideId]);
 
     // --- Room Handlers ---
     const updateRoom = useCallback((id: string, updates: Partial<Room>) => {
@@ -2269,54 +2192,14 @@ export default function App() {
                                         </>
                                     )}
 
-                                    {/* Guides Layer */}
-                                    {guides.map(guide => {
-                                        const isSelected = selectedGuideId === guide.id;
-                                        const posPx = guide.position * PIXELS_PER_METER;
-                                        const isVertical = guide.type === 'v';
-                                        const angle = guide.angle || 0;
-                                        
-                                        return (
-                                            <g 
-                                                key={guide.id}
-                                                transform={isVertical ? `rotate(${angle}) translate(${posPx}, 0)` : `rotate(${angle}) translate(0, ${posPx})`}
-                                            >
-                                                {/* Visual Guide Line */}
-                                                <line
-                                                    x1={isVertical ? 0 : -100000}
-                                                    y1={isVertical ? -100000 : 0}
-                                                    x2={isVertical ? 0 : 100000}
-                                                    y2={isVertical ? 100000 : 0}
-                                                    stroke={isSelected ? "#f97316" : (darkMode ? "#06b6d4" : "#0891b2")}
-                                                    strokeWidth={(isSelected ? 1.5 : 0.8) / scale}
-                                                    strokeDasharray={`${2.5 / scale},${2.5 / scale}`}
-                                                    className="pointer-events-none transition-colors duration-200"
-                                                />
-                                                
-                                                {/* Interactive Wide Click-strip (Only when isGuidesMode is active) */}
-                                                {isGuidesMode && (
-                                                    <line
-                                                        x1={isVertical ? 0 : -100000}
-                                                        y1={isVertical ? -100000 : 0}
-                                                        x2={isVertical ? 0 : 100000}
-                                                        y2={isVertical ? 100000 : 0}
-                                                        stroke="transparent"
-                                                        strokeWidth={16 / scale}
-                                                        className={`cursor-grab active:cursor-grabbing pointer-events-auto ${guide.locked ? 'cursor-not-allowed' : ''}`}
-                                                        onPointerDown={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            handleStartDragExistingGuide(guide.id);
-                                                        }}
-                                                        onMouseDown={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                        }}
-                                                    />
-                                                )}
-                                            </g>
-                                        );
-                                    })}
+                                    <GuideLines
+                                        guides={guides}
+                                        selectedGuideId={selectedGuideId}
+                                        scale={scale}
+                                        darkMode={darkMode}
+                                        interactive={isGuidesMode}
+                                        onStartDrag={startDragGuide}
+                                    />
                                 </svg>
                             </div>
 
@@ -2995,98 +2878,25 @@ export default function App() {
                                         pixelsPerMeter={PIXELS_PER_METER}
                                         width={mainRef.current?.getBoundingClientRect().width || window.innerWidth}
                                         height={mainRef.current?.getBoundingClientRect().height || window.innerHeight}
-                                        onDragNewGuide={handleDragNewGuide}
+                                        onDragNewGuide={startNewGuide}
                                     />
                                 )}
 
-                                {/* Floating glassmorphic guide actions panel */}
                                 {(() => {
                                     const selectedGuide = guides.find(g => g.id === selectedGuideId);
                                     if (!selectedGuide || !isGuidesMode || viewMode !== 'CANVAS') return null;
-                                    
-                                    const isVertical = selectedGuide.type === 'v';
-                                    const posPx = selectedGuide.position * PIXELS_PER_METER;
-                                    const angleRad = ((selectedGuide.angle || 0) * Math.PI) / 180;
-                                     
-                                    const viewWidth = mainRef.current?.getBoundingClientRect().width || window.innerWidth;
-                                    const viewHeight = mainRef.current?.getBoundingClientRect().height || window.innerHeight;
-                                     
-                                    // If mostly vertical, keep panel near top (y_screen = 100); if mostly horizontal, keep panel near left (x_screen = 100)
-                                    const isMostlyVertical = isVertical 
-                                        ? Math.abs(Math.cos(angleRad)) >= 0.707 
-                                        : Math.abs(Math.sin(angleRad)) < 0.707;
-                                         
-                                    const targetScreenX = isMostlyVertical ? viewWidth / 2 : 120;
-                                    const targetScreenY = isMostlyVertical ? 100 : viewHeight / 2;
-                                     
-                                    const cx = (targetScreenX - offset.x) / scale;
-                                    const cy = (targetScreenY - offset.y) / scale;
-                                     
-                                    let ax: number, ay: number, ux: number, uy: number;
-                                    if (isVertical) {
-                                        ax = posPx * Math.cos(angleRad);
-                                        ay = posPx * Math.sin(angleRad);
-                                        ux = -Math.sin(angleRad);
-                                        uy = Math.cos(angleRad);
-                                    } else {
-                                        ax = -posPx * Math.sin(angleRad);
-                                        ay = posPx * Math.cos(angleRad);
-                                        ux = Math.cos(angleRad);
-                                        uy = Math.sin(angleRad);
-                                    }
-                                     
-                                    const vx = cx - ax;
-                                    const vy = cy - ay;
-                                    const t = vx * ux + vy * uy;
-                                    const closestWorldX = ax + t * ux;
-                                    const closestWorldY = ay + t * uy;
-                                     
-                                    const rawScreenX = closestWorldX * scale + offset.x;
-                                    const rawScreenY = closestWorldY * scale + offset.y;
-                                     
-                                    const screenX = Math.max(80, Math.min(viewWidth - 180, rawScreenX));
-                                    const screenY = Math.max(80, Math.min(viewHeight - 80, rawScreenY));
-                                        
+                                    const view = mainRef.current?.getBoundingClientRect();
                                     return (
-                                        <div 
-                                            className="absolute z-[150] flex items-center gap-1.5 p-1.5 bg-slate-900/90 dark:bg-slate-950/95 backdrop-blur-md border border-white/10 dark:border-white/5 rounded-full shadow-2xl text-white pointer-events-auto transition-all duration-300"
-                                            style={{
-                                                left: `${screenX}px`,
-                                                top: `${screenY}px`,
-                                                transform: isVertical ? 'translate(-50%, 0)' : 'translate(0, -50%)'
-                                            }}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onPointerDown={(e) => e.stopPropagation()}
-                                        >
-                                            <div className="px-2.5 py-0.5 text-[10px] font-black tracking-wider text-slate-400 border-r border-white/10 select-none uppercase font-sans">
-                                                Guide {isVertical ? 'V' : 'H'}
-                                            </div>
-
-                                            <button
-                                                onClick={() => toggleLockGuide(selectedGuide.id)}
-                                                className={`p-1.5 rounded-full transition-colors ${selectedGuide.locked ? 'text-red-400 hover:bg-red-500/10' : 'text-slate-300 hover:bg-white/10'}`}
-                                                title={selectedGuide.locked ? "Unlock Guide" : "Lock Guide"}
-                                            >
-                                                {selectedGuide.locked ? <Lock size={13} /> : <Unlock size={13} />}
-                                            </button>
-
-                                            <button
-                                                onClick={() => rotateGuide(selectedGuide.id, 90)}
-                                                className="p-1.5 rounded-full text-slate-300 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-1"
-                                                title="Rotate 90°"
-                                            >
-                                                <RotateCcw size={13} />
-                                                <span className="text-[9px] font-bold">90°</span>
-                                            </button>
-
-                                            <button
-                                                onClick={() => deleteGuide(selectedGuide.id)}
-                                                className="p-1.5 rounded-full text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
-                                                title="Delete Guide"
-                                            >
-                                                <Trash2 size={13} />
-                                            </button>
-                                        </div>
+                                        <GuideActionsPanel
+                                            guide={selectedGuide}
+                                            scale={scale}
+                                            offset={offset}
+                                            viewWidth={view?.width || window.innerWidth}
+                                            viewHeight={view?.height || window.innerHeight}
+                                            onToggleLock={toggleLockGuide}
+                                            onRotate={rotateGuide}
+                                            onDelete={deleteGuide}
+                                        />
                                     );
                                 })()}
                             </>
