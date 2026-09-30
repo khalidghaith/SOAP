@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, DIAGRAM_STYLES, DiagramStyle, Point, ZoneColor, Floor, VerticalConnection, ZoningTypology, SiteProperties, CanvasGuide } from './types';
+import { Room, COLOR_PALETTE, DIAGRAM_STYLES, DiagramStyle, Point, Floor, VerticalConnection, ZoningTypology, SiteProperties, CanvasGuide } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { HelpModal } from './components/HelpModal';
 import { AboutModal } from './components/AboutModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
-import { ZoneOverlay } from './components/ZoneOverlay'; // Newly added
+import { ZoneOverlay } from './components/ZoneOverlay';
 import { ExportModal } from './components/ExportModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SitePropertiesModal } from './components/SitePropertiesModal';
@@ -14,7 +14,7 @@ import type { VolumesViewHandle } from './components/VolumesView';
 const VolumesView = React.lazy(() => import('./components/VolumesView').then(m => ({ default: m.VolumesView })));
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AILayoutModal } from './components/AILayoutModal';
-import { applyMagneticPhysics } from './utils/physics'; // Newly added
+import { applyMagneticPhysics } from './utils/physics';
 import { handleExport, getHexColorForZone, getHexBorderForZone } from './utils/exportSystem';
 import { arrangeRooms } from './utils/layout';
 import { validateAiLayout } from './utils/aiLayout';
@@ -42,155 +42,18 @@ import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
 import { Rulers, getRulerTickInterval } from './components/Rulers';
 import SoapLogo from './lib/symbols/SOAP-Logo.svg';
-import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
-import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
 
 import { generateSpatialLayout } from './services/geminiService';
-import { polygonArea, bubbleArea, vertexCentroid } from './utils/geometry';
 import { PIXELS_PER_METER, isOnFloor } from './utils/rooms';
+import { convertRoomShape, RoomShape } from './utils/shapeConversion';
+import { selectionBoxFrom, outlineInBox, SelectionMode } from './utils/selection';
+import { downloadBlob, saveFile } from './utils/fileSave';
+import { ZonesIcon, BrushCleaningIcon } from './components/icons';
 
 // Shim process for libs that might expect it in Vite
 if (typeof window !== 'undefined' && !window.process) {
     (window as any).process = { env: {} };
 }
-
-
-const COLOR_PALETTE: ZoneColor[] = [
-    { bg: 'bg-[#f44336]/50', text: 'text-white', border: 'border-[#f44336]' },
-    { bg: 'bg-[#e81e63]/50', text: 'text-white', border: 'border-[#e81e63]' },
-    { bg: 'bg-[#9c27b0]/50', text: 'text-white', border: 'border-[#9c27b0]' },
-    { bg: 'bg-[#673ab7]/50', text: 'text-white', border: 'border-[#673ab7]' },
-    { bg: 'bg-[#3f51b5]/50', text: 'text-white', border: 'border-[#3f51b5]' },
-    { bg: 'bg-[#2196f3]/50', text: 'text-white', border: 'border-[#2196f3]' },
-    { bg: 'bg-[#03a9f4]/50', text: 'text-slate-900', border: 'border-[#03a9f4]' },
-    { bg: 'bg-[#00bcd4]/50', text: 'text-slate-900', border: 'border-[#00bcd4]' },
-    { bg: 'bg-[#009688]/50', text: 'text-white', border: 'border-[#009688]' },
-    { bg: 'bg-[#4caf50]/50', text: 'text-slate-900', border: 'border-[#4caf50]' },
-    { bg: 'bg-[#8bc34a]/50', text: 'text-slate-900', border: 'border-[#8bc34a]' },
-    { bg: 'bg-[#cddc39]/50', text: 'text-slate-900', border: 'border-[#cddc39]' },
-    { bg: 'bg-[#ffeb3b]/50', text: 'text-slate-900', border: 'border-[#ffeb3b]' },
-    { bg: 'bg-[#ffc107]/50', text: 'text-slate-900', border: 'border-[#ffc107]' },
-    { bg: 'bg-[#ff9800]/50', text: 'text-slate-900', border: 'border-[#ff9800]' },
-    { bg: 'bg-[#ff5722]/50', text: 'text-white', border: 'border-[#ff5722]' },
-];
-
-const isPointInPolygon = (p: Point, polygon: Point[]): boolean => {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const xi = polygon[i].x, yi = polygon[i].y;
-        const xj = polygon[j].x, yj = polygon[j].y;
-        const intersect = ((yi > p.y) !== (yj > p.y))
-            && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi);
-        if (intersect) inside = !inside;
-    }
-    return inside;
-};
-
-const ccw = (A: Point, B: Point, C: Point): boolean => {
-    return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
-};
-
-const intersectSegments = (A: Point, B: Point, C: Point, D: Point): boolean => {
-    return ccw(A, C, D) !== ccw(B, C, D) && ccw(A, B, C) !== ccw(A, B, D);
-};
-
-const getRoomVertices = (room: Room): Point[] => {
-    const angleRad = (room.rotation || 0) * (Math.PI / 180);
-    const cos = Math.cos(angleRad);
-    const sin = Math.sin(angleRad);
-
-    if (room.polygon && room.polygon.length > 0) {
-        // Polygon rooms rotate around (room.x, room.y)
-        return room.polygon.map(p => {
-            const rx = p.x * cos - p.y * sin;
-            const ry = p.x * sin + p.y * cos;
-            return { x: room.x + rx, y: room.y + ry };
-        });
-    } else {
-        // Rectangular rooms rotate around center (room.x + width/2, room.y + height/2)
-        const cx = room.x + room.width / 2;
-        const cy = room.y + room.height / 2;
-        const halfW = room.width / 2;
-        const halfH = room.height / 2;
-
-        const localVertices = [
-            { x: -halfW, y: -halfH },
-            { x: halfW, y: -halfH },
-            { x: halfW, y: halfH },
-            { x: -halfW, y: halfH }
-        ];
-
-        return localVertices.map(v => {
-            const rx = v.x * cos - v.y * sin;
-            const ry = v.x * sin + v.y * cos;
-            return { x: cx + rx, y: cy + ry };
-        });
-    }
-};
-
-
-
-
-const ZonesIcon: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className = '', ...props }) => (
-    <div
-        className={`w-4 h-4 flex items-center justify-center zones-icon-container ${className}`}
-        dangerouslySetInnerHTML={{ __html: ZonesIconRaw }}
-        {...props}
-    />
-);
-
-const BrushCleaningIcon: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className = '', ...props }) => (
-    <div
-        className={`w-4 h-4 flex items-center justify-center brush-cleaning-icon-container ${className}`}
-        dangerouslySetInnerHTML={{ __html: brushCleaningSvgRaw }}
-        {...props}
-    />
-);
-
-
-// Helper for file saving
-const downloadBlob = (blob: Blob, fileName: string) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    // Revoking immediately can cancel the download in some browsers
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-};
-
-const saveFile = async (blob: Blob, suggestedName: string, extension: string) => {
-    const fileName = `${suggestedName}.${extension}`;
-    if ('showSaveFilePicker' in window) {
-        try {
-            const handle = await (window as any).showSaveFilePicker({
-                suggestedName: fileName,
-                types: [{
-                    description: 'File',
-                    accept: { [blob.type]: [`.${extension}`] },
-                }],
-            });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-            return;
-        } catch (err: any) {
-            if (err?.name === 'AbortError') return; // user cancelled the dialog
-            // Some contexts (embedded browsers, iframes, restricted policies) expose the picker
-            // but refuse to write. Fall back to a regular download instead of failing.
-            console.warn('Save dialog unavailable, falling back to download:', err);
-        }
-    }
-    try {
-        downloadBlob(blob, fileName);
-        notify({ kind: 'success', title: `Saved ${fileName}`, message: 'Check your Downloads folder.' });
-    } catch (err: any) {
-        console.error('Failed to save file:', err);
-        notify({ kind: 'error', title: "Couldn't save the file", message: err?.message });
-    }
-};
 
 type ViewMode = 'EDITOR' | 'CANVAS' | 'VOLUMES';
 
@@ -265,7 +128,6 @@ export default function App() {
     const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
 
     const selectedAnnotation = useMemo(() => annotations.find(a => a.id === selectedAnnotationId), [annotations, selectedAnnotationId]);
-
 
     // View State
     const [viewport, setViewport] = useState({
@@ -369,139 +231,22 @@ export default function App() {
     const performSelection = useCallback((start: Point, end: Point) => {
         if (!mainRef.current) return;
 
+        // start/end are relative to the canvas element; the box is tested in world coordinates
         const rect = mainRef.current.getBoundingClientRect();
-        const clientStart = { x: start.x + rect.left, y: start.y + rect.top };
-        const clientEnd = { x: end.x + rect.left, y: end.y + rect.top };
+        const box = selectionBoxFrom(
+            toWorld(start.x + rect.left, start.y + rect.top),
+            toWorld(end.x + rect.left, end.y + rect.top),
+        );
+        const mode: SelectionMode = start.x > end.x ? 'crossing' : 'window'; // right-to-left drags cross
 
-        const wStart = toWorld(clientStart.x, clientStart.y);
-        const wEnd = toWorld(clientEnd.x, clientEnd.y);
+        setSelectedRoomIds(new Set(roomsRef.current
+            .filter(r => r.isPlaced && isOnFloor(r, currentFloor)
+                && outlineInBox(roomWorldPolygon(r, 1, { points: true }), box, mode, true))
+            .map(r => r.id)));
 
-        const minX = Math.min(wStart.x, wEnd.x);
-        const maxX = Math.max(wStart.x, wEnd.x);
-        const minY = Math.min(wStart.y, wEnd.y);
-        const maxY = Math.max(wStart.y, wEnd.y);
-
-        const isCrossing = start.x > end.x; // Right-to-left
-
-        const visibleRooms = roomsRef.current.filter(r => r.isPlaced && isOnFloor(r, currentFloor));
-        const newlySelectedRooms = new Set<string>();
-
-        visibleRooms.forEach(room => {
-            const vertices = getRoomVertices(room);
-
-            if (isCrossing) {
-                // Crossing Selection: Intersects or Inside
-                // 1. Check if any vertex of room is inside the selection box
-                const someVertexInside = vertices.some(v => v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY);
-                if (someVertexInside) {
-                    newlySelectedRooms.add(room.id);
-                    return;
-                }
-
-                // 2. Check if selection box corners are inside the room
-                const boxCorners = [
-                    { x: minX, y: minY },
-                    { x: maxX, y: minY },
-                    { x: maxX, y: maxY },
-                    { x: minX, y: maxY }
-                ];
-                const cornerInside = boxCorners.some(c => isPointInPolygon(c, vertices));
-                if (cornerInside) {
-                    newlySelectedRooms.add(room.id);
-                    return;
-                }
-
-                // 3. Check if any edge of the selection box intersects any edge of the room
-                const boxEdges = [
-                    [boxCorners[0], boxCorners[1]],
-                    [boxCorners[1], boxCorners[2]],
-                    [boxCorners[2], boxCorners[3]],
-                    [boxCorners[3], boxCorners[0]]
-                ];
-                const roomEdges: Point[][] = [];
-                for (let i = 0; i < vertices.length; i++) {
-                    roomEdges.push([vertices[i], vertices[(i + 1) % vertices.length]]);
-                }
-
-                let edgesIntersect = false;
-                for (const bEdge of boxEdges) {
-                    for (const rEdge of roomEdges) {
-                        if (intersectSegments(bEdge[0], bEdge[1], rEdge[0], rEdge[1])) {
-                            edgesIntersect = true;
-                            break;
-                        }
-                    }
-                    if (edgesIntersect) break;
-                }
-
-                if (edgesIntersect) {
-                    newlySelectedRooms.add(room.id);
-                }
-            } else {
-                // Window Selection: Completely Inside
-                const allInside = vertices.every(v => v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY);
-                if (allInside) {
-                    newlySelectedRooms.add(room.id);
-                }
-            }
-        });
-
-        setSelectedRoomIds(newlySelectedRooms);
-
-        // --- Select Annotations (if in Sketch Mode) ---
         if (isSketchMode) {
-            const visibleAnnotations = annotations.filter(a => a.floor === currentFloor && a.points && a.points.length > 0);
-            let selectedAnnId: string | null = null;
-
-            for (const a of visibleAnnotations) {
-                if (isCrossing) {
-                    // Crossing Selection: Any point is inside, or any segment intersects the box edges
-                    const anyPointInside = a.points.some(p => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY);
-                    if (anyPointInside) {
-                        selectedAnnId = a.id;
-                        break;
-                    }
-
-                    const boxCorners = [
-                        { x: minX, y: minY },
-                        { x: maxX, y: minY },
-                        { x: maxX, y: maxY },
-                        { x: minX, y: maxY }
-                    ];
-                    const boxEdges = [
-                        [boxCorners[0], boxCorners[1]],
-                        [boxCorners[1], boxCorners[2]],
-                        [boxCorners[2], boxCorners[3]],
-                        [boxCorners[3], boxCorners[0]]
-                    ];
-
-                    let edgesIntersect = false;
-                    for (let i = 0; i < a.points.length - 1; i++) {
-                        const p1 = a.points[i];
-                        const p2 = a.points[i + 1];
-                        for (const bEdge of boxEdges) {
-                            if (intersectSegments(bEdge[0], bEdge[1], p1, p2)) {
-                                edgesIntersect = true;
-                                break;
-                            }
-                        }
-                        if (edgesIntersect) break;
-                    }
-
-                    if (edgesIntersect) {
-                        selectedAnnId = a.id;
-                        break;
-                    }
-                } else {
-                    // Window Selection: All points inside
-                    const allInside = a.points.every(p => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY);
-                    if (allInside) {
-                        selectedAnnId = a.id;
-                        break;
-                    }
-                }
-            }
-            setSelectedAnnotationId(selectedAnnId);
+            const hit = annotations.find(a => a.floor === currentFloor && a.points?.length > 0 && outlineInBox(a.points, box, mode, false));
+            setSelectedAnnotationId(hit?.id ?? null);
         }
     }, [currentFloor, annotations, isSketchMode, toWorld]);
 
@@ -517,7 +262,6 @@ export default function App() {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isOverlaySelectorOpen]);
-
 
     // Dark Mode Local State
     const [darkMode, setDarkMode] = useState(() => {
@@ -559,9 +303,6 @@ export default function App() {
         };
     }, [canvasStyle.id, darkMode]);
 
-
-
-
     // --- 3D / Volumes View Computations ---
     const verticalConnections = useMemo(() => {
         const vconns: VerticalConnection[] = [];
@@ -580,7 +321,6 @@ export default function App() {
         });
         return vconns;
     }, [connections, rooms]);
-
 
     // Clear selection when exiting reference mode
     useEffect(() => {
@@ -1607,7 +1347,6 @@ export default function App() {
         updateRoom(id, updates);
     }, [addGroupedHistory, updateRoom]);
 
-
     const handleMoveRoom = useCallback((id: string, x: number, y: number) => {
         setRooms(prev => {
             const leader = prev.find(r => r.id === id);
@@ -2134,203 +1873,9 @@ export default function App() {
         }));
     };
 
-    const handleConvertShape = (shape: 'rect' | 'polygon' | 'bubble') => {
+    const handleConvertShape = (shape: RoomShape) => {
         addToHistory();
-        setRooms(prev => prev.map(r => {
-            if (!selectedRoomIds.has(r.id)) return r;
-            if ((r.shape || 'rect') === shape) return r;
-
-            const roomStyle = r.style;
-            const newStyle: any = { ...roomStyle };
-
-            if (roomStyle?.fill) newStyle.fill = roomStyle.fill;
-            if (roomStyle?.stroke) newStyle.stroke = roomStyle.stroke;
-            if (roomStyle?.strokeWidth) newStyle.strokeWidth = roomStyle.strokeWidth;
-            if (roomStyle?.opacity) newStyle.opacity = roomStyle.opacity;
-            if (roomStyle?.cornerRadius) newStyle.cornerRadius = roomStyle.cornerRadius;
-            if (roomStyle?.strokeDasharray) newStyle.strokeDasharray = roomStyle.strokeDasharray;
-
-            // If the original room had no style object, newStyle might be empty, which is perfect.
-            const newRoom = { ...r, shape, style: Object.keys(newStyle).length > 0 ? newStyle : undefined };
-
-            if (shape === 'rect') {
-                if (r.polygon && r.polygon.length > 0) {
-                    const points = r.polygon;
-                    const rotationRad = ((r.rotation || 0) * Math.PI) / 180;
-                    const cosR = Math.cos(rotationRad);
-                    const sinR = Math.sin(rotationRad);
-
-                    // 1. Convert local points to absolute canvas points
-                    const absPoints = points.map(p => {
-                        const xAbs = p.x * cosR - p.y * sinR + r.x;
-                        const yAbs = p.x * sinR + p.y * cosR + r.y;
-                        return { x: xAbs, y: yAbs };
-                    });
-
-                    // 2. Compute polygon area in pixels
-                    const polyAreaPx = (r.shape === 'bubble') ? bubbleArea(points) : polygonArea(points);
-
-                    // Check if they form a rectangle/square
-                    let isRect = false;
-                    let W = 0, H = 0, rx = 0, ry = 0, rotDeg = 0;
-
-                    if (absPoints.length === 4) {
-                        const [A0, A1, A2, A3] = absPoints;
-                        const v0 = { x: A1.x - A0.x, y: A1.y - A0.y };
-                        const v1 = { x: A2.x - A1.x, y: A2.y - A1.y };
-                        const v2 = { x: A3.x - A2.x, y: A3.y - A2.y };
-                        const v3 = { x: A0.x - A3.x, y: A0.y - A3.y };
-
-                        const L0 = Math.sqrt(v0.x * v0.x + v0.y * v0.y);
-                        const L1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
-                        const L2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
-                        const L3 = Math.sqrt(v3.x * v3.x + v3.y * v3.y);
-
-                        if (L0 >= 0.1 && L1 >= 0.1 && L2 >= 0.1 && L3 >= 0.1) {
-                            const lenDiff1 = Math.abs(L0 - L2) / Math.max(L0, L2);
-                            const lenDiff2 = Math.abs(L1 - L3) / Math.max(L1, L3);
-
-                            const d0 = Math.abs((v0.x * v1.x + v0.y * v1.y) / (L0 * L1));
-                            const d1 = Math.abs((v1.x * v2.x + v1.y * v2.y) / (L1 * L2));
-                            const d2 = Math.abs((v2.x * v3.x + v2.y * v3.y) / (L2 * L3));
-                            const d3 = Math.abs((v3.x * v0.x + v3.y * v0.y) / (L3 * L0));
-
-                            const lenTolerance = 0.08;
-                            const orthoTolerance = 0.087; // ~5 deg
-
-                            if (lenDiff1 < lenTolerance && lenDiff2 < lenTolerance &&
-                                d0 < orthoTolerance && d1 < orthoTolerance &&
-                                d2 < orthoTolerance && d3 < orthoTolerance) {
-                                isRect = true;
-                                W = (L0 + L2) / 2;
-                                H = (L1 + L3) / 2;
-                                const C = {
-                                    x: (A0.x + A1.x + A2.x + A3.x) / 4,
-                                    y: (A0.y + A1.y + A2.y + A3.y) / 4
-                                };
-                                const thetaRad = Math.atan2(v0.y, v0.x);
-                                rotDeg = (thetaRad * 180) / Math.PI;
-                                rx = C.x - W / 2;
-                                ry = C.y - H / 2;
-                            }
-                        }
-                    }
-
-                    if (!isRect) {
-                        // Fit using Minimum Area Oriented Bounding Box (OBB)
-                        const centroid = vertexCentroid(absPoints);
-                        let minArea = Infinity;
-                        let bestTheta = 0;
-                        let bestW = 0;
-                        let bestH = 0;
-                        let bestCX = 0;
-                        let bestCY = 0;
-
-                        const N = absPoints.length;
-                        for (let i = 0; i < N; i++) {
-                            const p1 = absPoints[i];
-                            const p2 = absPoints[(i + 1) % N];
-                            const v = { x: p2.x - p1.x, y: p2.y - p1.y };
-                            const theta = Math.atan2(v.y, v.x);
-
-                            const cosA = Math.cos(-theta);
-                            const sinA = Math.sin(-theta);
-                            const rotated = absPoints.map(p => {
-                                const dx = p.x - centroid.x;
-                                const dy = p.y - centroid.y;
-                                return {
-                                    x: dx * cosA - dy * sinA,
-                                    y: dx * sinA + dy * cosA
-                                };
-                            });
-
-                            let minX = Infinity, maxX = -Infinity;
-                            let minY = Infinity, maxY = -Infinity;
-                            rotated.forEach(p => {
-                                if (p.x < minX) minX = p.x;
-                                if (p.x > maxX) maxX = p.x;
-                                if (p.y < minY) minY = p.y;
-                                if (p.y > maxY) maxY = p.y;
-                            });
-
-                            const currentW = maxX - minX;
-                            const currentH = maxY - minY;
-                            const area = currentW * currentH;
-
-                            if (area < minArea) {
-                                minArea = area;
-                                bestTheta = theta;
-                                bestW = currentW;
-                                bestH = currentH;
-                                const C_local = {
-                                    x: (minX + maxX) / 2,
-                                    y: (minY + maxY) / 2
-                                };
-                                const cosB = Math.cos(bestTheta);
-                                const sinB = Math.sin(bestTheta);
-                                bestCX = C_local.x * cosB - C_local.y * sinB + centroid.x;
-                                bestCY = C_local.x * sinB + C_local.y * cosB + centroid.y;
-                            }
-                        }
-
-                        // Scale the bestW and bestH so the bounding box area matches the original polygon's area
-                        const obbArea = bestW * bestH;
-                        if (obbArea > 10 && polyAreaPx > 10) {
-                            const s = Math.sqrt(polyAreaPx / obbArea);
-                            bestW *= s;
-                            bestH *= s;
-                        }
-
-                        W = bestW;
-                        H = bestH;
-                        rotDeg = (bestTheta * 180) / Math.PI;
-                        rx = bestCX - W / 2;
-                        ry = bestCY - H / 2;
-                    }
-
-                    // Normalize angle to standard bounds [-180, 180]
-                    if (rotDeg > 180) rotDeg -= 360;
-                    if (rotDeg < -180) rotDeg += 360;
-
-                    newRoom.polygon = undefined;
-                    newRoom.width = W;
-                    newRoom.height = H;
-                    newRoom.x = rx;
-                    newRoom.y = ry;
-                    newRoom.rotation = Number(rotDeg.toFixed(2));
-
-                    const newArea = Number(((W * H) / (PIXELS_PER_METER * PIXELS_PER_METER)).toFixed(2));
-                    newRoom.area = newArea > 0 ? newArea : r.area;
-                } else {
-                    newRoom.polygon = undefined;
-                }
-            } else {
-                let points = r.polygon;
-                if (!points || points.length === 0) {
-                    // A rect turns about its centre; start the shape with its origin there too, so it doesn't jump
-                    const hw = r.width / 2, hh = r.height / 2;
-                    points = [{ x: -hw, y: -hh }, { x: hw, y: -hh }, { x: hw, y: hh }, { x: -hw, y: hh }];
-                    newRoom.x = r.x + hw;
-                    newRoom.y = r.y + hh;
-                    if (r.textPos) newRoom.textPos = { x: r.textPos.x - hw, y: r.textPos.y - hh };
-                }
-                if (shape === 'bubble') {
-                    const targetAreaPx = r.area * (PIXELS_PER_METER * PIXELS_PER_METER);
-                    const centroid = vertexCentroid(points);
-                    const scale = 0.9;
-                    points = points.map(p => ({ x: centroid.x + (p.x - centroid.x) * scale, y: centroid.y + (p.y - centroid.y) * scale }));
-                    for (let i = 0; i < 10; i++) {
-                        const currentArea = bubbleArea(points);
-                        if (currentArea === 0 || Math.abs(currentArea - targetAreaPx) < 10) break;
-                        const correction = Math.sqrt(targetAreaPx / currentArea);
-                        points = points.map(p => ({ x: centroid.x + (p.x - centroid.x) * correction, y: centroid.y + (p.y - centroid.y) * correction }));
-                    }
-                }
-                newRoom.polygon = points;
-            }
-            // Polygon ↔ bubble moves the centre of gravity slightly: keep the rotation pivot on it
-            return shape === 'rect' ? newRoom : recenterShape(newRoom);
-        }));
+        setRooms(prev => prev.map(r => (selectedRoomIds.has(r.id) ? convertRoomShape(r, shape) : r)));
     };
 
     const unplacedRooms = rooms.filter(r => !r.isPlaced);
@@ -2342,8 +1887,6 @@ export default function App() {
     }, [rooms, selectedZone]);
 
     const zoneArea = selectedZoneRooms.reduce((acc, r) => acc + r.area, 0);
-
-
 
     const handleSave = async (format: 'json' | 'png' | 'pdf' | 'obj' | 'csv' | 'dxf', options?: any) => {
         setShowExportModal(false);
@@ -2361,14 +1904,7 @@ export default function App() {
         } else if (format === 'csv') {
             const headers = "Name,Area,Zone,Floor\n";
             const csvContent = rooms.map(r => [r.name, r.area, r.zone, (r.isPlaced && floors.find(f => f.id === r.floor)?.label) || 'Unplaced'].map(toCsvField).join(',')).join('\n');
-            const blob = new Blob([headers + csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `${finalName}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            downloadBlob(new Blob([headers + csvContent], { type: 'text/csv;charset=utf-8;' }), `${finalName}.csv`);
 
         } else if (format === 'obj') {
             if (volumesViewRef.current) {
@@ -3177,7 +2713,6 @@ export default function App() {
                                     onInteractionStart={addToHistory}
                                 />
                             </div>
-
 
                             <div
                                 className="absolute top-6 right-6 flex flex-col items-end gap-2 z-[200] export-exclude pointer-events-auto"

@@ -121,6 +121,26 @@ export const ZONE_COLORS: Record<string, ZoneColor> = {
   'Default': { bg: 'bg-white dark:bg-white/10', border: 'border-slate-300 dark:border-white/20', text: 'text-slate-700 dark:text-slate-300' },
 };
 
+// Colours offered for new and edited zones
+export const COLOR_PALETTE: ZoneColor[] = [
+    { bg: 'bg-[#f44336]/50', text: 'text-white', border: 'border-[#f44336]' },
+    { bg: 'bg-[#e81e63]/50', text: 'text-white', border: 'border-[#e81e63]' },
+    { bg: 'bg-[#9c27b0]/50', text: 'text-white', border: 'border-[#9c27b0]' },
+    { bg: 'bg-[#673ab7]/50', text: 'text-white', border: 'border-[#673ab7]' },
+    { bg: 'bg-[#3f51b5]/50', text: 'text-white', border: 'border-[#3f51b5]' },
+    { bg: 'bg-[#2196f3]/50', text: 'text-white', border: 'border-[#2196f3]' },
+    { bg: 'bg-[#03a9f4]/50', text: 'text-slate-900', border: 'border-[#03a9f4]' },
+    { bg: 'bg-[#00bcd4]/50', text: 'text-slate-900', border: 'border-[#00bcd4]' },
+    { bg: 'bg-[#009688]/50', text: 'text-white', border: 'border-[#009688]' },
+    { bg: 'bg-[#4caf50]/50', text: 'text-slate-900', border: 'border-[#4caf50]' },
+    { bg: 'bg-[#8bc34a]/50', text: 'text-slate-900', border: 'border-[#8bc34a]' },
+    { bg: 'bg-[#cddc39]/50', text: 'text-slate-900', border: 'border-[#cddc39]' },
+    { bg: 'bg-[#ffeb3b]/50', text: 'text-slate-900', border: 'border-[#ffeb3b]' },
+    { bg: 'bg-[#ffc107]/50', text: 'text-slate-900', border: 'border-[#ffc107]' },
+    { bg: 'bg-[#ff9800]/50', text: 'text-slate-900', border: 'border-[#ff9800]' },
+    { bg: 'bg-[#ff5722]/50', text: 'text-white', border: 'border-[#ff5722]' },
+];
+
 export const DIAGRAM_STYLES: DiagramStyle[] = [
   {
     id: 'standard',
