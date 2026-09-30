@@ -25,12 +25,15 @@ import { useGuides } from './hooks/useGuides';
 import { GuideLines, GuideActionsPanel } from './components/GuideLayer';
 import { AppHeader, ViewMode } from './components/AppHeader';
 import { CanvasToolbar, CanvasTool } from './components/CanvasToolbar';
+import { VolumesSettings, CurrentFloorSettings } from './components/FloorSettingsPanel';
+import { InventorySidebar } from './components/InventorySidebar';
+import { FloorTabs } from './components/FloorTabs';
 import { canvasContentBounds } from './utils/canvasBounds';
 import { SpacePropertiesPanel } from './components/SpacePropertiesPanel';
 import { ZonePropertiesPanel } from './components/ZonePropertiesPanel';
 import { NotificationHost, notify, confirmDialog } from './components/Notifications';
 import {
-    Plus, Package, ChevronRight, ChevronLeft, X, Maximize, ChevronUp, ChevronDown, Box, Layers, Eye, EyeOff
+    ChevronRight, ChevronLeft, Maximize
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchPanel } from './components/SketchToolbar';
@@ -54,7 +57,6 @@ import { PIXELS_PER_METER, isOnFloor } from './utils/rooms';
 import { convertRoomShape, RoomShape } from './utils/shapeConversion';
 import { selectionBoxFrom, outlineInBox, SelectionMode } from './utils/selection';
 import { downloadBlob, saveFile } from './utils/fileSave';
-
 
 // Shim process for libs that might expect it in Vite
 if (typeof window !== 'undefined' && !window.process) {
@@ -219,7 +221,6 @@ export default function App() {
     const [isZoneDragging, setIsZoneDragging] = useState(false);
     const [isBubbleDragging, setIsBubbleDragging] = useState(false);
     const [isInventoryHovered, setIsInventoryHovered] = useState(false);
-    const [editingFloorId, setEditingFloorId] = useState<number | null>(null);
     const [hasInitialZoomed, setHasInitialZoomed] = useState(false);
     const [floorGap, setFloorGap] = useState(4);
     const [hiddenFloorIds, setHiddenFloorIds] = useState<Set<number>>(new Set());
@@ -687,8 +688,7 @@ export default function App() {
         setCurrentFloor(newId);
     };
 
-    const handleDeleteFloor = (e: React.MouseEvent, id: number) => {
-        e.stopPropagation();
+    const handleDeleteFloor = (id: number) => {
         addToHistory();
         // Return rooms to inventory
         setRooms(prev => prev.map(r => r.floor === id ? { ...r, isPlaced: false } : r));
@@ -1742,81 +1742,20 @@ export default function App() {
                         />
                     </div>
 
-                    <aside
-                        ref={inventoryRef}
-                        className={`${isInventoryOpen ? 'w-80' : 'w-[42px]'} glass-panel border-r border-slate-200/40 dark:border-dark-border flex flex-col z-30 shadow-[10px_0_30px_rgba(0,0,0,0.02)] transition-all duration-300 ${isInventoryHovered ? 'ring-2 ring-orange-400 ring-inset bg-orange-50/30 dark:bg-orange-900/10' : ''}`}
+                    <InventorySidebar
+                        panelRef={inventoryRef}
+                        isOpen={isInventoryOpen}
+                        onOpenChange={setIsInventoryOpen}
+                        isDropTarget={isInventoryHovered}
+                        unplacedRooms={unplacedRooms}
+                        zoneColors={zoneColors}
+                        unitSystem={appSettings.unitSystem}
+                        onDragStart={handleDragStart}
                         onDragOver={handleInventoryDragOver}
                         onDrop={handleInventoryDrop}
-                    >
-                        {isInventoryOpen ? (
-                            <>
-                                <div className="p-6 border-b border-slate-100/30 dark:border-dark-border/30 flex justify-between items-center bg-transparent h-20">
-                                    <div>
-                                        <h2 className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-2 mb-1">
-                                            Space Inventory
-                                        </h2>
-                                        <p className="text-[10px] font-bold text-slate-500 dark:text-gray-400">{unplacedRooms.length} spaces pending placement</p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="w-8 h-8 flex items-center justify-center bg-slate-200/50 dark:bg-white/10 rounded-xl text-xs font-black text-slate-600 dark:text-gray-300 border border-slate-200/50 dark:border-white/5">{unplacedRooms.length}</span>
-                                        <button onClick={() => setIsInventoryOpen(false)} className="text-slate-300 hover:text-slate-600 dark:text-gray-600 dark:hover:text-gray-400"><ChevronLeft size={18} /></button>
-                                    </div>
-                                </div>
-                                <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-transparent">
-                                    {unplacedRooms.length > 0 ? unplacedRooms.map(room => (
-                                        <div
-                                            key={room.id}
-                                            draggable
-                                            onDragStart={(e) => handleDragStart(e, room)}
-                                            className="p-5 rounded-2xl glass-card cursor-grab active:cursor-grabbing group"
-                                            onClick={() => {
-                                                /* Optional: keep click to place at center if drag fails or as alternative */
-                                                /* placeRoom(room); */
-                                            }}
-                                        >
-                                            <div className="flex justify-between items-start mb-3">
-                                                <div>
-                                                    <span className="font-black text-slate-800 dark:text-gray-200 text-sm tracking-tight block group-hover:text-orange-600">{room.name}</span>
-                                                    <span className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">Drag to canvas to place</span>
-                                                </div>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handlePlaceCenter(room); }}
-                                                    className="w-8 h-8 rounded-lg bg-slate-50 dark:bg-white/5 flex items-center justify-center text-slate-300 dark:text-gray-500 group-hover:bg-orange-500/10 group-hover:text-orange-600 hover:scale-110 active:scale-95"
-                                                >
-                                                    <Plus size={16} />
-                                                </button>
-                                            </div>
-                                            <div className="flex items-center gap-3">
-                                                <span className="px-2 py-1 bg-slate-100 dark:bg-white/5 rounded-lg text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-wider">
-                                                    {appSettings.unitSystem === 'imperial' ? `${Number((room.area * 10.7639).toFixed(1))} sq ft` : `${room.area} m²`}
-                                                </span>
-                                                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm ${zoneColors[room.zone]?.bg || 'bg-slate-100'} ${zoneColors[room.zone]?.text || 'text-slate-500'}`}>{room.zone}</span>
-                                            </div>
-                                        </div>
-                                    )) : (
-                                        <div className="text-center py-24 opacity-30 px-10">
-                                            <div className="w-16 h-16 bg-slate-100 dark:bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                                                <Package size={32} className="text-slate-400 dark:text-gray-500" />
-                                            </div>
-                                            <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed text-slate-500 dark:text-gray-500">Inventory Clear<br />All elements are in the design context.</p>
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="p-6 bg-transparent border-t border-slate-100/30 dark:border-dark-border/30">
-                                    <button onClick={() => addRoom({})} className="w-full py-4 glass-card glow-effect rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300 flex items-center justify-center gap-3 group">
-                                        <Plus size={18} className="group-hover:rotate-90" /> Add Manual Space
-                                    </button>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="h-full flex flex-col items-center py-6 cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => setIsInventoryOpen(true)}>
-                                <div className="flex-1 flex items-center justify-center">
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-gray-500 whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>Inventory</span>
-                                </div>
-                                <ChevronRight size={18} className="text-slate-400 mb-4" />
-                            </div>
-                        )}
-                    </aside>
+                        onPlaceCenter={handlePlaceCenter}
+                        onAddSpace={() => addRoom({})}
+                    />
 
                     <main
                         ref={mainRef}
@@ -2253,62 +2192,14 @@ export default function App() {
                                 </div>
                             </div>
 
-                            {/* Floor Tabs Bar */}
-                            <div
-                                className="absolute bottom-0 left-0 right-0 h-8 glass-panel !border-x-0 !border-b-0 flex items-start px-4 gap-1 z-40 export-exclude pointer-events-auto"
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                            >
-                                {floors.map(f => (
-                                    <div
-                                        key={f.id}
-                                        onClick={() => setCurrentFloor(f.id)}
-                                        onDoubleClick={() => setEditingFloorId(f.id)}
-                                        className={`group
-                                            relative px-4 py-1.5 text-[9px] font-black uppercase tracking-widest cursor-pointer rounded-b-lg flex items-center gap-2 select-none border-b border-x border-transparent
-                                            ${currentFloor === f.id
-                                                ? 'bg-[#f0f2f5] dark:bg-dark-bg text-orange-600 border-slate-200/50 dark:border-dark-border !border-t-transparent h-full -translate-y-px'
-                                                : 'bg-slate-300/50 dark:bg-white/5 text-slate-500 dark:text-gray-500 hover:bg-slate-100/50 dark:hover:bg-white/10 h-[85%] mt-0'
-                                            }
-                                        `}
-                                    >
-                                        {editingFloorId === f.id ? (
-                                            <input
-                                                autoFocus
-                                                className="bg-transparent border-none outline-none w-20 text-center font-black uppercase tracking-widest p-0 text-[10px] text-orange-600"
-                                                value={f.label}
-                                                onChange={(e) => handleRenameFloor(f.id, e.target.value)}
-                                                onBlur={() => setEditingFloorId(null)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') setEditingFloorId(null);
-                                                    e.stopPropagation();
-                                                }}
-                                                onClick={(e) => e.stopPropagation()}
-                                            />
-                                        ) : (
-                                            <>
-                                                {f.label}
-                                                {currentFloor === f.id && (
-                                                    <button
-                                                        onClick={(e) => floors.length > 1 && handleDeleteFloor(e, f.id)}
-                                                        className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 ml-1"
-                                                        title="Delete Floor"
-                                                    >
-                                                        <X size={8} />
-                                                    </button>
-                                                )}
-                                            </>
-                                        )}
-                                    </div>
-                                ))}
-                                <button
-                                    onClick={handleAddFloor}
-                                    className="h-[85%] w-8 flex items-center justify-center rounded-b-lg bg-slate-300/50 dark:bg-white/5 hover:bg-orange-600 hover:text-white text-slate-500"
-                                    title="Add Floor"
-                                >
-                                    <Plus size={12} />
-                                </button>
-                            </div>
+                            <FloorTabs
+                                floors={floors}
+                                currentFloor={currentFloor}
+                                onSelectFloor={setCurrentFloor}
+                                onRenameFloor={handleRenameFloor}
+                                onDeleteFloor={handleDeleteFloor}
+                                onAddFloor={handleAddFloor}
+                            />
                         </div>
 
                         {selectionBox && (
@@ -2569,162 +2460,25 @@ export default function App() {
                                         <div className="space-y-8 animate-in fade-in duration-500">
                                             {/* Floor Settings - Shown when nothing is selected */}
                                             {viewMode === 'VOLUMES' ? (
-                                                <div className="space-y-6">
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <div className="p-2 bg-orange-100 dark:bg-orange-900/20 rounded-lg">
-                                                            <Box size={14} className="text-orange-600" />
-                                                        </div>
-                                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300">Volumes Settings</h3>
-                                                    </div>
-
-                                                    <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border space-y-4">
-                                                        <div>
-                                                            <div className="flex justify-between items-center mb-1.5">
-                                                                <label className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Floor Gap</label>
-                                                                <span className="text-[10px] font-bold text-orange-600 bg-orange-50 dark:bg-orange-900/20 px-1.5 rounded">{(floorGap / 2).toFixed(1)}m</span>
-                                                            </div>
-                                                            <input
-                                                                type="range"
-                                                                min="0"
-                                                                max="40"
-                                                                step="0.5"
-                                                                value={floorGap}
-                                                                onChange={(e) => setFloorGap(parseFloat(e.target.value))}
-                                                                className="w-full accent-orange-500 h-1 bg-slate-200 dark:bg-dark-border rounded-lg appearance-none cursor-pointer"
-                                                            />
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border space-y-4">
-                                                        <div className="flex items-center justify-between">
-                                                            <label className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Show Labels</label>
-                                                            <button
-                                                                onClick={() => setShowVolumeLabels(!showVolumeLabels)}
-                                                                className={`w-8 h-5 rounded-full relative transition-colors ${showVolumeLabels ? 'bg-orange-500' : 'bg-slate-300 dark:bg-white/10'}`}
-                                                            >
-                                                                <div className={`absolute top-1 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${showVolumeLabels ? 'left-4' : 'left-1'}`} />
-                                                            </button>
-                                                        </div>
-
-                                                        {showVolumeLabels && (
-                                                            <div>
-                                                                <div className="flex justify-between items-center mb-1.5">
-                                                                    <label className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Label Size</label>
-                                                                    <span className="text-[10px] font-bold text-slate-600 dark:text-gray-300">{volumeLabelFontSize}px</span>
-                                                                </div>
-                                                                <input
-                                                                    type="range"
-                                                                    min="4"
-                                                                    max="24"
-                                                                    step="1"
-                                                                    value={volumeLabelFontSize}
-                                                                    onChange={(e) => setVolumeLabelFontSize(parseFloat(e.target.value))}
-                                                                    className="w-full accent-orange-500 h-1 bg-slate-200 dark:bg-dark-border rounded-lg appearance-none cursor-pointer"
-                                                                />
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="space-y-3">
-                                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-gray-500 px-1">Floors Configuration</h3>
-                                                        {floors.map(floor => {
-                                                            const floorRooms = rooms.filter(r => r.floor === floor.id && r.isPlaced);
-                                                            const floorArea = floorRooms.reduce((acc, r) => acc + r.area, 0);
-                                                            const isHidden = hiddenFloorIds.has(floor.id);
-
-                                                            return (
-                                                                <div key={floor.id} className="p-4 bg-white dark:bg-dark-bg border border-slate-100 dark:border-dark-border rounded-xl space-y-3">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <button
-                                                                                onClick={() => toggleFloorVisibility(floor.id)}
-                                                                                className={`p-1 rounded-md transition-colors ${isHidden ? 'text-slate-400 hover:text-slate-600' : 'text-orange-600 hover:text-orange-700 bg-orange-50 dark:bg-orange-900/20'}`}
-                                                                                title={isHidden ? "Show Floor" : "Hide Floor"}
-                                                                            >
-                                                                                {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
-                                                                            </button>
-                                                                            <span className={`text-xs font-bold ${isHidden ? 'text-slate-400' : 'text-slate-700 dark:text-gray-200'}`}>{floor.label}</span>
-                                                                        </div>
-                                                                        <span className="text-[10px] font-mono text-slate-400">{floorRooms.length} Spaces</span>
-                                                                    </div>
-
-                                                                    <div className="flex items-center gap-3">
-                                                                        <div className="flex-1">
-                                                                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Height (m)</label>
-                                                                            <input
-                                                                                type="number"
-                                                                                step="0.1"
-                                                                                className="w-full bg-slate-50 dark:bg-white/5 border-none rounded-lg px-2 py-1 text-xs font-bold text-slate-700 dark:text-gray-200 focus:ring-1 focus:ring-orange-500 outline-none"
-                                                                                value={floor.height}
-                                                                                onChange={(e) => handleUpdateFloor(floor.id, { height: parseFloat(e.target.value) || 0 })}
-                                                                            />
-                                                                        </div>
-                                                                        <div className="flex-1">
-                                                                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Total Area</label>
-                                                                            <div className="px-2 py-1 text-xs font-bold text-slate-500 dark:text-gray-400">
-                                                                                {appSettings.unitSystem === 'imperial' ? `${Math.round(floorArea * 10.7639)} sq ft` : `${Math.round(floorArea)} m²`}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
+                                                <VolumesSettings
+                                                    floors={floors}
+                                                    rooms={rooms}
+                                                    floorGap={floorGap}
+                                                    onFloorGapChange={setFloorGap}
+                                                    showLabels={showVolumeLabels}
+                                                    onToggleLabels={() => setShowVolumeLabels(!showVolumeLabels)}
+                                                    labelFontSize={volumeLabelFontSize}
+                                                    onLabelFontSizeChange={setVolumeLabelFontSize}
+                                                    hiddenFloorIds={hiddenFloorIds}
+                                                    onToggleFloorVisibility={toggleFloorVisibility}
+                                                    onUpdateFloor={handleUpdateFloor}
+                                                    unitSystem={appSettings.unitSystem}
+                                                />
                                             ) : (
-                                                <div className="space-y-6">
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <div className="p-2 bg-orange-100 dark:bg-orange-900/20 rounded-lg">
-                                                            <Layers size={14} className="text-orange-600" />
-                                                        </div>
-                                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-gray-300">Floor Settings</h3>
-                                                    </div>
-
-                                                    <div className="p-5 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-dark-border space-y-4">
-                                                        <div>
-                                                            <label className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-1.5 block">Current Floor Label</label>
-                                                            <input
-                                                                className="w-full text-lg font-black text-slate-800 dark:text-gray-100 bg-transparent border-b border-dashed border-slate-300 dark:border-dark-border focus:border-orange-500 outline-none pb-1"
-                                                                value={floors.find(f => f.id === currentFloor)?.label || ""}
-                                                                onChange={(e) => handleUpdateFloor(currentFloor, { label: e.target.value })}
-                                                            />
-                                                        </div>
-
-                                                        <div>
-                                                            <div className="flex justify-between items-center mb-1.5">
-                                                                <label className="text-[9px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest block">Floor Height</label>
-                                                                <span className="text-[10px] font-bold text-orange-600 bg-orange-50 dark:bg-orange-900/20 px-1.5 rounded">meters</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-3">
-                                                                <input
-                                                                    type="number"
-                                                                    step="0.1"
-                                                                    className="flex-1 text-2xl font-mono font-bold text-slate-700 dark:text-gray-200 bg-transparent outline-none"
-                                                                    value={floors.find(f => f.id === currentFloor)?.height || 3}
-                                                                    onChange={(e) => handleUpdateFloor(currentFloor, { height: parseFloat(e.target.value) || 0 })}
-                                                                />
-                                                                <div className="flex flex-col gap-1">
-                                                                    <button
-                                                                        onClick={() => handleUpdateFloor(currentFloor, { height: (floors.find(f => f.id === currentFloor)?.height || 3) + 0.1 })}
-                                                                        className="p-1 hover:bg-white dark:hover:bg-white/10 rounded shadow-sm border border-slate-200 dark:border-dark-border text-slate-400 hover:text-orange-600"
-                                                                    >
-                                                                        <ChevronUp size={14} />
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => handleUpdateFloor(currentFloor, { height: Math.max(0, (floors.find(f => f.id === currentFloor)?.height || 3) - 0.1) })}
-                                                                        className="p-1 hover:bg-white dark:hover:bg-white/10 rounded shadow-sm border border-slate-200 dark:border-dark-border text-slate-400 hover:text-orange-600"
-                                                                    >
-                                                                        <ChevronDown size={14} />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    <p className="text-[9px] text-slate-400 dark:text-gray-600 leading-relaxed px-2 italic">
-                                                        Changing the height affects 3D extrusions and spatial stacking for all spaces on this floor.
-                                                    </p>
-                                                </div>
+                                                <CurrentFloorSettings
+                                                    floor={floors.find(f => f.id === currentFloor)}
+                                                    onChange={updates => handleUpdateFloor(currentFloor, updates)}
+                                                />
                                             )}
                                         </div>
                                     )}
