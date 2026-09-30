@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Room, AppSettings, ZoneColor } from '../types';
 
 interface ZonePropertiesPanelProps {
@@ -18,15 +18,30 @@ interface ZonePropertiesPanelProps {
 export const ZonePropertiesPanel: React.FC<ZonePropertiesPanelProps> = ({
     selectedZone, selectedZoneRooms, zoneArea, zoneColors, setZoneColors, colorPalette: COLOR_PALETTE,
     appSettings, addToHistory, renameZone, setSelectedRoomIds,
-}) => (
+}) => {
+    // Rename once on Enter or blur, not on every keystroke: each rename is an undo step,
+    // and half-typed names would otherwise become zones of their own
+    const [draftName, setDraftName] = useState(selectedZone);
+    useEffect(() => setDraftName(selectedZone), [selectedZone]);
+    const commitName = () => {
+        if (draftName.trim() && draftName.trim() !== selectedZone) renameZone(selectedZone, draftName.trim());
+        else setDraftName(selectedZone);
+    };
+
+    return (
         <div className="space-y-6">
             <div>
                 <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest mb-2 block">Zone Name</label>
                 <div className="flex items-center gap-2">
                     <input
                         className="w-full text-xl font-black text-slate-800 dark:text-gray-100 focus:outline-none focus:text-orange-600 bg-transparent border-b border-dashed border-slate-300 dark:border-dark-border focus:border-orange-500 pb-1"
-                        value={selectedZone}
-                        onChange={(e) => renameZone(selectedZone, e.target.value)}
+                        value={draftName}
+                        onChange={(e) => setDraftName(e.target.value)}
+                        onBlur={commitName}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            else if (e.key === 'Escape') setDraftName(selectedZone);
+                        }}
                     />
                     <div className={`w-4 h-4 rounded-full ${zoneColors[selectedZone]?.bg || 'bg-slate-200'}`} />
                 </div>
@@ -74,4 +89,5 @@ export const ZonePropertiesPanel: React.FC<ZonePropertiesPanelProps> = ({
                 </div>
             </div>
         </div>
-);
+    );
+};

@@ -1,5 +1,6 @@
 import { Room, Connection, Point, ZoneColor, AppSettings, Annotation, DiagramStyle, ReferenceImage, SiteProperties } from '../types';
 import { getConvexHull, createRoundedPath } from './geometry';
+import { roomCenter } from './site';
 import { SketchManager } from '../SketchManager';
 import { generateDXF } from './dxf';
 import { notify } from '../components/Notifications';
@@ -844,25 +845,13 @@ export const handleExport = async (
         });
     }
 
-    // Connections between rooms (with true center coordinates considering rotation)
+    // Connections between rooms, centre to centre
     connections.forEach(conn => {
         const from = visibleRooms.find(r => r.id === conn.fromId);
         const to = visibleRooms.find(r => r.id === conn.toId);
         if (from && to) {
-            const getRotatedCenter = (room: Room) => {
-                const isPoly = room.polygon && room.polygon.length > 0;
-                const localCx = isPoly ? calculateCentroid(room.polygon!).x : room.width / 2;
-                const localCy = isPoly ? calculateCentroid(room.polygon!).y : room.height / 2;
-                const angle = room.rotation || 0;
-                const rad = (angle * Math.PI) / 180;
-                const cos = Math.cos(rad);
-                const sin = Math.sin(rad);
-                const rx = localCx * cos - localCy * sin;
-                const ry = localCx * sin + localCy * cos;
-                return { x: room.x + rx, y: room.y + ry };
-            };
-            const p1 = getRotatedCenter(from);
-            const p2 = getRotatedCenter(to);
+            const p1 = roomCenter(from);
+            const p2 = roomCenter(to);
             const connStrokeWidth = getStrokeWidthForExport('connection');
             svgContent += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#94a3b8" stroke-width="${connStrokeWidth}" />`;
         }

@@ -42,7 +42,7 @@ import { BridgesModal } from './components/BridgesModal';
 import { bridge, useBridge } from './services/bridgeClient';
 import { runBridgeCommand, BridgeError, checkProject, PLANNING_RULES } from './utils/bridgeCommands';
 import { renderPlanSvg, svgToPngBase64 } from './utils/planRender';
-import { analyzeSite, recenterShape, readGoogleEarthFile, shapeToBoundary, polygonCentroid, rotatePoint, roomWorldPolygon, worldToGeo, geoToWorld, imageryBox, fetchSiteImagery, IMAGERY_ATTRIBUTION, KmlShape } from './utils/site';
+import { analyzeSite, recenterShape, roomCenter, readGoogleEarthFile, shapeToBoundary, polygonCentroid, rotatePoint, roomWorldPolygon, worldToGeo, geoToWorld, imageryBox, fetchSiteImagery, IMAGERY_ATTRIBUTION, KmlShape } from './utils/site';
 import { StylePanel } from './components/StylePanel';
 import { SnapPanel } from './components/SnapPanel';
 import { Rulers, getRulerTickInterval } from './components/Rulers';
@@ -780,7 +780,7 @@ export default function App() {
         if (appSettings.snapToGrid) {
             const gridSizePx = currentGridSizeMeters * PIXELS_PER_METER;
             if (gridSizePx > 0) {
-                if (!activeGuideX) {
+                if (activeGuideX === undefined) {
                     const nearestGridLeft = Math.round(room.x / gridSizePx) * gridSizePx;
                     const distLeft = Math.abs(room.x - nearestGridLeft);
                     const nearestGridRight = Math.round((room.x + room.width) / gridSizePx) * gridSizePx;
@@ -794,7 +794,7 @@ export default function App() {
                     }
                 }
 
-                if (!activeGuideY) {
+                if (activeGuideY === undefined) {
                     const nearestGridTop = Math.round(room.y / gridSizePx) * gridSizePx;
                     const distTop = Math.abs(room.y - nearestGridTop);
                     const nearestGridBottom = Math.round((room.y + room.height) / gridSizePx) * gridSizePx;
@@ -810,14 +810,15 @@ export default function App() {
             }
         }
 
-        const newGuides = activeGuideX || activeGuideY ? { x: activeGuideX, y: activeGuideY } : null;
+        // 0 is a real position (the origin axes), so test for undefined rather than falsiness
+        const newGuides = activeGuideX !== undefined || activeGuideY !== undefined ? { x: activeGuideX, y: activeGuideY } : null;
         setSnapGuides(prev => {
             if (!prev && !newGuides) return prev;
             if (prev && newGuides && prev.x === newGuides.x && prev.y === newGuides.y) return prev;
             return newGuides;
         });
         return { x: snappedX, y: snappedY };
-    }, [currentFloor, snapEnabled, appSettings, floorOverlays]);
+    }, [currentFloor, snapEnabled, appSettings, floorOverlays, currentGridSizeMeters]);
 
     // Canvas Refs
     const mainRef = useRef<HTMLElement>(null);
@@ -1377,14 +1378,22 @@ export default function App() {
         }
     };
 
-    const handleRenameFloor = (id: number, newName: string) => {
-        setFloors(prev => prev.map(f => f.id === id ? { ...f, label: newName } : f));
-    };
+    // Typing into a field should be one undo step, not one per keystroke. Consecutive edits with the same key
+    // (the same fields of the same space or floor) less than a second apart share the step saved by the first.
+    const lastGroupedEditRef = useRef<{ key: string; time: number } | null>(null);
+    const addGroupedHistory = useCallback((key: string) => {
+        const now = Date.now();
+        const last = lastGroupedEditRef.current;
+        if (!last || last.key !== key || now - last.time > 1000) addToHistory();
+        lastGroupedEditRef.current = { key, time: now };
+    }, [addToHistory]);
 
     const handleUpdateFloor = (id: number, updates: Partial<Floor>) => {
-        addToHistory();
+        addGroupedHistory(`floor:${id}:${Object.keys(updates).sort().join(',')}`);
         setFloors(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
     };
+
+    const handleRenameFloor = (id: number, newName: string) => handleUpdateFloor(id, { label: newName });
 
     // --- Drag & Drop Handlers ---
     const handleDragStart = (e: React.DragEvent, room: Room) => {
@@ -1438,8 +1447,8 @@ export default function App() {
     };
 
     const handleAddZone = (name: string) => {
-        addToHistory();
         if (zoneColors[name] || !name.trim()) return;
+        addToHistory();
         // Assign a random color style from existing ones for now
         const randomStyle = COLOR_PALETTE[Math.floor(Math.random() * COLOR_PALETTE.length)];
         setZoneColors(prev => ({ ...prev, [name]: randomStyle }));
@@ -1726,17 +1735,11 @@ export default function App() {
         setRooms(prev => prev.map(r => (r.id === id ? recenterShape(r) : r)));
     }, []);
 
-    // Property-panel edits are undoable. Consecutive edits to the same fields of the same space
-    // (e.g. typing a name) within a second are grouped into one undo step.
-    const lastPanelEditRef = useRef<{ key: string; time: number } | null>(null);
+    // Property-panel edits are undoable; typing into a field is one step
     const updateRoomFromPanel = useCallback((id: string, updates: Partial<Room>) => {
-        const key = `${id}:${Object.keys(updates).sort().join(',')}`;
-        const now = Date.now();
-        const last = lastPanelEditRef.current;
-        if (!last || last.key !== key || now - last.time > 1000) addToHistory();
-        lastPanelEditRef.current = { key, time: now };
+        addGroupedHistory(`room:${id}:${Object.keys(updates).sort().join(',')}`);
         updateRoom(id, updates);
-    }, [addToHistory, updateRoom]);
+    }, [addGroupedHistory, updateRoom]);
 
 
     const handleMoveRoom = useCallback((id: string, x: number, y: number) => {
@@ -2108,6 +2111,7 @@ export default function App() {
         if (connectionSourceId === roomId) {
             setConnectionSourceId(null);
         } else if (connectionSourceId) {
+            addToHistory();
             setConnections(prev => {
                 const existing = prev.find(c =>
                     (c.fromId === connectionSourceId && c.toId === roomId) ||
@@ -2127,7 +2131,12 @@ export default function App() {
         } else {
             setConnectionSourceId(roomId);
         }
-    }, [connectionSourceId]);
+    }, [connectionSourceId, addToHistory]);
+
+    const removeConnection = useCallback((id: string) => {
+        addToHistory();
+        setConnections(prev => prev.filter(c => c.id !== id));
+    }, [addToHistory]);
 
     const toggleFloorVisibility = useCallback((floorId: number) => {
         setHiddenFloorIds(prev => {
@@ -2161,12 +2170,19 @@ export default function App() {
         setSelectedRoomIds(new Set());
     }, []);
 
-    const renameZone = useCallback((oldZone: string, newZone: string) => {
+    const renameZone = useCallback((oldZone: string, rawName: string) => {
+        const newZone = rawName.trim();
+        if (!newZone || newZone === oldZone) return;
         addToHistory();
-        if (!newZone.trim()) return;
         setRooms(prev => prev.map(r => r.zone === oldZone ? { ...r, zone: newZone } : r));
+        // The colour follows the zone; renaming onto an existing zone merges into it and keeps its colour
+        setZoneColors(prev => {
+            if (!prev[oldZone]) return prev;
+            const { [oldZone]: color, ...rest } = prev;
+            return rest[newZone] ? rest : { ...rest, [newZone]: color };
+        });
         setSelectedZone(newZone);
-    }, [addToHistory]);
+    }, [addToHistory, setZoneColors]);
 
     const handleBubbleDragEnd = useCallback((room: Room, e: any) => {
         setIsBubbleDragging(false);
@@ -2569,8 +2585,7 @@ export default function App() {
             }
         }
         return null;
-        return null;
-    }, [viewMode, darkMode, rooms, connections, currentFloor, scale, offset]);
+    }, [viewMode, showZones, projectName, rooms, connections, currentFloor, darkMode, zoneColors, floors, appSettings, annotations, canvasStyle, referenceImages, siteProperties, floorOverlays]);
 
     return (
         <div className="h-screen w-screen bg-slate-50 dark:bg-dark-bg overflow-hidden font-sans selection:bg-orange-500/20 transition-colors duration-300">
@@ -3067,10 +3082,8 @@ export default function App() {
 
                                         if (!isFromVisible || !isToVisible) return null;
 
-                                        const x1 = fromRoom.x + fromRoom.width / 2;
-                                        const y1 = fromRoom.y + fromRoom.height / 2;
-                                        const x2 = toRoom.x + toRoom.width / 2;
-                                        const y2 = toRoom.y + toRoom.height / 2;
+                                        const { x: x1, y: y1 } = roomCenter(fromRoom);
+                                        const { x: x2, y: y2 } = roomCenter(toRoom);
 
                                         const isBlueprint = canvasStyle.id === 'blueprint';
 
@@ -3970,7 +3983,7 @@ export default function App() {
                                             rooms={rooms}
                                             floors={floors}
                                             connections={connections}
-                                            setConnections={setConnections}
+                                            onRemoveConnection={removeConnection}
                                             zoneColors={zoneColors}
                                             appSettings={appSettings}
                                             selectedRoom={selectedRoom}

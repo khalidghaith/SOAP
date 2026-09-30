@@ -3,7 +3,7 @@ import { deflateRawSync } from 'node:zlib';
 import { Room, Floor, SiteProperties, Point } from '../types';
 import {
     polygonArea, insetPolygon, buildableArea, polygonInside, polygonsOverlap, roomWorldPolygon,
-    analyzeSite, geoToWorld, worldToGeo, parseKml, readKmz, alignEdgeRotation, rotatePoint, recenterShape, polygonCentroid, bubbleCurve,
+    analyzeSite, geoToWorld, worldToGeo, parseKml, readKmz, alignEdgeRotation, rotatePoint, recenterShape, polygonCentroid, bubbleCurve, roomCenter,
 } from './site';
 
 const rect = (x: number, y: number, w: number, h: number) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
@@ -13,6 +13,22 @@ const room = (id: string, x: number, y: number, w: number, h: number, extra: Par
     x: x * PX, y: y * PX, width: w * PX, height: h * PX, ...extra,
 });
 const floors: Floor[] = [{ id: -1, label: 'B', height: 3 }, { id: 0, label: 'GF', height: 4 }, { id: 1, label: 'L1', height: 3.5 }, { id: 2, label: 'L2', height: 3.5 }];
+
+describe('roomCenter', () => {
+    const close = (p: Point, x: number, y: number) => { expect(p.x).toBeCloseTo(x, 6); expect(p.y).toBeCloseTo(y, 6); };
+
+    it('is the middle of a rect, however it is rotated (rects turn about their middle)', () => {
+        close(roomCenter(room('r', 2, 3, 10, 4)), 7 * PX, 5 * PX);
+        close(roomCenter(room('r', 2, 3, 10, 4, { rotation: 37 })), 7 * PX, 5 * PX);
+    });
+
+    it('is (x, y) for a re-centred polygon or bubble, not x + width/2', () => {
+        const poly = recenterShape(room('p', 2, 3, 8, 8, { shape: 'polygon', polygon: rect(0, 0, 160, 80), rotation: 30 }));
+        close(roomCenter(poly), poly.x, poly.y);
+        const bubble = recenterShape(room('b', 2, 3, 8, 8, { shape: 'bubble', polygon: rect(0, 0, 160, 80) }));
+        close(roomCenter(bubble), bubble.x, bubble.y);
+    });
+});
 
 describe('recenterShape', () => {
     // An L drawn with its origin at the top-left corner, as older shapes (and edited ones) have it

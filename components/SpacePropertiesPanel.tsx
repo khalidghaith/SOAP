@@ -9,7 +9,7 @@ interface SpacePropertiesPanelProps {
     rooms: Room[];
     floors: Floor[];
     connections: Connection[];
-    setConnections: React.Dispatch<React.SetStateAction<Connection[]>>;
+    onRemoveConnection: (id: string) => void;
     zoneColors: Record<string, ZoneColor>;
     appSettings: AppSettings;
     selectedRoom: Room | undefined;
@@ -29,7 +29,7 @@ interface SpacePropertiesPanelProps {
 
 /** Right-sidebar details for the selected space (or a multi-selection). */
 export const SpacePropertiesPanel: React.FC<SpacePropertiesPanelProps> = ({
-    rooms, floors, connections, setConnections, zoneColors, appSettings,
+    rooms, floors, connections, onRemoveConnection, zoneColors, appSettings,
     selectedRoom, selectedRoomIds, setSelectedRoomIds, selectedRoomsList, isMultiSelection, multiSelectionStats,
     connectionSourceId, updateRoom, deleteRoom, toggleLink, handleAddZone, handleConvertShape, handleMoveSelectionFloors,
 }) => (
@@ -261,7 +261,7 @@ export const SpacePropertiesPanel: React.FC<SpacePropertiesPanelProps> = ({
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            setConnections(prev => prev.filter(c => c.id !== conn.id));
+                                                            onRemoveConnection(conn.id);
                                                         }}
                                                         className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 p-1"
                                                         title="Unlink"

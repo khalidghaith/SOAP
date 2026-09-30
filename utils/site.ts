@@ -234,6 +234,12 @@ export const roomWorldPolygon = (r: Room, pxPerMeter = SITE_PX_PER_METER, { poin
 };
 
 /**
+ * A room's centre of gravity on the plan, in canvas pixels. Rect rooms rotate about their middle and
+ * polygon/bubble rooms about (x, y), so neither is simply (x + width/2, y + height/2) in general.
+ */
+export const roomCenter = (r: Room): Point => polygonCentroid(roomWorldPolygon(r, 1));
+
+/**
  * Moves a polygon/bubble room's origin (room.x, room.y, which it rotates about) to its centre of gravity,
  * shifting its points (and label) so nothing moves on the plan. After that, rotating turns the shape about
  * its middle. Rect rooms, and shapes already centred, are returned unchanged.

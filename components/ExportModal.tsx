@@ -64,16 +64,29 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
     const { scale, quality, pageSize, orientation, transparentBackground, pdfScale } = options;
 
     useEffect(() => {
-        if (step === 'CONFIGURE' && onPreview && (selectedFormat === 'png' || selectedFormat === 'pdf')) {
-            setIsLoadingPreview(true);
-            onPreview({ ...options, format: selectedFormat }).then(url => {
+        if (!(step === 'CONFIGURE' && onPreview && (selectedFormat === 'png' || selectedFormat === 'pdf'))) {
+            setPreviewUrl(null);
+            setIsLoadingPreview(false);
+            return;
+        }
+        // Options can change while a preview renders: drop results that arrive after newer settings
+        let cancelled = false;
+        setIsLoadingPreview(true);
+        onPreview({ ...options, format: selectedFormat })
+            .catch(() => null)
+            .then(url => {
+                if (cancelled) {
+                    if (url) URL.revokeObjectURL(url);
+                    return;
+                }
                 setPreviewUrl(url);
                 setIsLoadingPreview(false);
             });
-        } else {
-            setPreviewUrl(null);
-        }
+        return () => { cancelled = true; };
     }, [step, onPreview, selectedFormat, scale, quality, pageSize, orientation, transparentBackground, pdfScale]);
+
+    // Free each preview image once a newer one replaces it or the dialog closes
+    useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
     useEffect(() => {
         setOptions(prev => ({ ...prev, filename: projectName }));
