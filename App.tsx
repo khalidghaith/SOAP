@@ -23,15 +23,17 @@ import { useProjectDocument } from './hooks/useProjectDocument';
 import { useCanvasViewport } from './hooks/useCanvasViewport';
 import { useGuides } from './hooks/useGuides';
 import { GuideLines, GuideActionsPanel } from './components/GuideLayer';
+import { AppHeader, ViewMode } from './components/AppHeader';
+import { CanvasToolbar } from './components/CanvasToolbar';
 import { canvasContentBounds } from './utils/canvasBounds';
 import { SpacePropertiesPanel } from './components/SpacePropertiesPanel';
 import { ZonePropertiesPanel } from './components/ZonePropertiesPanel';
 import { NotificationHost, notify, confirmDialog } from './components/Notifications';
 import {
-    Plus, Package, Download, Undo2, Redo2, RotateCcw, TableProperties, PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Ruler, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, Image as ImageIcon, Box, Layers, Save, Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, LandPlot, Plug
+    Plus, Package, ChevronRight, ChevronLeft, X, Maximize, ChevronUp, ChevronDown, Box, Layers, Eye, EyeOff
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
-import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
+import { SketchPanel } from './components/SketchToolbar';
 import { AnnotationLayer } from './components/AnnotationLayer';
 import { ReferenceLayer } from './components/ReferenceLayer';
 import { ReferenceToolbar } from './components/ReferenceToolbar';
@@ -52,14 +54,12 @@ import { PIXELS_PER_METER, isOnFloor } from './utils/rooms';
 import { convertRoomShape, RoomShape } from './utils/shapeConversion';
 import { selectionBoxFrom, outlineInBox, SelectionMode } from './utils/selection';
 import { downloadBlob, saveFile } from './utils/fileSave';
-import { ZonesIcon, BrushCleaningIcon } from './components/icons';
+
 
 // Shim process for libs that might expect it in Vite
 if (typeof window !== 'undefined' && !window.process) {
     (window as any).process = { env: {} };
 }
-
-type ViewMode = 'EDITOR' | 'CANVAS' | 'VOLUMES';
 
 export default function App() {
     // Project document: saved data, undo/redo and autosave
@@ -105,8 +105,6 @@ export default function App() {
     const [showSitePropertiesModal, setShowSitePropertiesModal] = useState(false);
     const [showBridgesModal, setShowBridgesModal] = useState(false);
     const bridgeState = useBridge();
-    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);
     const [isAiLayoutLoading, setIsAiLayoutLoading] = useState(false);
     const [showAiLayoutModal, setShowAiLayoutModal] = useState(false);
 
@@ -215,7 +213,6 @@ export default function App() {
     const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
     const [snapGuides, setSnapGuides] = useState<{ x?: number, y?: number } | null>(null);
     const activeOverlayFloorId = floorOverlays[currentFloor] ?? null;
-    const [isOverlaySelectorOpen, setIsOverlaySelectorOpen] = useState(false);
     const [isZoneDragging, setIsZoneDragging] = useState(false);
     const [isBubbleDragging, setIsBubbleDragging] = useState(false);
     const [isInventoryHovered, setIsInventoryHovered] = useState(false);
@@ -250,19 +247,6 @@ export default function App() {
             setSelectedAnnotationId(hit?.id ?? null);
         }
     }, [currentFloor, annotations, isSketchMode, toWorld]);
-
-    const overlaySelectorRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (!isOverlaySelectorOpen) return;
-        const handleClickOutside = (event: MouseEvent) => {
-            if (overlaySelectorRef.current && !overlaySelectorRef.current.contains(event.target as Node)) {
-                setIsOverlaySelectorOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOverlaySelectorOpen]);
 
     // Dark Mode Local State
     const [darkMode, setDarkMode] = useState(() => {
@@ -1701,181 +1685,34 @@ export default function App() {
             </div>
 
             <div className="hidden md:flex flex-col h-full w-full">
-                {/* Premium Header */}
-                <header className="h-[42px] glass-panel !border-x-0 !border-t-0 flex items-center justify-between pr-4 shrink-0 z-40 shadow-sm relative transition-colors duration-300">
-                    <div className="flex flex-1 items-center h-full overflow-hidden">
-                        {/* Logo Block (matches inventory width) */}
-                        <div className={`flex items-center h-full transition-all duration-300 shrink-0 ${isInventoryOpen ? 'w-80 border-r border-slate-200/50 dark:border-dark-border pr-2' : 'w-[42px] mr-4'}`}>
-                            <img src={SoapLogo} className="w-[42px] h-[42px] object-cover shrink-0 cursor-pointer hover:opacity-80 transition-opacity" title="Rename Project" alt="SOAP" onClick={() => {
-                                const newName = window.prompt("Rename Project:", projectName);
-                                if (newName && newName.trim()) setProjectName(newName);
-                            }} />
-                            <div className={`flex-1 min-w-0 px-3 hidden md:block transition-opacity duration-300 ${isInventoryOpen ? 'opacity-100' : 'opacity-0'}`}>
-                                <input className="font-black text-slate-900 dark:text-gray-100 tracking-tight leading-none bg-transparent border-none focus:outline-none focus:ring-0 w-full p-0 text-sm truncate" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
-                            </div>
-                        </div>
-
-                        {/* Actions Block */}
-                        <div className="hidden lg:flex items-center gap-1 pl-2">
-                            <button
-                                onClick={() => setDarkMode(!darkMode)}
-                                className={`w-8 h-8 rounded-lg flex items-center justify-center ${!darkMode ? 'text-slate-400 hover:text-orange-500 hover:bg-orange-50' : 'text-slate-400 hover:text-orange-400 hover:bg-white/5'}`}
-                                title="Toggle Dark Mode"
-                            >
-                                {darkMode ? <Moon size={14} /> : <Sun size={14} />}
-                            </button>
-                            <button
-                                onClick={() => setShowBridgesModal(true)}
-                                className={`relative w-8 h-8 rounded-lg flex items-center justify-center ${bridgeState.settings.enabled ? 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5' : 'text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-white/5'}`}
-                                title="Connect an AI assistant (Claude)"
-                            >
-                                <Plug size={14} />
-                                {bridgeState.settings.enabled && (
-                                    // Waiting for Claude Desktop to open is normal (amber); red means something needs fixing
-                                    <span className={`absolute top-1 right-1 w-1.5 h-1.5 rounded-full ${bridgeState.status === 'connected' ? (bridgeState.sessions.length ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500') : bridgeState.problem || (bridgeState.status === 'unavailable' && bridgeState.settings.connection !== 'helper') ? 'bg-red-500' : 'bg-amber-400'}`} />
-                                )}
-                            </button>
-                            <button
-                                onClick={() => setShowApiKeyModal(true)}
-                                className={`w-8 h-8 rounded-lg flex items-center justify-center ${apiKey ? 'text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-white/5' : 'text-orange-500 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 shadow-lg shadow-orange-100'}`}
-                                title="Gemini API Key Settings"
-                            >
-                                <Key size={14} />
-                            </button>
-                            <button onClick={() => {
-                                setShowSettingsModal(true);
-                                setShowSnapPanel(false);
-                                setShowStylePanel(false);
-                                setIsReferenceMode(false);
-                            }} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5" title="Advanced Preferences">
-                                <Settings size={14} />
-                            </button>
-                            <button onClick={() => setShowHelpModal(true)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5" title="Help">
-                                <CircleHelp size={14} />
-                            </button>
-                            <button onClick={() => setShowAboutModal(true)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-white/5" title="About">
-                                <Info size={14} />
-                            </button>
-
-                            <div className="h-6 w-px bg-slate-200/60 dark:bg-dark-border mx-1" />
-
-                            <button onClick={undo} disabled={!canUndo} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30" title="Undo (Ctrl+Z)">
-                                <Undo2 size={14} />
-                            </button>
-                            <button onClick={redo} disabled={!canRedo} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-30" title="Redo (Ctrl+Y)">
-                                <Redo2 size={14} />
-                            </button>
-                            <div className="w-px h-3 bg-slate-200 dark:bg-dark-border mx-1" />
-                            <button onClick={handleResetProject} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" title="Reset Project">
-                                <RotateCcw size={14} />
-                            </button>
-                        </div>
-
-                        {/* Mobile Menu Button */}
-                        <button
-                            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                            className="lg:hidden ml-auto w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-white/5"
-                        >
-                            {isMobileMenuOpen ? <X size={16} /> : <Menu size={16} />}
-                        </button>
-                    </div>
-
-                    {/* Workspace Toggles - Centered */}
-                    <div className="flex justify-center flex-none h-[42px] border-x border-slate-200/20 dark:border-dark-border bg-transparent shadow-sm">
-                        <button
-                            onClick={() => setViewMode('EDITOR')}
-                            className={`flex items-center justify-center gap-2 px-6 h-full text-[10px] font-black uppercase tracking-widest transition-colors ${viewMode === 'EDITOR' ? 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400 border-b-2 border-orange-500 shadow-[inset_0_-2px_10px_rgba(249,115,22,0.05)]' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-200/30 dark:hover:bg-white/5 border-b-2 border-transparent'}`}
-                        >
-                            <TableProperties size={14} /> <span className="hidden lg:inline">Program</span>
-                        </button>
-                        <div className="w-px h-full bg-slate-200/80 dark:bg-dark-border" />
-                        <button
-                            onClick={() => setViewMode('CANVAS')}
-                            className={`flex items-center justify-center gap-2 px-6 h-full text-[10px] font-black uppercase tracking-widest transition-colors ${viewMode === 'CANVAS' ? 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400 border-b-2 border-orange-500 shadow-[inset_0_-2px_10px_rgba(249,115,22,0.05)]' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-200/30 dark:hover:bg-white/5 border-b-2 border-transparent'}`}
-                        >
-                            <PencilRuler size={14} /> <span className="hidden lg:inline">Canvas</span>
-                        </button>
-                        <div className="w-px h-full bg-slate-200/80 dark:bg-dark-border" />
-                        <button
-                            onClick={() => setViewMode('VOLUMES')}
-                            className={`flex items-center justify-center gap-2 px-6 h-full text-[10px] font-black uppercase tracking-widest transition-colors ${viewMode === 'VOLUMES' ? 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400 border-b-2 border-orange-500 shadow-[inset_0_-2px_10px_rgba(249,115,22,0.05)]' : 'text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200 hover:bg-slate-200/30 dark:hover:bg-white/5 border-b-2 border-transparent'}`}
-                        >
-                            <Box size={14} /> <span className="hidden lg:inline">Volumes</span>
-                        </button>
-                    </div>
-
-                    <div className="flex flex-1 items-center justify-end gap-1.5">
-                        <button
-                            onClick={() => setShowExportModal(true)} className="h-8 px-3 text-slate-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-2 group"
-                        >
-                            <Save size={14} className="group-hover:-translate-y-0.5" /> Save
-                        </button>
-
-                        <div className="flex items-center">
-                            <label className="h-8 px-3 text-slate-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-2 cursor-pointer group">
-                                <Download size={14} className="group-hover:-translate-y-0.5" /> Project
-                                <input type="file" accept={viewMode === 'EDITOR' ? ".json,.csv" : ".json"} className="hidden" onChange={handleImportProject} />
-                            </label>
-                        </div>
-                    </div>
-
-                    {/* Mobile Menu Overlay */}
-                    {isMobileMenuOpen && (
-                        <div className="absolute top-[42px] left-0 right-0 bg-white dark:bg-dark-surface border-b border-slate-200 dark:border-dark-border p-4 flex flex-col gap-4 z-50 shadow-xl lg:hidden animate-in slide-in-from-top-2">
-                            <div className="grid grid-cols-5 gap-2">
-                                <button
-                                    onClick={() => { setDarkMode(!darkMode); setIsMobileMenuOpen(false); }}
-                                    className={`h-10 rounded-xl flex items-center justify-center ${!darkMode ? 'bg-slate-100 text-slate-600' : 'bg-white/5 text-slate-300'}`}
-                                >
-                                    {darkMode ? <Moon size={16} /> : <Sun size={16} />}
-                                </button>
-                                <button
-                                    onClick={() => { setShowApiKeyModal(true); setIsMobileMenuOpen(false); }}
-                                    className={`h-10 rounded-xl flex items-center justify-center ${apiKey ? 'bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}
-                                >
-                                    <Key size={16} />
-                                </button>
-                                <button
-                                    onClick={() => { setShowBridgesModal(true); setIsMobileMenuOpen(false); }}
-                                    className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300"
-                                    title="AI Bridges"
-                                >
-                                    <Plug size={16} />
-                                </button>
-                                <button
-                                    onClick={() => { setShowSettingsModal(true); setIsMobileMenuOpen(false); }}
-                                    className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300"
-                                >
-                                    <Settings size={16} />
-                                </button>
-                                <button
-                                    onClick={() => { setShowHelpModal(true); setIsMobileMenuOpen(false); }}
-                                    className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300"
-                                >
-                                    <CircleHelp size={16} />
-                                </button>
-                                <button
-                                    onClick={() => { setShowAboutModal(true); setIsMobileMenuOpen(false); }}
-                                    className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300"
-                                >
-                                    <Info size={16} />
-                                </button>
-                            </div>
-                            <div className="h-px bg-slate-100 dark:bg-dark-border" />
-                            <div className="grid grid-cols-3 gap-2">
-                                <button onClick={() => { undo(); setIsMobileMenuOpen(false); }} disabled={!canUndo} className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 disabled:opacity-50">
-                                    <Undo2 size={16} />
-                                </button>
-                                <button onClick={() => { redo(); setIsMobileMenuOpen(false); }} disabled={!canRedo} className="h-10 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300 disabled:opacity-50">
-                                    <Redo2 size={16} />
-                                </button>
-                                <button onClick={() => { handleResetProject(); setIsMobileMenuOpen(false); }} className="h-10 rounded-xl flex items-center justify-center bg-red-50 text-red-500 dark:bg-red-900/20">
-                                    <RotateCcw size={16} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </header>
+                <AppHeader
+                    projectName={projectName}
+                    onProjectNameChange={setProjectName}
+                    isInventoryOpen={isInventoryOpen}
+                    viewMode={viewMode}
+                    onViewModeChange={setViewMode}
+                    darkMode={darkMode}
+                    onToggleDarkMode={() => setDarkMode(d => !d)}
+                    bridgeState={bridgeState}
+                    hasApiKey={!!apiKey}
+                    canUndo={canUndo}
+                    canRedo={canRedo}
+                    onUndo={undo}
+                    onRedo={redo}
+                    onResetProject={handleResetProject}
+                    onOpenBridges={() => setShowBridgesModal(true)}
+                    onOpenApiKey={() => setShowApiKeyModal(true)}
+                    onOpenSettings={() => {
+                        setShowSettingsModal(true);
+                        setShowSnapPanel(false);
+                        setShowStylePanel(false);
+                        setIsReferenceMode(false);
+                    }}
+                    onOpenHelp={() => setShowHelpModal(true)}
+                    onOpenAbout={() => setShowAboutModal(true)}
+                    onOpenSave={() => setShowExportModal(true)}
+                    onImportProject={handleImportProject}
+                />
 
                 <div className="flex-1 flex overflow-hidden relative">
                     <div
@@ -2495,264 +2332,93 @@ export default function App() {
                         {/* Shared overlays & panels */}
                         {(viewMode === 'CANVAS' || viewMode === 'VOLUMES') && (
                             <>
-                                {/* Tools Bar (Top Left) */}
-                                <div
-                                    className="absolute top-6 left-6 flex flex-col gap-2 z-[200] export-exclude pointer-events-auto"
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                >
-                                    <div className="glass-panel p-2 rounded-3xl shadow-xl flex flex-col items-center gap-1.5 border border-white/20 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl">
-                                        {/* Mobile Expand Button */}
-                                        <button
-                                            onClick={() => setIsToolbarExpanded(!isToolbarExpanded)}
-                                            className="lg:hidden w-8 h-8 rounded-full flex items-center justify-center text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5"
-                                        >
-                                            {isToolbarExpanded ? <ChevronLeft size={16} /> : <MoreHorizontal size={16} />}
-                                        </button>
-
-                                        <div className={`flex flex-col items-center gap-2 ${!isToolbarExpanded ? 'hidden lg:flex' : 'flex'}`}>
-                                            {/* Grid Controller (Vertical Capsule) - Always visible in both 2D and 3D */}
-                                            <div className="flex flex-col items-center bg-slate-100/50 dark:bg-white/5 rounded-2xl py-1.5 px-1 border border-slate-200/50 dark:border-dark-border gap-1 w-8">
-                                                <span className="text-[10px] font-black font-sans text-center h-4 flex items-center justify-center leading-none">{gridSize}{appSettings.unitSystem === 'imperial' ? 'ft' : 'm'}</span>
-                                                <div className="flex items-center justify-center gap-0.5">
-                                                    <button onClick={() => setGridSizeIndex(prev => Math.min(prev + 1, GRID_SIZES.length - 1))} className="text-slate-400 hover:text-orange-600 transition-colors" title="Increase Grid"><ChevronUp size={12} /></button>
-                                                    <button onClick={() => setGridSizeIndex(prev => Math.max(prev - 1, 0))} className="text-slate-400 hover:text-orange-600 transition-colors" title="Decrease Grid"><ChevronDown size={12} /></button>
-                                                </div>
-                                                <div className="w-6 h-px bg-slate-200/60 dark:bg-dark-border my-0.5" />
-                                                <button
-                                                    onClick={() => setShowGrid(!showGrid)}
-                                                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 ${!showGrid ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5' : 'bg-white dark:bg-dark-surface text-orange-600 dark:text-orange-400 shadow-sm'}`}
-                                                    title="Toggle Grid"
-                                                >
-                                                    <Grid size={11} />
-                                                </button>
-                                            </div>
-
-                                            {viewMode === 'CANVAS' && (
-                                                <>
-
-                                                    <button
-                                                        onClick={handleAutoArrange}
-                                                        className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600"
-                                                        title="Auto Arrange Layout"
-                                                    >
-                                                        <LayoutTemplate size={16} />
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() => setShowAiLayoutModal(true)}
-                                                        disabled={isAiLayoutLoading}
-                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isAiLayoutLoading ? 'bg-orange-100 text-orange-400 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-purple-600'}`}
-                                                        title="AI Spatial Layout"
-                                                    >
-                                                        <Sparkles size={16} className={isAiLayoutLoading ? "animate-spin" : ""} />
-                                                    </button>
-
-                                                    <div className="relative" ref={overlaySelectorRef}>
-                                                        <button
-                                                            onClick={() => setIsOverlaySelectorOpen(prev => !prev)}
-                                                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${activeOverlayFloorId !== null ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}
-                                                            title="Select Overlay Floor"
-                                                        >
-                                                            <Layers size={16} />
-                                                        </button>
-                                                        {isOverlaySelectorOpen && (
-                                                            <div className="absolute left-full top-0 ml-2.5 w-48 glass-panel p-2.5 rounded-2xl shadow-xl flex flex-col gap-1 origin-left z-50 border border-white/20 dark:border-white/10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl">
-                                                                <div className="px-2 py-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">Overlay Floor</div>
-                                                                {floors.filter(f => f.id !== currentFloor).map(floor => (
-                                                                    <button
-                                                                        key={floor.id}
-                                                                        onClick={() => {
-                                                                            setFloorOverlays(prev => ({
-                                                                                ...prev,
-                                                                                [currentFloor]: prev[currentFloor] === floor.id ? null : floor.id
-                                                                            }));
-                                                                            setIsOverlaySelectorOpen(false);
-                                                                        }}
-                                                                        className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${activeOverlayFloorId === floor.id ? 'bg-orange-100 dark:bg-orange-900/20 text-orange-600' : 'text-slate-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-white/5'}`}
-                                                                    >
-                                                                        {floor.label}
-                                                                    </button>
-                                                                ))}
-                                                                {floors.length > 1 && <div className="h-px bg-slate-200 dark:bg-dark-border my-1" />}
-                                                                <button
-                                                                    onClick={() => {
-                                                                        setFloorOverlays(prev => ({
-                                                                            ...prev,
-                                                                            [currentFloor]: null
-                                                                        }));
-                                                                        setIsOverlaySelectorOpen(false);
-                                                                    }}
-                                                                    className={`w-full text-left px-2 py-1.5 rounded-md text-xs font-bold ${activeOverlayFloorId === null ? 'bg-slate-200 dark:bg-white/10 text-slate-800 dark:text-white' : 'text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-white/5'}`}
-                                                                >
-                                                                    None
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    <button
-                                                        onClick={() => {
-                                                            const newValue = !showSnapPanel;
-                                                            setShowSnapPanel(newValue);
-                                                            if (newValue) {
-                                                                setShowStylePanel(false);
-                                                                setIsReferenceMode(false);
-                                                                setIsSketchMode(false);
-                                                            }
-                                                        }}
-                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 relative ${
-                                                            showSnapPanel
-                                                                ? 'bg-gradient-to-tr from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30 scale-110'
-                                                                : snapEnabled
-                                                                    ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'
-                                                                    : 'text-slate-400 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500 bg-white/5 border border-slate-200/50 dark:border-white/5 hover:border-orange-500/20'
-                                                        }`}
-                                                        title="Snapping Settings & Grid"
-                                                    >
-                                                        <Magnet size={16} />
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() => setIsMagnetMode(!isMagnetMode)}
-                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!isMagnetMode ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
-                                                        title="Physics / Magnetic Zones"
-                                                    >
-                                                        <Atom size={16} className={isMagnetMode ? "animate-spin" : ""} />
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() => setShowZones(!showZones)}
-                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${!showZones ? 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500' : 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800/50 shadow-inner'}`}
-                                                        title="Toggle Zone Overlays"
-                                                    >
-                                                        <ZonesIcon className="w-4 h-4 transition-all duration-300" />
-                                                    </button>
-                                                     <button
-                                                        onClick={() => {
-                                                            const newValue = !isReferenceMode;
-                                                            setIsReferenceMode(newValue);
-                                                            if (newValue) {
-                                                                closeSiteMode();
-                                                                setIsSketchMode(false);
-                                                                setShowStylePanel(false);
-                                                                setShowSnapPanel(false);
-                                                            }
-                                                        }}
-                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isReferenceMode ? 'bg-orange-500 text-white shadow-lg scale-105 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
-                                                        title="Edit Reference Images"
-                                                    >
-                                                        <ImageIcon size={16} />
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() => {
-                                                            if (isSiteMode) { closeSiteMode(); return; }
-                                                            setIsSiteMode(true);
-                                                            setIsSketchMode(false);
-                                                            setIsReferenceMode(false);
-                                                            setIsGuidesMode(false);
-                                                            setShowStylePanel(false);
-                                                            setShowSnapPanel(false);
-                                                        }}
-                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isSiteMode ? 'bg-orange-500 text-white shadow-lg scale-105 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
-                                                        title="Site: boundary, setbacks & Google Earth import"
-                                                    >
-                                                        <LandPlot size={16} />
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() => {
-                                                            const newValue = !isGuidesMode;
-                                                            setIsGuidesMode(newValue);
-                                                            if (newValue) {
-                                                                closeSiteMode();
-                                                                setIsSketchMode(false);
-                                                                setIsReferenceMode(false);
-                                                                setShowStylePanel(false);
-                                                                setShowSnapPanel(false);
-                                                            }
-                                                        }}
-                                                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isGuidesMode ? 'bg-orange-500 text-white shadow-lg scale-105 animate-pulse' : 'text-slate-400 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-600'}`}
-                                                        title="Drafting Guides & Rulers Mode"
-                                                    >
-                                                        <Ruler size={16} />
-                                                    </button>
-
-                                                    <SketchToolbar
-                                                        isActive={isSketchMode}
-                                                        onToggle={() => {
-                                                            const newValue = !isSketchMode;
-                                                            setIsSketchMode(newValue);
-                                                            if (newValue) {
-                                                                closeSiteMode();
-                                                                setIsReferenceMode(false);
-                                                                setShowStylePanel(false);
-                                                                setShowSnapPanel(false);
-                                                            }
-                                                        }}
-                                                    />
-                                                </>
-                                            )}
-
-                                            {/* Style Selector Toggle (Visible in both 2D and 3D) */}
-                                            <button
-                                                onClick={() => {
-                                                    const newValue = !showStylePanel;
-                                                    setShowStylePanel(newValue);
-                                                    if (newValue) {
-                                                        setIsReferenceMode(false);
-                                                        setIsSketchMode(false);
-                                                        setShowSnapPanel(false);
-                                                    }
-                                                }}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 relative ${showStylePanel
-                                                        ? 'bg-gradient-to-tr from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30 scale-110'
-                                                        : 'text-slate-400 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-orange-500 bg-white/5 border border-slate-200/50 dark:border-white/5 hover:border-orange-500/20'
-                                                    }`}
-                                                title="Visual Styles & Appearance"
-                                            >
-                                                <Palette size={16} />
-                                            </button>
-
-                                            {/* View Orientation Toggle (Only in 3D VOLUMES workspace) */}
-                                            {viewMode === 'VOLUMES' && (
-                                                <div className="flex flex-col items-center bg-slate-100/50 dark:bg-white/5 rounded-2xl py-1.5 px-1 border border-slate-200/50 dark:border-dark-border gap-1 w-8">
-                                                    <button
-                                                        onClick={() => handleViewStateChange({ viewType: 'perspective' }, true)}
-                                                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black tracking-tighter transition-all ${volumesViewState.viewType === 'perspective'
-                                                                ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm font-black'
-                                                                : 'text-slate-400 hover:text-slate-600 dark:text-gray-500 dark:hover:text-gray-300'
-                                                            }`}
-                                                        title="Perspective View"
-                                                    >
-                                                        3D
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleViewStateChange({ viewType: 'isometric' }, true)}
-                                                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black tracking-tighter transition-all ${volumesViewState.viewType === 'isometric'
-                                                                ? 'bg-white dark:bg-dark-surface text-orange-600 shadow-sm font-black'
-                                                                : 'text-slate-400 hover:text-slate-600 dark:text-gray-500 dark:hover:text-gray-300'
-                                                            }`}
-                                                        title="Isometric View"
-                                                    >
-                                                        ISO
-                                                    </button>
-                                                </div>
-                                            )}
-
-                                            {viewMode === 'CANVAS' && (
-                                                <button
-                                                    onClick={handleClearCanvas}
-                                                    className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-slate-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500"
-                                                    title="Clear Canvas"
-                                                >
-                                                    <BrushCleaningIcon className="w-4 h-4" />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
+                                <CanvasToolbar
+                                    viewMode={viewMode}
+                                    gridSize={gridSize}
+                                    unitSystem={appSettings.unitSystem}
+                                    onGridSizeStep={step => setGridSizeIndex(prev => Math.min(Math.max(prev + step, 0), GRID_SIZES.length - 1))}
+                                    showGrid={showGrid}
+                                    onToggleGrid={() => setShowGrid(!showGrid)}
+                                    onAutoArrange={handleAutoArrange}
+                                    onOpenAiLayout={() => setShowAiLayoutModal(true)}
+                                    isAiLayoutLoading={isAiLayoutLoading}
+                                    floors={floors}
+                                    currentFloor={currentFloor}
+                                    overlayFloorId={activeOverlayFloorId}
+                                    onOverlayFloorChange={floorId => setFloorOverlays(prev => ({ ...prev, [currentFloor]: floorId }))}
+                                    snapPanelOpen={showSnapPanel}
+                                    snapEnabled={snapEnabled}
+                                    onToggleSnapPanel={() => {
+                                        const newValue = !showSnapPanel;
+                                        setShowSnapPanel(newValue);
+                                        if (newValue) {
+                                            setShowStylePanel(false);
+                                            setIsReferenceMode(false);
+                                            setIsSketchMode(false);
+                                        }
+                                    }}
+                                    magnetMode={isMagnetMode}
+                                    onToggleMagnet={() => setIsMagnetMode(!isMagnetMode)}
+                                    showZones={showZones}
+                                    onToggleZones={() => setShowZones(!showZones)}
+                                    referenceMode={isReferenceMode}
+                                    onToggleReference={() => {
+                                        const newValue = !isReferenceMode;
+                                        setIsReferenceMode(newValue);
+                                        if (newValue) {
+                                            closeSiteMode();
+                                            setIsSketchMode(false);
+                                            setShowStylePanel(false);
+                                            setShowSnapPanel(false);
+                                        }
+                                    }}
+                                    siteMode={isSiteMode}
+                                    onToggleSite={() => {
+                                        if (isSiteMode) { closeSiteMode(); return; }
+                                        setIsSiteMode(true);
+                                        setIsSketchMode(false);
+                                        setIsReferenceMode(false);
+                                        setIsGuidesMode(false);
+                                        setShowStylePanel(false);
+                                        setShowSnapPanel(false);
+                                    }}
+                                    guidesMode={isGuidesMode}
+                                    onToggleGuides={() => {
+                                        const newValue = !isGuidesMode;
+                                        setIsGuidesMode(newValue);
+                                        if (newValue) {
+                                            closeSiteMode();
+                                            setIsSketchMode(false);
+                                            setIsReferenceMode(false);
+                                            setShowStylePanel(false);
+                                            setShowSnapPanel(false);
+                                        }
+                                    }}
+                                    sketchMode={isSketchMode}
+                                    onToggleSketch={() => {
+                                        const newValue = !isSketchMode;
+                                        setIsSketchMode(newValue);
+                                        if (newValue) {
+                                            closeSiteMode();
+                                            setIsReferenceMode(false);
+                                            setShowStylePanel(false);
+                                            setShowSnapPanel(false);
+                                        }
+                                    }}
+                                    stylePanelOpen={showStylePanel}
+                                    onToggleStylePanel={() => {
+                                        const newValue = !showStylePanel;
+                                        setShowStylePanel(newValue);
+                                        if (newValue) {
+                                            setIsReferenceMode(false);
+                                            setIsSketchMode(false);
+                                            setShowSnapPanel(false);
+                                        }
+                                    }}
+                                    volumesViewType={volumesViewState.viewType}
+                                    onVolumesViewTypeChange={viewType => handleViewStateChange({ viewType }, true)}
+                                    onClearCanvas={handleClearCanvas}
+                                />
 
                                 {/* Style Selector panel floating alongside vertical toolbar */}
                                 {showStylePanel && (
