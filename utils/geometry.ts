@@ -40,19 +40,6 @@ export const getConvexHull = (points: Point[]): Point[] => {
     return [...lower, ...upper];
 };
 
-// Generate a smooth path from hull points (Catmull-Rom or Bezier refinement can be added here, 
-// but for "fluid" look, simply using SVG's smooth curve commands (Q or S) or just rounded line joins works well.
-// Here we will do a simple rounded corner approach).
-export const getHullPath = (points: Point[], padding: number = 20): string => {
-    if (points.length < 3) return "";
-
-    // Simple path for now
-    const d = points.map((p, i) => {
-        return `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`;
-    }).join(' ');
-
-    return d + " Z";
-};
 
 // SVG Fillet utility
 export const createRoundedPath = (rawPoints: Point[], radius: number) => {

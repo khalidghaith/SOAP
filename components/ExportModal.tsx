@@ -83,6 +83,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ onExport, onClose, vie
                 setIsLoadingPreview(false);
             });
         return () => { cancelled = true; };
+        // Only the options that change the image; typing a filename must not re-render the preview
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [step, onPreview, selectedFormat, scale, quality, pageSize, orientation, transparentBackground, pdfScale]);
 
     // Free each preview image once a newer one replaces it or the dialog closes

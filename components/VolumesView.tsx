@@ -1,9 +1,9 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback, useLayoutEffect, useImperativeHandle, forwardRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, PerspectiveCamera, OrthographicCamera, GizmoHelper, GizmoViewport, Text, Edges, Html, Line } from '@react-three/drei';
+import { OrbitControls, Grid, PerspectiveCamera, OrthographicCamera, GizmoHelper, GizmoViewport, Edges, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { OBJExporter } from 'three-stdlib';
-import { Room, Floor, ZoneColor, VerticalConnection, ZONE_COLORS, AppSettings, DiagramStyle } from '../types';
+import { Room, Floor, ZoneColor, VerticalConnection, AppSettings, DiagramStyle } from '../types';
 import { Maximize } from 'lucide-react';
 import { getHexColorForZone, getHexBorderForZone } from '../utils/exportSystem';
 
@@ -12,7 +12,6 @@ interface VolumesViewProps {
     floors: Floor[];
     verticalConnections: VerticalConnection[];
     zoneColors: Record<string, ZoneColor>;
-    pixelsPerMeter: number;
     connectionSourceId: string | null;
     onLinkToggle: (roomId: string) => void;
     appSettings: AppSettings;
@@ -61,7 +60,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
 }) {
     const color = useMemo(() => {
         return getHexColorForZone(room.zone, zoneColors);
-    }, [room.zone, zoneColors, darkMode]);
+    }, [room.zone, zoneColors]);
 
     const floor = floors.find(f => f.id === room.floor);
     const spaceType = room.spaceType || 'standard';
@@ -101,7 +100,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             default:
                 return baseHeight;
         }
-    }, [spaceType, room.depth, room.vcFromFloor, room.vcToFloor, room.msFromFloor, room.msToFloor, floor, floors]);
+    }, [spaceType, room.depth, room.floor, room.vcFromFloor, room.vcToFloor, room.msFromFloor, room.msToFloor, floor, floors]);
 
     const heightIn3D = useMemo(() => {
         if (spaceType === 'verticalConnection' || spaceType === 'multistory') {
@@ -127,7 +126,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             return total + numGaps * floorGap;
         }
         return heightInMeters * HEIGHT_SCALE;
-    }, [spaceType, heightInMeters, room.vcFromFloor, room.vcToFloor, room.msFromFloor, room.msToFloor, floors, floorGap]);
+    }, [spaceType, heightInMeters, room.floor, room.vcFromFloor, room.vcToFloor, room.msFromFloor, room.msToFloor, floors, floorGap]);
 
     // Calculate cumulative floor Y position
     const yFloor = useMemo(() => {
@@ -209,28 +208,11 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         return s;
     }, [room.shape, room.polygon, room.width, room.height]);
 
-    if (!shape) return null;
-
-    // Position calculation
-    let posX = (room.x || 0) / 10;
-    let posY = -((room.y || 0) / 10);
-
-    if (room.shape === 'rect' || !room.shape) {
-        posX += (room.width / 10) / 2;
-        posY -= (room.height / 10) / 2;
-    }
-
-    // Safety check: Do not render invalid polygons/bubbles to prevent ExtrudeGeometry crashes
-    if ((room.shape === 'polygon' || room.shape === 'bubble') && (!room.polygon || room.polygon.length < 3)) {
-        return null;
-    }
-
     const themeParams = useMemo(() => {
         const id = diagramStyle.id;
 
         let meshColor = isLinkingSource ? '#f59e0b' : color;
         let opacity = isSelected ? 0.9 : 0.6;
-        let transparent = true;
         let roughness = 0.2;
         let metalness = 0.1;
         let edgesColor = isSelected || isLinkingSource ? "#f59e0b" : "white";
@@ -240,7 +222,6 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         if (id === 'blueprint') {
             meshColor = '#0284c7';
             opacity = isSelected ? 0.65 : 0.45;
-            transparent = true;
             roughness = 0.1;
             metalness = 0.1;
             edgesColor = isSelected || isLinkingSource ? "#fb923c" : "#e2e8f0";
@@ -249,7 +230,6 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         } else if (id === 'clay') {
             meshColor = '#c05c46';
             opacity = 1.0;
-            transparent = false;
             roughness = 0.95;
             metalness = 0.0;
             edgesColor = isSelected || isLinkingSource ? "#f59e0b" : (darkMode ? '#000000' : '#ffffff');
@@ -268,7 +248,7 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
                 finalOpacity = isSelected ? Math.min(1.0, appSettings.volumesOpacity * 1.5) : appSettings.volumesOpacity;
             }
         }
-        transparent = finalOpacity < 1.0;
+        const transparent = finalOpacity < 1.0;
 
         let finalMeshColor = meshColor;
         if (id === 'standard' && !isLinkingSource) {
@@ -328,8 +308,8 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
         let backdropFilter = 'blur(8px)';
         let filter = 'drop-shadow(0 4px 6px rgba(0,0,0,0.4))';
         let padding = '3px 8px';
-        let textTransform: React.CSSProperties['textTransform'] = 'none';
-        let letterSpacing = 'normal';
+        const textTransform: React.CSSProperties['textTransform'] = 'none';
+        const letterSpacing = 'normal';
 
         if (id === 'blueprint') {
             fontFamily = 'font-mono';
@@ -354,7 +334,24 @@ function RoomVolume({ room, floors, zoneColors, isSelected, isLinkingSource, onS
             textTransform,
             letterSpacing
         };
-    }, [diagramStyle.id, isSelected, darkMode, color]);
+    }, [diagramStyle.id, isSelected, darkMode]);
+
+    // Early returns only after every hook, so the hook order never changes between renders
+    if (!shape) return null;
+
+    // Position calculation
+    let posX = (room.x || 0) / 10;
+    let posY = -((room.y || 0) / 10);
+
+    if (room.shape === 'rect' || !room.shape) {
+        posX += (room.width / 10) / 2;
+        posY -= (room.height / 10) / 2;
+    }
+
+    // Safety check: Do not render invalid polygons/bubbles to prevent ExtrudeGeometry crashes
+    if ((room.shape === 'polygon' || room.shape === 'bubble') && (!room.polygon || room.polygon.length < 3)) {
+        return null;
+    }
 
     return (
         <group
@@ -451,7 +448,7 @@ function FloorPlane({ floor, floors, darkMode, gridSize, floorGap, diagramStyle 
     let cellSizeValue = 0;
     let cellColor = "transparent";
     let sectionThickness = 1.5;
-    let fadeDistance = 100;
+    const fadeDistance = 100;
 
     if (id === 'blueprint') {
         sectionColor = darkMode ? "rgba(56, 189, 248, 0.35)" : "rgba(14, 165, 233, 0.3)";
@@ -484,6 +481,28 @@ function FloorPlane({ floor, floors, darkMode, gridSize, floorGap, diagramStyle 
 function VerticalLink({ conn, rooms, floors, darkMode, floorGap, diagramStyle }: { conn: VerticalConnection; rooms: Room[]; floors: Floor[]; darkMode: boolean; floorGap: number, diagramStyle: DiagramStyle }) {
     const fromRoom = rooms.find(r => r.id === conn.fromId);
     const toRoom = rooms.find(r => r.id === conn.toId);
+
+    const styleParams = useMemo(() => {
+        const id = diagramStyle.id;
+        let color = darkMode ? "#fb923c" : "#f97316";
+        let lineWidth = 3;
+        let opacity = 0.6;
+        let dashed = false;
+
+        if (id === 'blueprint') {
+            color = darkMode ? '#38bdf8' : '#0284c7';
+            lineWidth = 2;
+            opacity = 0.8;
+            dashed = true;
+        } else if (id === 'clay') {
+            color = darkMode ? '#94a3b8' : '#64748b';
+            lineWidth = 2.5;
+            opacity = 0.5;
+            dashed = false;
+        }
+
+        return { color, lineWidth, opacity, dashed };
+    }, [diagramStyle.id, darkMode]);
 
     if (!fromRoom || !toRoom) return null;
 
@@ -531,28 +550,6 @@ function VerticalLink({ conn, rooms, floors, darkMode, floorGap, diagramStyle }:
 
     // Safety check for NaN coordinates
     if (!p1 || !p2 || p1.some(v => !Number.isFinite(v)) || p2.some(v => !Number.isFinite(v))) return null;
-
-    const styleParams = useMemo(() => {
-        const id = diagramStyle.id;
-        let color = darkMode ? "#fb923c" : "#f97316";
-        let lineWidth = 3;
-        let opacity = 0.6;
-        let dashed = false;
-
-        if (id === 'blueprint') {
-            color = darkMode ? '#38bdf8' : '#0284c7';
-            lineWidth = 2;
-            opacity = 0.8;
-            dashed = true;
-        } else if (id === 'clay') {
-            color = darkMode ? '#94a3b8' : '#64748b';
-            lineWidth = 2.5;
-            opacity = 0.5;
-            dashed = false;
-        }
-
-        return { color, lineWidth, opacity, dashed };
-    }, [diagramStyle.id, darkMode]);
 
     return (
         <Line
@@ -702,10 +699,9 @@ function ViewStateTracker({ onUpdate, isInteracting }: { onUpdate: (pos: THREE.V
     return null;
 }
 
-function CameraHandler({ viewState, onViewStateChange, isInteracting, cameraVersion }: {
+function CameraHandler({ viewState, onViewStateChange, cameraVersion }: {
     viewState: VolumesViewProps['viewState'],
     onViewStateChange: (updates: Partial<VolumesViewProps['viewState']>, incrementVersion?: boolean) => void,
-    isInteracting: React.MutableRefObject<boolean>,
     cameraVersion: number
 }) {
     const { camera, controls, size } = useThree();
@@ -782,7 +778,7 @@ function CameraHandler({ viewState, onViewStateChange, isInteracting, cameraVers
 }
 
 // Internal component to handle scene access and export logic
-const SceneManager = forwardRef<VolumesViewHandle, { hiddenFloorIds: Set<number> }>(({ hiddenFloorIds }, ref) => {
+const SceneManager = forwardRef<VolumesViewHandle>((_props, ref) => {
     const { scene, gl, camera } = useThree();
 
     useImperativeHandle(ref, () => ({
@@ -826,7 +822,7 @@ const SceneManager = forwardRef<VolumesViewHandle, { hiddenFloorIds: Set<number>
 
 
 export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
-    rooms, floors, verticalConnections, zoneColors, pixelsPerMeter,
+    rooms, floors, verticalConnections, zoneColors,
     connectionSourceId, onLinkToggle, appSettings, diagramStyle,
     selectedRoomIds, onRoomSelect, darkMode, gridSize, active, floorGap, hiddenFloorIds, showLabels, labelFontSize,
     viewState, onViewStateChange, cameraVersion, showGrid = true
@@ -919,24 +915,18 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
         });
     };
 
-    // Save state on unmount
+    // Save state on unmount. The camera state object is updated in place, never replaced,
+    // so holding it here still gives its latest values at cleanup time.
     useEffect(() => {
+        const cameraState = cameraStateRef.current;
         return () => {
             onViewStateChange({
-                cameraPosition: [cameraStateRef.current.pos.x, cameraStateRef.current.pos.y, cameraStateRef.current.pos.z],
-                target: [cameraStateRef.current.target.x, cameraStateRef.current.target.y, cameraStateRef.current.target.z],
-                zoom: cameraStateRef.current.zoom
+                cameraPosition: [cameraState.pos.x, cameraState.pos.y, cameraState.pos.z],
+                target: [cameraState.target.x, cameraState.target.y, cameraState.target.z],
+                zoom: cameraState.zoom
             });
         };
     }, [onViewStateChange]);
-
-    const handleViewTypeChange = (type: 'perspective' | 'isometric') => {
-        onViewStateChange({
-            viewType: type,
-            cameraPosition: [cameraStateRef.current.pos.x, cameraStateRef.current.pos.y, cameraStateRef.current.pos.z],
-            target: [cameraStateRef.current.target.x, cameraStateRef.current.target.y, cameraStateRef.current.target.z],
-        }, true);
-    };
 
     return (
         <div className="h-full w-full relative transition-colors duration-500" style={{ backgroundColor: viewBg, cursor: 'default' }}>
@@ -954,8 +944,8 @@ export const VolumesView = forwardRef<VolumesViewHandle, VolumesViewProps>(({
                     <OrthographicCamera makeDefault near={0.1} far={2000} up={[0, 0, 1]} />
                 )}
                 <OrbitControls key={viewState.viewType} makeDefault zoomToCursor enableDamping={false} />
-                <SceneManager ref={internalRef} hiddenFloorIds={hiddenFloorIds} />
-                <CameraHandler viewState={viewState} onViewStateChange={onViewStateChange} isInteracting={isInteracting} cameraVersion={cameraVersion} />
+                <SceneManager ref={internalRef} />
+                <CameraHandler viewState={viewState} onViewStateChange={onViewStateChange} cameraVersion={cameraVersion} />
                 <CameraController zoomTrigger={zoomToFitTrigger} placedRooms={visiblePlacedRooms} floors={floors} onFitComplete={handleFitComplete} floorGap={floorGap} />
                 <ViewStateTracker onUpdate={handleCameraUpdate} isInteracting={isInteracting} />
 

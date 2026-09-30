@@ -22,7 +22,6 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     annotations, isSketchMode, activeType, properties, currentFloor, scale, offset, onAddAnnotation, onDeleteAnnotation, onUpdateAnnotation, selectedAnnotationId, onSelectAnnotation, onInteractionStart
 }) => {
     const [points, setPoints] = useState<Point[]>([]);
-    const [handles, setHandles] = useState<Point[]>([]);
     const [tempPoint, setTempPoint] = useState<Point | null>(null);
     const [step, setStep] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
@@ -71,7 +70,6 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     // Reset tool state
     const resetTool = () => {
         setPoints([]);
-        setHandles([]);
         setTempPoint(null);
         setStep(0);
         setIsDragging(false);
@@ -125,12 +123,14 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
     };
 
     // Handle Escape key to cancel drawing
+    // commitText is recreated every render with the current text; the listener calls the latest one
+    const commitTextRef = useRef<() => void>(() => {});
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 resetTool();
                 if (editingTextId) {
-                    commitText();
+                    commitTextRef.current();
                 }
                 onSelectAnnotation?.(null);
             }
@@ -148,7 +148,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [activeType, points, currentFloor, properties, onAddAnnotation, editingTextId, isSketchMode]);
+    }, [activeType, points, currentFloor, properties, onAddAnnotation, onSelectAnnotation, editingTextId, isSketchMode]);
 
     useEffect(() => {
         const handleOutsideClick = () => {
@@ -553,7 +553,7 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         }
     };
 
-    const handleDoubleClick = (e: React.MouseEvent) => {
+    const handleDoubleClick = () => {
         if (activeType === 'polyline' && points.length > 1) {
             onAddAnnotation({
                 id: `ann-${Date.now()}`,
@@ -620,13 +620,14 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
         setEditingTextId(null);
         setTextInputValue("");
     };
+    commitTextRef.current = commitText;
 
-    const handleRemovePoint = (annId: string, pointIndex: number) => {
+    const handleRemovePoint =(annId: string, pointIndex: number) => {
         const ann = annotations.find(a => a.id === annId);
         if (!ann) return;
 
-        let newPoints = [...ann.points];
-        let nodeModes = ann.nodeModes ? [...ann.nodeModes] : undefined;
+        const newPoints = [...ann.points];
+        const nodeModes = ann.nodeModes ? [...ann.nodeModes] : undefined;
         if (ann.type === 'bezier') {
             // Remove node (Anchor + In + Out)
             // Ensure we align to the anchor (index should be divisible by 3)
@@ -664,13 +665,13 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
 
         onInteractionStart?.();
 
-        let newPoints = [...ann.points];
+        const newPoints = [...ann.points];
         const nodeModes = ann.nodeModes ? [...ann.nodeModes] : new Array(ann.points.length / 3).fill('smooth');
         nodeModes[nodeIndex / 3] = mode;
 
         const p = newPoints[nodeIndex];
-        let inIdx = nodeIndex + 1;
-        let outIdx = nodeIndex + 2;
+        const inIdx = nodeIndex + 1;
+        const outIdx = nodeIndex + 2;
 
         if (mode === 'corner') {
             newPoints[inIdx] = { ...p };
@@ -687,8 +688,8 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                 const prevAnchorIdx = nodeIndex - 3;
                 const nextAnchorIdx = nodeIndex + 3;
 
-                let hasPrev = prevAnchorIdx >= 0 && prevAnchorIdx < newPoints.length;
-                let hasNext = nextAnchorIdx >= 0 && nextAnchorIdx < newPoints.length;
+                const hasPrev = prevAnchorIdx >= 0 && prevAnchorIdx < newPoints.length;
+                const hasNext = nextAnchorIdx >= 0 && nextAnchorIdx < newPoints.length;
 
                 if (hasPrev && hasNext) {
                     const prev = newPoints[prevAnchorIdx];
@@ -736,8 +737,8 @@ export const AnnotationLayer: React.FC<AnnotationLayerProps> = ({
                 const prevAnchorIdx = nodeIndex - 3;
                 const nextAnchorIdx = nodeIndex + 3;
 
-                let hasPrev = prevAnchorIdx >= 0 && prevAnchorIdx < newPoints.length;
-                let hasNext = nextAnchorIdx >= 0 && nextAnchorIdx < newPoints.length;
+                const hasPrev = prevAnchorIdx >= 0 && prevAnchorIdx < newPoints.length;
+                const hasNext = nextAnchorIdx >= 0 && nextAnchorIdx < newPoints.length;
 
                 if (hasPrev && hasNext) {
                     const prev = newPoints[prevAnchorIdx];

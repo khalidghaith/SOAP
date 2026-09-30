@@ -143,7 +143,7 @@ export const ZoneOverlay: React.FC<ZoneOverlayProps> = ({ rooms, currentFloor, s
                 color: zoneColors[matchedKey] || zoneColors['Default']
             };
         }).filter(Boolean);
-    }, [rooms, currentFloor, scale, appSettings.cornerRadius, appSettings.zonePadding, zoneColors, selectedZone]);
+    }, [rooms, currentFloor, appSettings.cornerRadius, appSettings.zonePadding, zoneColors]);
 
     useEffect(() => {
         const handlePointerMove = (e: PointerEvent) => {

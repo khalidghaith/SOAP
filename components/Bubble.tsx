@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Room, Point, DiagramStyle, AppSettings, ZoneColor, SpaceType, CanvasGuide } from '../types';
-import { Link as LinkIcon } from 'lucide-react';
+import { Room, Point, DiagramStyle, AppSettings, ZoneColor, CanvasGuide } from '../types';
+
 import { createRoundedPath } from '../utils/geometry';
 import { wrapText, getHexColorForZone, getHexBorderForZone } from '../utils/exportSystem';
 import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
@@ -20,13 +20,10 @@ interface BubbleProps {
     snapEnabled: boolean;
     snapPixelUnit: number;
     getSnappedPosition?: (room: Room, excludeId: string) => { x: number, y: number };
-    onLinkToggle?: (id: string) => void;
     onMove?: (x: number, y: number) => void;
     onDragStart?: () => void;
     isLinkingSource?: boolean;
-    isAnyDragging?: boolean;
     pixelsPerMeter: number;
-    floors: { id: number; label: string }[];
     appSettings: AppSettings;
     zoneColors: Record<string, ZoneColor>;
     onDragEnd?: (room: Room, e: any) => void;
@@ -37,18 +34,6 @@ interface BubbleProps {
     isGrayedOut?: boolean;
     guides?: CanvasGuide[];
 }
-
-
-const hexToRgba = (hex: string, opacity: number): string => {
-    if (!hex) return 'transparent';
-    if (hex.startsWith('rgba') || hex === 'transparent') return hex;
-    const cleanHex = hex.replace('#', '');
-    if (cleanHex.length !== 6) return hex;
-    const r = parseInt(cleanHex.substring(0, 2), 16);
-    const g = parseInt(cleanHex.substring(2, 4), 16);
-    const b = parseInt(cleanHex.substring(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-};
 
 // area utility
 const calculatePolygonArea = (points: Point[]): number => {
@@ -188,9 +173,27 @@ const RenderCorner = ({ cursor, pos, zoomScale, onPointerDown }: { cursor: strin
 
 const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='filter: drop-shadow(1px 1px 0px white);'><path d='M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3'/></svg>") 12 12, auto`;
 
+// Fill opacity encoded in a zone's Tailwind class, e.g. "bg-[#f44336]/50" → 0.5 (the dark: variant in dark mode)
+const getZoneOpacity = (zone: string, zoneColors: Record<string, ZoneColor>, darkMode: boolean) => {
+    const zoneKey = Object.keys(zoneColors || {}).find(
+        (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
+    );
+    if (zoneKey && zoneColors[zoneKey]) {
+        const classes = zoneColors[zoneKey].bg.split(' ');
+        let activeClass = classes.find(c => !c.includes(':')) || '';
+        if (darkMode) {
+            const darkClass = classes.find(c => c.startsWith('dark:'));
+            if (darkClass) activeClass = darkClass.replace('dark:', '');
+        }
+        const opacityMatch = activeClass.match(/\/(\d+)$/);
+        if (opacityMatch) return parseInt(opacityMatch[1], 10) / 100;
+    }
+    return 1.0;
+};
+
 const BubbleComponent: React.FC<BubbleProps> = ({
     room, zoomScale, updateRoom, onShapeEdited, isSelected, onSelect, diagramStyle, snapEnabled, snapPixelUnit,
-    getSnappedPosition, onLinkToggle, isLinkingSource, pixelsPerMeter = 20, floors, appSettings, zoneColors, onDragEnd, onDragStart, onMove, isAnyDragging, otherRooms, isSketchMode, isOverlay, darkMode = false, isGrayedOut = false, guides
+    getSnappedPosition, isLinkingSource, pixelsPerMeter = 20, appSettings, zoneColors, onDragEnd, onDragStart, onMove, otherRooms, isSketchMode, isOverlay, darkMode = false, isGrayedOut = false, guides
 }) => {
     const pointerClass = isSketchMode || isOverlay || isGrayedOut ? 'pointer-events-none' : 'pointer-events-auto';
     const [isDragging, setIsDragging] = useState(false);
@@ -202,7 +205,6 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
     // Polygon Editing State
     const [hoveredVertex, setHoveredVertex] = useState<number | null>(null);
-    const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
     const [draggedVertex, setDraggedVertex] = useState<number | null>(null);
     const [draggedEdge, setDraggedEdge] = useState<number | null>(null);
     const [isExtruding, setIsExtruding] = useState(false);
@@ -228,32 +230,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     };
     const visualStyle = getZoneStyle(room.zone);
 
-    const getZoneOpacity = (zone: string) => {
-        const isDark = darkMode;
-        const zoneKey = Object.keys(zoneColors || {}).find(
-            (k) => k.toLowerCase() === zone.toLowerCase() || zone.toLowerCase().includes(k.toLowerCase())
-        );
-        if (zoneKey && zoneColors[zoneKey]) {
-            const classString = zoneColors[zoneKey].bg;
-            const classes = classString.split(' ');
-            let activeClass = classes.find(c => !c.includes(':')) || '';
-            if (isDark) {
-                const darkClass = classes.find(c => c.startsWith('dark:'));
-                if (darkClass) activeClass = darkClass.replace('dark:', '');
-            }
-            const opacityMatch = activeClass.match(/\/(\d+)$/);
-            if (opacityMatch) {
-                return parseInt(opacityMatch[1], 10) / 100;
-            }
-        }
-        return 1.0;
-    };
-
     const themeStyles = useMemo(() => {
         const id = diagramStyle.id;
         const baseBorderColor = getHexBorderForZone(room.zone, zoneColors);
         const baseFillColor = getHexColorForZone(room.zone, zoneColors);
-        const zoneOpacity = getZoneOpacity(room.zone);
+        const zoneOpacity = getZoneOpacity(room.zone, zoneColors, darkMode);
 
         // Common default fallback values
         let fill = room.style?.fill || baseFillColor;
@@ -358,11 +339,9 @@ const BubbleComponent: React.FC<BubbleProps> = ({
     // Wobble Animation Loop
     useEffect(() => {
         if (wobbleTime > 0) {
-            let frameId: number;
-            const animate = () => {
+            const frameId = requestAnimationFrame(() => {
                 setWobbleTime(prev => Math.max(0, prev - 0.05));
-            };
-            frameId = requestAnimationFrame(animate);
+            });
             return () => cancelAnimationFrame(frameId);
         }
     }, [wobbleTime]);
@@ -398,7 +377,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedVertices, activePoints, room.id, updateRoom, onShapeEdited, room.shape, pixelsPerMeter]);
+    }, [selectedVertices, activePoints, room.id, room.area, updateRoom, onShapeEdited, room.shape, pixelsPerMeter]);
 
     const handleRotateStart = (e: React.PointerEvent) => {
         e.stopPropagation();
@@ -565,6 +544,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                         const gy = Math.round(movingEdgeY / snapPixelUnit) * snapPixelUnit;
                         const dist = Math.abs(movingEdgeY - gy);
                         if (dist < bestSnapDist) {
+                            // eslint-disable-next-line no-useless-assignment -- keeps the best-so-far search uniform
                             bestSnapDist = dist;
                             snappedAxis = 'y';
                             snapValue = gy;
@@ -650,7 +630,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     const startAngle = (startDragState.current as any).startAngle ?? angleRad;
                     const startRotation = (startDragState.current as any).startRotation ?? (room.rotation || 0);
                     
-                    let deltaDeg = (angleRad - startAngle) * (180 / Math.PI);
+                    const deltaDeg = (angleRad - startAngle) * (180 / Math.PI);
                     let angleDeg = startRotation + deltaDeg;
 
                     if (e.shiftKey) {
@@ -1145,7 +1125,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             window.removeEventListener('pointerup', handlePointerUp);
             window.removeEventListener('pointercancel', handlePointerUp);
         };
-    }, [onShapeEdited, isDragging, isRotating, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, isTextDragging, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd, onMove, isSelected, onSelect, otherRooms, appSettings.snapToObjects, appSettings.snapTolerance, appSettings.snapToGrid, room.x, room.y, room.shape, room.area, pixelsPerMeter, appSettings.incrementalScalingEnabled, appSettings.incrementalScaleAmount, appSettings.unitSystem, guides, appSettings.snapToGuides]);
+    }, [onShapeEdited, isDragging, isRotating, resizeHandle, draggedVertex, draggedEdge, isExtruding, polygonSnapshot, isTextDragging, room.id, zoomScale, updateRoom, snapEnabled, snapPixelUnit, selectedVertices, appSettings.snapWhileScaling, getSnappedPosition, onDragEnd, onMove, isSelected, onSelect, otherRooms, appSettings.snapToObjects, appSettings.snapTolerance, appSettings.snapToGrid, room, pixelsPerMeter, appSettings.incrementalScalingEnabled, appSettings.incrementalScaleAmount, appSettings.unitSystem, guides, appSettings.snapToGuides]);
 
     const handleResizeStart = (e: React.PointerEvent, handle: string) => {
         e.stopPropagation();
@@ -1382,8 +1362,6 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         };
     };
 
-    const isInteracting = isDragging || isRotating || resizeHandle !== null || draggedVertex !== null || draggedEdge !== null || isTextDragging;
-    const disableTransition = isInteracting || (isSelected && isAnyDragging);
 
     const wrappedNameLines = useMemo(() => {
         return wrapText(room.name, bounds.width - 16, appSettings.fontSize);
@@ -1463,8 +1441,6 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                             strokeWidth={12 / zoomScale}
                                             fill="none"
                                             className="cursor-move hover:stroke-orange-600/50 pointer-events-auto transition-colors duration-75"
-                                            onMouseEnter={() => setHoveredEdge(i)}
-                                            onMouseLeave={() => setHoveredEdge(null)}
                                             onPointerDown={(e) => handleEdgeDown(e, i)}
                                         />
                                     );
@@ -1477,8 +1453,6 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                                         stroke="rgba(0,0,0,0)"
                                         strokeWidth={12 / zoomScale}
                                         className="cursor-move hover:stroke-orange-600/50 pointer-events-auto transition-colors duration-75"
-                                        onMouseEnter={() => setHoveredEdge(i)}
-                                        onMouseLeave={() => setHoveredEdge(null)}
                                         onPointerDown={(e) => handleEdgeDown(e, i)}
                                     />
                                 );

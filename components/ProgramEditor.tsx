@@ -60,7 +60,7 @@ const NameInput = ({ value, onChange, onFocus, highlight, placeholder }: any) =>
             className="w-full bg-transparent font-bold text-slate-700 dark:text-gray-200 text-sm focus:outline-none focus:text-orange-600 border-b border-transparent focus:border-orange-500/20"
             value={value}
             onChange={onChange}
-            onFocus={(e) => { setIsFocused(true); onFocus?.(); }}
+            onFocus={() => { setIsFocused(true); onFocus?.(); }}
             onBlur={() => setIsFocused(false)}
             placeholder={placeholder}
             autoFocus={isFocused}
@@ -106,7 +106,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
         });
 
         // 3. Sort Groups (Zones)
-        let sortedZones = Object.keys(groups);
+        const sortedZones = Object.keys(groups);
         if (sortConfig.key === 'zone') {
             sortedZones.sort((a, b) => {
                 return sortConfig.direction === 'asc' ? a.localeCompare(b) : b.localeCompare(a);

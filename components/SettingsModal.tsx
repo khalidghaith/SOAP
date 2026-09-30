@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sliders, Globe, Layers, RefreshCw, Check, Undo2 } from 'lucide-react';
+import { X, Sliders, Globe, Layers, RefreshCw, Undo2 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { clearAutosave, getAutosaveSize } from '../utils/projectStore';
 import { notify } from './Notifications';

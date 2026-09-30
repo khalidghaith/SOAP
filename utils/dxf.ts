@@ -396,8 +396,6 @@ export const generateDXF = (
         const dy = p2.y - p1.y;
         const len = Math.hypot(dx, dy);
         if (len > 0) {
-          const uX = dx / len;
-          const uY = dy / len;
           const arrowSize = 12;
 
           const headX = p2.x + offsetX;

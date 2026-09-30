@@ -54,6 +54,8 @@ export const ReferenceLayer: React.FC<ReferenceLayerProps> = ({
         localResizeStateRef.current = localResizeState;
     }, [selectedImageId, localDragPos, localResizeState]);
 
+    // Listen only while a drag or resize is in progress; the handlers read the latest values from refs
+    const isManipulating = localDragPos !== null || localResizeState !== null;
     useEffect(() => {
         const handleGlobalMouseMove = (e: MouseEvent) => {
             if (isDraggingRef.current && selectedImageIdRef.current) {
@@ -113,7 +115,7 @@ export const ReferenceLayer: React.FC<ReferenceLayerProps> = ({
             document.body.style.cursor = '';
         };
 
-        if (localDragPos !== null || localResizeState !== null) {
+        if (isManipulating) {
             window.addEventListener('mousemove', handleGlobalMouseMove);
             window.addEventListener('mouseup', handleGlobalMouseUp);
         }
@@ -122,7 +124,7 @@ export const ReferenceLayer: React.FC<ReferenceLayerProps> = ({
             window.removeEventListener('mousemove', handleGlobalMouseMove);
             window.removeEventListener('mouseup', handleGlobalMouseUp);
         };
-    }, [localDragPos !== null || localResizeState !== null, toWorld, onUpdateImage]);
+    }, [isManipulating, toWorld, onUpdateImage]);
 
     // Track cursor for scaling preview line
     useEffect(() => {

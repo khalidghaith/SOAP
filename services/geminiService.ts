@@ -166,7 +166,7 @@ export const generateSpatialLayout = async (
   }
 
   // Define Typology Specific Rules
-  let typologyInstructions = "";
+  let typologyInstructions: string;
   if (typology === 'residential') {
     typologyInstructions = `
       TYPOLOGY: Residential (Villa/Apartment Floor Plan)
@@ -211,7 +211,7 @@ export const generateSpatialLayout = async (
   }
 
   // Define Massing Envelope Rules
-  let massingInstructions = "";
+  let massingInstructions: string;
   if (massing === 'l-shape') {
     massingInstructions = `
       BUILDING MASSING: L-Shaped Footprint

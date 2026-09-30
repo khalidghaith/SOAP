@@ -1,24 +1,6 @@
 import React from 'react';
 import {
-    Pencil,
-    Trash2,
-    Type,
-    Slash,
-    Tangent,
-    Spline,
-    Square,
-    ArrowRight,
-    Palette,
-    ChevronDown,
-    Eraser,
-    MousePointer2,
-    BringToFront,
-    SendToBack,
-    Bold,
-    Italic,
-    Underline,
-    Minus,
-    MoreHorizontal
+    Pencil, Trash2, Type, Slash, Tangent, Spline, Eraser, MousePointer2, BringToFront, SendToBack, Bold, Italic, Underline, Minus, MoreHorizontal
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType } from '../types';
 import polylineSvgRaw from '../lib/symbols/polyline.svg?raw';

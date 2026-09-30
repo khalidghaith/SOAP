@@ -124,15 +124,6 @@ const getBubblePathCommands = (points: Point[]) => {
     return cmds;
 };
 
-const triggerDownload = (url: string, filename: string) => {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-};
-
 // Helper to parse tailwind class string
 const parseTailwindColor = (classString: string, type: 'bg' | 'border' | 'text', darkMode: boolean): { color: string | null, opacity: number | null } => {
     if (!classString) return { color: null, opacity: null };
@@ -253,14 +244,12 @@ export const handleExport = async (
 ) => {
     // Style Helpers
     const getStrokeWidth = (style?: DiagramStyle) => style?.borderWidth || appSettings.strokeWidth || 2;
-    const getStrokeColor = (zone: string, style?: DiagramStyle) => {
+    const getStrokeColor = (zone: string, _style?: DiagramStyle) => {
         return getHexBorderForZone(zone, zoneColors);
     };
-    const getFillColor = (zone: string, style?: DiagramStyle) => {
+    const getFillColor = (zone: string, _style?: DiagramStyle) => {
         return getHexColorForZone(zone, zoneColors);
     };
-    const getOpacity = (style?: DiagramStyle) => style?.opacity || 0.9;
-    const isSketchy = currentStyle?.sketchy || false;
 
     const visibleRooms = rooms.filter(r => {
         if (!r.isPlaced) return false;
@@ -364,7 +353,7 @@ export const handleExport = async (
         const pageWidth = isPortrait ? Math.min(size.w, size.h) : Math.max(size.w, size.h);
         const pageHeight = isPortrait ? Math.max(size.w, size.h) : Math.min(size.w, size.h);
 
-        let targetW = width;
+        let targetW: number;
         if (options?.pdfScale) {
             const scaleVal = options.pdfScale;
             const pxToMm = (1000 / scaleVal) / PIXELS_PER_METER;
@@ -378,7 +367,6 @@ export const handleExport = async (
             if (aspectSvg > aspectPage) {
                 targetW = availableW;
             } else {
-                const targetH = availableH;
                 targetW = availableH * aspectSvg;
             }
         }
@@ -402,7 +390,7 @@ export const handleExport = async (
         const availableW = canvasW - 2 * marginPx;
         const availableH = canvasH - 2 * marginPx;
 
-        let targetW = width;
+        let targetW: number;
         if (options?.pdfScale) {
             const pdfScale = options.pdfScale;
             const scaleVal = ((1000 / pdfScale) * mmToPx) / PIXELS_PER_METER;
@@ -876,7 +864,7 @@ export const handleExport = async (
         } else if (r.polygon) {
             d = `M ${r.polygon[0].x} ${r.polygon[0].y} ` + r.polygon.slice(1).map(p => `L ${p.x} ${p.y}`).join(" ") + " Z";
         } else {
-            let radius = getRoomCornerRadius(r);
+            const radius = getRoomCornerRadius(r);
 
             if (radius > 0) {
                 const w = r.width;
@@ -941,7 +929,7 @@ export const handleExport = async (
         } else if (r.polygon) {
             d = `M ${r.polygon[0].x} ${r.polygon[0].y} ` + r.polygon.slice(1).map(p => `L ${p.x} ${p.y}`).join(" ") + " Z";
         } else {
-            let radius = getRoomCornerRadius(r);
+            const radius = getRoomCornerRadius(r);
 
             if (radius > 0) {
                 const w = r.width;
@@ -1105,7 +1093,7 @@ export const handleExport = async (
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
 
-        let scaleFactor = 1;
+        let scaleFactor: number;
 
         if (options?.pdfScale) {
             const scale = options.pdfScale;
@@ -1152,8 +1140,8 @@ export const handleExport = async (
 
         // Add Scale Bar to PDF (Bottom Right of Page)
         const isImperial = appSettings.unitSystem === 'imperial';
-        let barWidthMm = 0;
-        let label = isImperial ? "30 ft" : "10m";
+        let barWidthMm: number;
+        const label = isImperial ? "30 ft" : "10m";
 
         if (options?.pdfScale) {
             const targetMm = isImperial ? 9144 : 10000;
@@ -1274,7 +1262,7 @@ export const handleExport = async (
         const availableW = canvasW - 2 * marginPx;
         const availableH = canvasH - 2 * marginPx;
 
-        let scaleFactor = 1;
+        let scaleFactor: number;
         if (options?.pdfScale) {
             const pdfScale = options.pdfScale;
             scaleFactor = ((1000 / pdfScale) * mmToPx) / PIXELS_PER_METER;
@@ -1299,8 +1287,8 @@ export const handleExport = async (
 
         // Draw Scale Bar and Compass natively on Canvas at high-res
         const isImperial = appSettings.unitSystem === 'imperial';
-        let barWidthPx = 0;
-        let label = isImperial ? "30 ft" : "10m";
+        let barWidthPx: number;
+        const label = isImperial ? "30 ft" : "10m";
 
         if (options?.pdfScale) {
             const targetMm = isImperial ? 9144 : 10000;

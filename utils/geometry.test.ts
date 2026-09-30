@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getConvexHull, getHullPath, createRoundedPath } from './geometry';
+import { getConvexHull, createRoundedPath } from './geometry';
 
 const square = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
 
@@ -13,13 +13,6 @@ describe('getConvexHull', () => {
     it('handles tiny inputs', () => {
         expect(getConvexHull([])).toEqual([]);
         expect(getConvexHull([{ x: 1, y: 1 }])).toEqual([{ x: 1, y: 1 }]);
-    });
-});
-
-describe('getHullPath', () => {
-    it('builds a closed path, or nothing for fewer than 3 points', () => {
-        expect(getHullPath(square)).toBe('M 0 0 L 10 0 L 10 10 L 0 10 Z');
-        expect(getHullPath(square.slice(0, 2))).toBe('');
     });
 });
 

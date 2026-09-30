@@ -1,11 +1,11 @@
-import { Point, Annotation, AnnotationType } from './types';
+import { Point, Annotation } from './types';
 
 export class SketchManager {
     /**
      * Generates an SVG path string from points based on type.
      */
     static generatePath(annotation: Annotation): string {
-        const { type, points, style, handles } = annotation;
+        const { type, points, style } = annotation;
         if (points.length === 0) return '';
         const closed = (annotation as any).closed;
 
@@ -19,9 +19,7 @@ export class SketchManager {
                 if (style.fillet && style.fillet > 0) {
                     return this.generateFilletedPolyline(points, style.fillet, closed);
                 }
-                let polyPath = `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
-                if (closed) polyPath += ' Z';
-                return polyPath;
+                return `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ') + (closed ? ' Z' : '');
 
             case 'arc':
                 if (points.length < 3) return '';
@@ -49,7 +47,7 @@ export class SketchManager {
 
         const isClosed = closed || isGeometricallyClosed;
 
-        let effectivePoints = [...points];
+        const effectivePoints = [...points];
         // If it's closed and the last point duplicates the first, remove it for the loop
         if (isClosed && isGeometricallyClosed) {
             effectivePoints.pop();

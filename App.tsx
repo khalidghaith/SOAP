@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Room, FLOORS, Connection, DIAGRAM_STYLES, DiagramStyle, Point, ZONE_COLORS, AppSettings, ZoneColor, Floor, VerticalConnection, SpaceType, VCType, StairConfig, DEFAULT_STAIR_PARAMS, ZoningTypology, SiteProperties, CanvasGuide } from './types';
+import { Room, DIAGRAM_STYLES, DiagramStyle, Point, ZoneColor, Floor, VerticalConnection, ZoningTypology, SiteProperties, CanvasGuide } from './types';
 import { ProgramEditor } from './components/ProgramEditor';
 import { Bubble } from './components/Bubble';
 import { HelpModal } from './components/HelpModal';
@@ -24,12 +24,7 @@ import { SpacePropertiesPanel } from './components/SpacePropertiesPanel';
 import { ZonePropertiesPanel } from './components/ZonePropertiesPanel';
 import { NotificationHost, notify, confirmDialog } from './components/Notifications';
 import {
-    Plus, Package, Download, Upload, Settings2, Undo2, Redo2, RotateCcw,
-    TableProperties, Hexagon, Circle, Square,
-    PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, Ruler, Copy,
-    Link, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, FileImage, Image as ImageIcon, Scaling, Box, Layers, Save,
-    Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, Shapes,
-    TreePine, Building2, Home, ArrowUpDown, LandPlot, Plug
+    Plus, Package, Download, Undo2, Redo2, RotateCcw, TableProperties, PencilRuler, ChevronRight, ChevronLeft, Key, X, Settings, LayoutTemplate, Sparkles, Trash2, Lock, Unlock, Ruler, Magnet, Grid, Moon, Sun, Maximize, ChevronUp, ChevronDown, Atom, Image as ImageIcon, Box, Layers, Save, Eye, EyeOff, CircleHelp, Info, Menu, MoreHorizontal, Palette, LandPlot, Plug
 } from 'lucide-react';
 import { Annotation, AnnotationType, ArrowCapType, ReferenceImage, ReferenceScaleState } from './types';
 import { SketchToolbar, SketchPanel } from './components/SketchToolbar';
@@ -50,7 +45,7 @@ import SoapLogo from './lib/symbols/SOAP-Logo.svg';
 import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
 import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
 
-import { analyzeProgram, generateSpatialLayout } from './services/geminiService';
+import { generateSpatialLayout } from './services/geminiService';
 
 // Shim process for libs that might expect it in Vite
 if (typeof window !== 'undefined' && !window.process) {
@@ -335,16 +330,6 @@ export default function App() {
             y: (y - rect.top - offset.y) / scale
         };
     }, [offset.x, offset.y, scale]);
-
-    const toScreen = useCallback((x: number, y: number) => {
-        if (!mainRef.current) return { x: 0, y: 0 };
-        const rect = mainRef.current.getBoundingClientRect();
-        return {
-            x: x * scale + offset.x + rect.left,
-            y: y * scale + offset.y + rect.top
-        };
-    }, [offset.x, offset.y, scale]);
-    const [is3DMode, setIs3DMode] = useState(false);
     const [canvasStyle, setCanvasStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [volumesStyle, setVolumesStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [showStylePanel, setShowStylePanel] = useState(false);
@@ -853,7 +838,7 @@ export default function App() {
         }, 50); // 20fps for physics to save CPU
 
         return () => clearInterval(interval);
-    }, [isMagnetMode, appSettings.magnetStrength, appSettings.magnetPadding]);
+    }, [isMagnetMode, appSettings.magnetStrength, appSettings.magnetPadding, setRooms]);
 
     // Inventory Hover Detection during Drag
     useEffect(() => {
@@ -883,7 +868,7 @@ export default function App() {
                 if (g.id !== draggedGuideId) return g;
                 
                 const angleRad = ((g.angle || 0) * Math.PI) / 180;
-                let newPos = 0;
+                let newPos: number;
                 if (g.type === 'h') {
                     newPos = (-worldPos.x * Math.sin(angleRad) + worldPos.y * Math.cos(angleRad)) / PIXELS_PER_METER;
                 } else {
@@ -909,7 +894,7 @@ export default function App() {
             window.removeEventListener('pointermove', handlePointerMove);
             window.removeEventListener('pointerup', handlePointerUp);
         };
-    }, [draggedGuideId, toWorld, gridSize, scale, appSettings.unitSystem]);
+    }, [draggedGuideId, toWorld, gridSize, scale, appSettings.unitSystem, setGuides]);
 
     // --- Core Handlers ---
     useEffect(() => {
@@ -1305,7 +1290,7 @@ export default function App() {
                     setSelectedRoomIds(new Set());
                     setSelectedZone(null);
                     setSelectedAnnotationId(null);
-                    if (connectionSourceId) setConnectionSourceId(null);
+                    setConnectionSourceId(null);
                 }
             }
             setSelectionBox(null);
@@ -1664,9 +1649,9 @@ export default function App() {
         setGuides(prev => [...prev, newGuide]);
         setSelectedGuideId(newId);
         setDraggedGuideId(newId);
-    }, [toWorld, addToHistory]);
+    }, [addToHistory, toWorld, setGuides]);
 
-    const handleStartDragExistingGuide = useCallback((id: string, e: React.PointerEvent) => {
+    const handleStartDragExistingGuide = useCallback((id: string) => {
         setSelectedGuideId(id);
         const guide = guides.find(g => g.id === id);
         if (guide && !guide.locked) {
@@ -1678,27 +1663,12 @@ export default function App() {
     const toggleLockGuide = useCallback((id: string) => {
         addToHistory();
         setGuides(prev => prev.map(g => g.id === id ? { ...g, locked: !g.locked } : g));
-    }, [addToHistory]);
-
-    const duplicateGuide = useCallback((id: string) => {
-        const guide = guides.find(g => g.id === id);
-        if (!guide) return;
-        addToHistory();
-        const newId = `guide-${Date.now()}`;
-        const duplicate: CanvasGuide = {
-            ...guide,
-            id: newId,
-            position: guide.position + 1.0, // Offset parallel guide by 1m
-            locked: false
-        };
-        setGuides(prev => [...prev, duplicate]);
-        setSelectedGuideId(newId);
-    }, [guides, addToHistory]);
+    }, [addToHistory, setGuides]);
 
     const rotateGuide = useCallback((id: string, angleDelta: number) => {
         addToHistory();
         setGuides(prev => prev.map(g => g.id === id ? { ...g, angle: ((g.angle || 0) + angleDelta) % 360 } : g));
-    }, [addToHistory]);
+    }, [addToHistory, setGuides]);
 
     const deleteGuide = useCallback((id: string) => {
         addToHistory();
@@ -1706,14 +1676,14 @@ export default function App() {
         if (selectedGuideId === id) {
             setSelectedGuideId(null);
         }
-    }, [selectedGuideId, addToHistory]);
+    }, [addToHistory, setGuides, selectedGuideId]);
 
     // --- Room Handlers ---
     const updateRoom = useCallback((id: string, updates: Partial<Room>) => {
         setRooms(prev => prev.map(r => {
             if (r.id !== id) return r;
 
-            let updatedRoom = { ...r, ...updates };
+            const updatedRoom = { ...r, ...updates };
 
             if (updates.area !== undefined &&
                 updates.width === undefined &&
@@ -1728,12 +1698,12 @@ export default function App() {
 
             return updatedRoom;
         }));
-    }, []);
+    }, [setRooms]);
 
     // After a polygon/bubble edit, move its origin (its rotation pivot) to the shape's centre; nothing moves on the plan
     const recenterRoomShape = useCallback((id: string) => {
         setRooms(prev => prev.map(r => (r.id === id ? recenterShape(r) : r)));
-    }, []);
+    }, [setRooms]);
 
     // Property-panel edits are undoable; typing into a field is one step
     const updateRoomFromPanel = useCallback((id: string, updates: Partial<Room>) => {
@@ -1768,7 +1738,7 @@ export default function App() {
                 return prev.map(r => r.id === id ? { ...r, x, y } : r);
             }
         });
-    }, [selectedRoomIds, currentFloor]);
+    }, [setRooms, selectedRoomIds, currentFloor]);
 
     const deleteRoom = useCallback((id: string) => {
         addToHistory();
@@ -1778,7 +1748,7 @@ export default function App() {
             next.delete(id);
             return next;
         });
-    }, [addToHistory]);
+    }, [addToHistory, setRooms]);
 
     const addRoom = useCallback((roomData: Partial<Room>) => {
         addToHistory();
@@ -1797,11 +1767,11 @@ export default function App() {
             ...roomData
         };
         setRooms(prev => [...prev, newRoom]);
-    }, [addToHistory]);
+    }, [addToHistory, setRooms]);
 
     const updateAnnotation = useCallback((id: string, updates: Partial<Annotation>) => {
         setAnnotations(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
-    }, []);
+    }, [setAnnotations]);
 
     const handleAnnotationPropertyChange = (key: string, value: any) => {
         if (selectedAnnotationId) {
@@ -1867,7 +1837,7 @@ export default function App() {
 
     const handleUpdateReferenceImage = useCallback((id: string, updates: Partial<ReferenceImage>) => {
         setReferenceImages(prev => prev.map(img => img.id === id ? { ...img, ...updates } : img));
-    }, []);
+    }, [setReferenceImages]);
 
     // --- Site ---
     const siteReport = useMemo(() => analyzeSite(siteProperties, rooms, floors, appSettings, PIXELS_PER_METER), [siteProperties, rooms, floors, appSettings]);
@@ -2100,7 +2070,7 @@ export default function App() {
     const deleteAnnotation = useCallback((id: string) => {
         addToHistory();
         setAnnotations(prev => prev.filter(a => a.id !== id));
-    }, [addToHistory]);
+    }, [addToHistory, setAnnotations]);
 
     const handleSaveApiKey = (key: string) => {
         setApiKey(key);
@@ -2131,12 +2101,12 @@ export default function App() {
         } else {
             setConnectionSourceId(roomId);
         }
-    }, [connectionSourceId, addToHistory]);
+    }, [connectionSourceId, addToHistory, setConnections]);
 
     const removeConnection = useCallback((id: string) => {
         addToHistory();
         setConnections(prev => prev.filter(c => c.id !== id));
-    }, [addToHistory]);
+    }, [addToHistory, setConnections]);
 
     const toggleFloorVisibility = useCallback((floorId: number) => {
         setHiddenFloorIds(prev => {
@@ -2163,7 +2133,7 @@ export default function App() {
             }
             return r;
         }));
-    }, [currentFloor]);
+    }, [currentFloor, setRooms]);
 
     const handleZoneClick = useCallback((z: string) => {
         setSelectedZone(z);
@@ -2182,7 +2152,7 @@ export default function App() {
             return rest[newZone] ? rest : { ...rest, [newZone]: color };
         });
         setSelectedZone(newZone);
-    }, [addToHistory, setZoneColors]);
+    }, [addToHistory, setRooms, setZoneColors]);
 
     const handleBubbleDragEnd = useCallback((room: Room, e: any) => {
         setIsBubbleDragging(false);
@@ -2205,7 +2175,7 @@ export default function App() {
                 }
             }
         }
-    }, [updateRoom, selectedRoomIds]);
+    }, [selectedRoomIds, setRooms, updateRoom]);
 
     const handleZoneDragEnd = useCallback((e: any) => {
         setIsZoneDragging(false);
@@ -2233,7 +2203,7 @@ export default function App() {
                 setSelectedZone(null);
             }
         }
-    }, [selectedZone, currentFloor, addToHistory]);
+    }, [selectedZone, addToHistory, setRooms, currentFloor]);
 
     // --- Render Helpers ---
     const selectedRoom = rooms.find(r => selectedRoomIds.has(r.id));
@@ -2457,7 +2427,7 @@ export default function App() {
                 if (shape === 'bubble') {
                     const targetAreaPx = r.area * (PIXELS_PER_METER * PIXELS_PER_METER);
                     const centroid = calculateCentroid(points);
-                    let scale = 0.9;
+                    const scale = 0.9;
                     points = points.map(p => ({ x: centroid.x + (p.x - centroid.x) * scale, y: centroid.y + (p.y - centroid.y) * scale }));
                     for (let i = 0; i < 10; i++) {
                         const currentArea = calculateCurvedArea(points);
@@ -2959,7 +2929,6 @@ export default function App() {
                                     floors={floors}
                                     verticalConnections={verticalConnections}
                                     zoneColors={zoneColors}
-                                    pixelsPerMeter={PIXELS_PER_METER}
                                     connectionSourceId={connectionSourceId}
                                     onLinkToggle={toggleLink}
                                     appSettings={appSettings}
@@ -3158,7 +3127,7 @@ export default function App() {
                                                         onPointerDown={(e) => {
                                                             e.preventDefault();
                                                             e.stopPropagation();
-                                                            handleStartDragExistingGuide(guide.id, e);
+                                                            handleStartDragExistingGuide(guide.id);
                                                         }}
                                                         onMouseDown={(e) => {
                                                             e.preventDefault();
@@ -3194,7 +3163,6 @@ export default function App() {
                                                     snapEnabled={false}
                                                     snapPixelUnit={1}
                                                     pixelsPerMeter={PIXELS_PER_METER}
-                                                    floors={floors}
                                                     appSettings={appSettings}
                                                     zoneColors={zoneColors}
                                                     isOverlay={true}
@@ -3247,7 +3215,6 @@ export default function App() {
                                             onMove={(x, y) => handleMoveRoom(room.id, x, y)}
                                             isSelected={selectedRoomIds.has(room.id)}
                                             isLinkingSource={connectionSourceId === room.id}
-                                            onLinkToggle={toggleLink}
                                             getSnappedPosition={getSnappedPosition}
                                             onSelect={(id, multi) => {
                                                 if (connectionSourceId) {
@@ -3270,12 +3237,10 @@ export default function App() {
                                             snapEnabled={snapEnabled}
                                             snapPixelUnit={appSettings.snapToGrid ? currentGridSizeMeters * PIXELS_PER_METER : 1}
                                             pixelsPerMeter={PIXELS_PER_METER}
-                                            floors={floors}
                                             appSettings={appSettings}
                                             zoneColors={zoneColors}
                                             onDragEnd={handleBubbleDragEnd}
                                             onDragStart={() => { setIsBubbleDragging(true); addToHistory(); }}
-                                            isAnyDragging={isBubbleDragging}
                                             otherRooms={selectedRoomIds.has(room.id) ? [...visibleRooms.filter(r => r.id !== room.id), ...overlayRooms] : undefined}
                                             isSketchMode={isSketchMode || isReferenceMode || isGuidesMode || isSiteMode}
                                             darkMode={darkMode}
@@ -3897,7 +3862,7 @@ export default function App() {
                                     const cx = (targetScreenX - offset.x) / scale;
                                     const cy = (targetScreenY - offset.y) / scale;
                                      
-                                    let ax = 0, ay = 0, ux = 0, uy = 0;
+                                    let ax: number, ay: number, ux: number, uy: number;
                                     if (isVertical) {
                                         ax = posPx * Math.cos(angleRad);
                                         ay = posPx * Math.sin(angleRad);
