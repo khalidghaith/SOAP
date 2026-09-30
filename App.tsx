@@ -20,6 +20,8 @@ import { arrangeRooms } from './utils/layout';
 import { validateAiLayout } from './utils/aiLayout';
 import { parseProjectData, parseCsv, parseArea, toCsvField } from './utils/projectStore';
 import { useProjectDocument } from './hooks/useProjectDocument';
+import { useCanvasViewport } from './hooks/useCanvasViewport';
+import { canvasContentBounds } from './utils/canvasBounds';
 import { SpacePropertiesPanel } from './components/SpacePropertiesPanel';
 import { ZonePropertiesPanel } from './components/ZonePropertiesPanel';
 import { NotificationHost, notify, confirmDialog } from './components/Notifications';
@@ -129,21 +131,15 @@ export default function App() {
 
     const selectedAnnotation = useMemo(() => annotations.find(a => a.id === selectedAnnotationId), [annotations, selectedAnnotationId]);
 
-    // View State
-    const [viewport, setViewport] = useState({
-        scale: 1,
-        offset: { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-    });
-    const { scale, offset } = viewport;
+    // Canvas view: pan/zoom state of the 2D plan
+    const mainRef = useRef<HTMLElement>(null);
+    const {
+        scale, offset, toWorld,
+        isPanning, startPan, movePan, endPan,
+        startPinch, movePinch, endTouch,
+        fitBounds,
+    } = useCanvasViewport(mainRef, viewMode === 'CANVAS');
 
-    const toWorld = useCallback((x: number, y: number) => {
-        if (!mainRef.current) return { x: 0, y: 0 };
-        const rect = mainRef.current.getBoundingClientRect();
-        return {
-            x: (x - rect.left - offset.x) / scale,
-            y: (y - rect.top - offset.y) / scale
-        };
-    }, [offset.x, offset.y, scale]);
     const [canvasStyle, setCanvasStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [volumesStyle, setVolumesStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [showStylePanel, setShowStylePanel] = useState(false);
@@ -459,23 +455,8 @@ export default function App() {
         return { x: snappedX, y: snappedY };
     }, [currentFloor, snapEnabled, appSettings, floorOverlays, currentGridSizeMeters]);
 
-    // Canvas Refs
-    const mainRef = useRef<HTMLElement>(null);
-    const [isPanning, setIsPanning] = useState(false);
     const inventoryRef = useRef<HTMLElement>(null);
-    const prevMainRect = useRef<{ width: number, height: number } | null>(null);
-    const lastMousePos = useRef<Point>({ x: 0, y: 0 });
 
-    // Touch State
-    const touchState = useRef<{
-        mode: 'none' | 'pan' | 'zoom';
-        startDist: number;
-        startScale: number;
-        startOffset: Point;
-        lastCenter: Point;
-    }>({ mode: 'none', startDist: 0, startScale: 1, startOffset: { x: 0, y: 0 }, lastCenter: { x: 0, y: 0 } });
-
-    // Update offset on resize to keep center
     // Physics Loop
     useEffect(() => {
         if (!isMagnetMode) return;
@@ -551,46 +532,10 @@ export default function App() {
     }, [draggedGuideId, toWorld, gridSize, scale, appSettings.unitSystem, setGuides]);
 
     // --- Core Handlers ---
-    useEffect(() => {
-        const element = mainRef.current;
-        if (!element) return;
-
-        const onWheel = (e: WheelEvent) => {
-            // Only handle wheel events for the 2D canvas to avoid interfering with 3D view controls.
-            if (viewMode !== 'CANVAS') {
-                return;
-            }
-
-            e.preventDefault();
-            const rect = element.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-
-            setViewport(prev => {
-                const { scale: currentScale, offset: currentOffset } = prev;
-                const zoomSensitivity = 0.001;
-                const delta = -e.deltaY * zoomSensitivity;
-                const newScale = Math.min(Math.max(0.1, currentScale + delta), 5);
-
-                const newOffsetX = mouseX - ((mouseX - currentOffset.x) / currentScale) * newScale;
-                const newOffsetY = mouseY - ((mouseY - currentOffset.y) / currentScale) * newScale;
-
-                return {
-                    scale: newScale,
-                    offset: { x: newOffsetX, y: newOffsetY }
-                };
-            });
-        };
-
-        element.addEventListener('wheel', onWheel, { passive: false });
-        return () => element.removeEventListener('wheel', onWheel);
-    }, [viewMode]);
-
     const handlePanStart = (e: React.MouseEvent) => {
         // Allow pan on Middle Button (1) OR Right Button (2)
         if (e.button === 1 || e.button === 2) {
-            setIsPanning(true);
-            lastMousePos.current = { x: e.clientX, y: e.clientY };
+            startPan(e.clientX, e.clientY);
         }
         // Left Click (0) on Background -> Start Selection Box
         else if (e.button === 0 && !isSketchMode && !isReferenceMode) {
@@ -623,246 +568,58 @@ export default function App() {
 
     const handleMouseMove = (e: React.MouseEvent) => {
         if (isPanning) {
-            const dx = e.clientX - lastMousePos.current.x;
-            const dy = e.clientY - lastMousePos.current.y;
-            setViewport(prev => ({
-                ...prev,
-                offset: { x: prev.offset.x + dx, y: prev.offset.y + dy }
-            }));
+            movePan(e.clientX, e.clientY);
         } else if (selectionBox && mainRef.current) {
             const rect = mainRef.current.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
-
-            const updatedEnd = { x: currentX, y: currentY };
+            const updatedEnd = { x: e.clientX - rect.left, y: e.clientY - rect.top };
             setSelectionBox(prev => prev ? { ...prev, end: updatedEnd } : null);
-
-            const dx = currentX - selectionBox.start.x;
-            const dy = currentY - selectionBox.start.y;
-            if (Math.hypot(dx, dy) > 5) {
+            if (Math.hypot(updatedEnd.x - selectionBox.start.x, updatedEnd.y - selectionBox.start.y) > 5) {
                 performSelection(selectionBox.start, updatedEnd);
             }
         }
-        lastMousePos.current = { x: e.clientX, y: e.clientY };
     };
 
     const handleTouchStart = (e: React.TouchEvent) => {
         if (viewMode === 'VOLUMES') return;
-
         if (e.touches.length === 1) {
-            // Single touch - Pan (if on background)
+            // One finger on the background pans and clears the selection
             if (e.target === mainRef.current) {
-                setIsPanning(true);
-                lastMousePos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-
-                // Clear selection if background
+                startPan(e.touches[0].clientX, e.touches[0].clientY);
                 setSelectedRoomIds(new Set());
                 setSelectedZone(null);
                 setSelectedAnnotationId(null);
-                if (connectionSourceId) setConnectionSourceId(null);
+                setConnectionSourceId(null);
             }
         } else if (e.touches.length === 2) {
-            // Two touch - Zoom & Pan
-            setIsPanning(true);
-
-            const t1 = e.touches[0];
-            const t2 = e.touches[1];
-
-            const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-            const center = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
-
-            touchState.current = {
-                mode: 'zoom',
-                startDist: dist,
-                startScale: scale,
-                startOffset: { ...offset },
-                lastCenter: center
-            };
+            startPinch(e.touches[0], e.touches[1]);
         }
     };
 
     const handleTouchMove = (e: React.TouchEvent) => {
         if (viewMode === 'VOLUMES') return;
-
-        if (e.touches.length === 1 && isPanning) {
-            const dx = e.touches[0].clientX - lastMousePos.current.x;
-            const dy = e.touches[0].clientY - lastMousePos.current.y;
-            setViewport(prev => ({
-                ...prev,
-                offset: { x: prev.offset.x + dx, y: prev.offset.y + dy }
-            }));
-            lastMousePos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        } else if (e.touches.length === 2) {
-            const t1 = e.touches[0];
-            const t2 = e.touches[1];
-
-            const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-            const center = { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
-            const state = touchState.current;
-
-            if (state.mode !== 'zoom') return;
-
-            const rect = mainRef.current?.getBoundingClientRect();
-            if (!rect) return;
-
-            // Calculate Zoom
-            const scaleFactor = dist / state.startDist;
-            const newScale = Math.min(Math.max(0.1, state.startScale * scaleFactor), 5);
-
-            // Calculate Pan (movement of the center point)
-            const panX = center.x - state.lastCenter.x;
-            const panY = center.y - state.lastCenter.y;
-
-            setViewport(prev => {
-                // Apply Pan first
-                const intermediateOffset = { x: prev.offset.x + panX, y: prev.offset.y + panY };
-
-                // Apply Zoom around the center (relative to container)
-                const relCenterX = center.x - rect.left;
-                const relCenterY = center.y - rect.top;
-
-                // Formula: newOffset = center - (center - oldOffset) * (newScale / oldScale)
-                const zoomRatio = newScale / prev.scale;
-                const finalOffsetX = relCenterX - (relCenterX - intermediateOffset.x) * zoomRatio;
-                const finalOffsetY = relCenterY - (relCenterY - intermediateOffset.y) * zoomRatio;
-
-                return {
-                    scale: newScale,
-                    offset: { x: finalOffsetX, y: finalOffsetY }
-                };
-            });
-
-            touchState.current.lastCenter = center;
-        }
+        if (e.touches.length === 1 && isPanning) movePan(e.touches[0].clientX, e.touches[0].clientY);
+        else if (e.touches.length === 2) movePinch(e.touches[0], e.touches[1]);
     };
 
     const handleTouchEnd = () => {
         if (viewMode === 'VOLUMES') return;
-        setIsPanning(false);
-        touchState.current.mode = 'none';
-    };
-
-    const handleMouseUp = () => {
-        setIsPanning(false);
+        endTouch();
     };
 
     const handleZoomToFit = useCallback(() => {
-        const getCenter = () => {
-            if (mainRef.current) {
-                const { width, height } = mainRef.current.getBoundingClientRect();
-                return { x: width / 2, y: height / 2 };
-            }
-            return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-        };
-
-        const currentFloorRooms = rooms.filter(r => r.isPlaced && isOnFloor(r, currentFloor));
-        const currentFloorAnnotations = annotations.filter(a =>
-            a.floor === currentFloor &&
-            a.points && a.points.length > 0 // Ensure annotation has points
-        );
-
-        const siteBoundary = siteProperties.boundary && siteProperties.boundary.length >= 3 && (siteProperties.showSite !== false || isSiteMode)
-            ? siteProperties.boundary : [];
-
-        if (currentFloorRooms.length === 0 && currentFloorAnnotations.length === 0 && siteBoundary.length === 0) {
-            setViewport({
-                scale: 1,
-                offset: getCenter()
-            });
-            return;
-        }
-
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        currentFloorRooms.forEach(r => {
-            if (r.polygon && r.polygon.length > 0) {
-                r.polygon.forEach(p => {
-                    minX = Math.min(minX, r.x + p.x);
-                    minY = Math.min(minY, r.y + p.y);
-                    maxX = Math.max(maxX, r.x + p.x);
-                    maxY = Math.max(maxY, r.y + p.y);
-                });
-            } else if (!r.polygon) {
-                minX = Math.min(minX, r.x);
-                minY = Math.min(minY, r.y);
-                maxX = Math.max(maxX, r.x + r.width);
-                maxY = Math.max(maxY, r.y + r.height);
-            }
-        });
-
-        currentFloorAnnotations.forEach(a => {
-            if (!a.points) return;
-            a.points.forEach(p => {
-                minX = Math.min(minX, p.x);
-                minY = Math.min(minY, p.y);
-                maxX = Math.max(maxX, p.x);
-                maxY = Math.max(maxY, p.y);
-            });
-        });
-
-        siteBoundary.forEach(p => {
-            minX = Math.min(minX, p.x * PIXELS_PER_METER);
-            minY = Math.min(minY, p.y * PIXELS_PER_METER);
-            maxX = Math.max(maxX, p.x * PIXELS_PER_METER);
-            maxY = Math.max(maxY, p.y * PIXELS_PER_METER);
-        });
-
-        // If bounds are still infinite (e.g. empty points arrays), reset view
-        if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
-            setViewport({ scale: 1, offset: getCenter() });
-            return;
-        }
-
-        const padding = 100;
-        const contentWidth = maxX - minX + padding * 2;
-        const contentHeight = maxY - minY + padding * 2;
-
-        if (mainRef.current) {
-            const { width, height } = mainRef.current.getBoundingClientRect();
-            const scaleX = width / contentWidth;
-            const scaleY = height / contentHeight;
-            const newScale = Math.min(Math.min(scaleX, scaleY), 2);
-            const newOffsetX = (width / 2) - ((minX + maxX) / 2) * newScale;
-            const newOffsetY = (height / 2) - ((minY + maxY) / 2) * newScale;
-            setViewport({
-                scale: newScale,
-                offset: { x: newOffsetX, y: newOffsetY }
-            });
-        }
-    }, [rooms, annotations, currentFloor, siteProperties.boundary, siteProperties.showSite, isSiteMode]);
+        const showSite = siteProperties.boundary && siteProperties.boundary.length >= 3 && (siteProperties.showSite !== false || isSiteMode);
+        fitBounds(canvasContentBounds(
+            rooms.filter(r => r.isPlaced && isOnFloor(r, currentFloor)),
+            annotations.filter(a => a.floor === currentFloor),
+            showSite ? siteProperties.boundary!.map(p => ({ x: p.x * PIXELS_PER_METER, y: p.y * PIXELS_PER_METER })) : [],
+        ));
+    }, [rooms, annotations, currentFloor, siteProperties.boundary, siteProperties.showSite, isSiteMode, fitBounds]);
 
     // Fit the view after a site import (runs once the new boundary is in state)
     useEffect(() => {
         if (fitRequest) handleZoomToFit();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fitRequest]);
-
-    // Resize Observer for Canvas
-    useEffect(() => {
-        if (!mainRef.current) return;
-
-        // Initialize prevRect
-        const { width, height } = mainRef.current.getBoundingClientRect();
-        prevMainRect.current = { width, height };
-
-        const resizeObserver = new ResizeObserver(() => {
-            if (!mainRef.current || !prevMainRect.current) return;
-            const { width: newW, height: newH } = mainRef.current.getBoundingClientRect();
-            const { width: oldW, height: oldH } = prevMainRect.current;
-
-            // Adjust offset to keep the center of the view stable
-            setViewport(prev => ({
-                ...prev,
-                offset: {
-                    x: prev.offset.x + (newW - oldW) / 2,
-                    y: prev.offset.y + (newH - oldH) / 2
-                }
-            }));
-
-            prevMainRect.current = { width: newW, height: newH };
-        });
-        resizeObserver.observe(mainRef.current);
-        return () => resizeObserver.disconnect();
-    }, []);
 
     // Keyboard Shortcuts
     useEffect(() => {
@@ -2303,7 +2060,7 @@ export default function App() {
                         className={`flex-1 relative overflow-hidden ${canvasTheme.bg} transition-colors duration-500 ${isZoneDragging ? 'no-transition' : ''}`}
                         onMouseDown={viewMode === 'VOLUMES' ? undefined : handlePanStart}
                         onMouseMove={viewMode === 'VOLUMES' ? undefined : handleMouseMove}
-                        onMouseUp={viewMode === 'VOLUMES' ? undefined : handleMouseUp}
+                        onMouseUp={viewMode === 'VOLUMES' ? undefined : endPan}
                         onContextMenu={(e) => e.preventDefault()}
                         onTouchStart={isSketchMode || isReferenceMode || isGuidesMode || isSiteMode || viewMode === 'VOLUMES' ? undefined : handleTouchStart}
                         onTouchMove={isSketchMode || isReferenceMode || isGuidesMode || isSiteMode || viewMode === 'VOLUMES' ? undefined : handleTouchMove}
