@@ -7,6 +7,8 @@ import { notify } from '../components/Notifications';
 import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
 import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
 import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
+import { isOnFloor, PIXELS_PER_METER } from './rooms';
+import { vertexCentroid } from './geometry';
 
 export type ExportFormat = 'png' | 'jpeg' | 'svg' | 'dxf' | 'pdf';
 
@@ -39,7 +41,6 @@ const getBubbleCurvePoints = (points: Point[], segmentsPerCurve: number = 5): Po
     }
     return result;
 };
-const PIXELS_PER_METER = 20;
 
 // Text wrapping helper with literal dash support
 export const wrapText = (text: string, maxWidth: number, fontSize: number, fontFamily: string = 'Inter, sans-serif'): string[] => {
@@ -89,15 +90,6 @@ export const wrapText = (text: string, maxWidth: number, fontSize: number, fontF
 };
 
 // --- Geometry Helpers ---
-
-const calculateCentroid = (points: Point[]): Point => {
-    let x = 0, y = 0;
-    for (const p of points) {
-        x += p.x;
-        y += p.y;
-    }
-    return { x: x / points.length, y: y / points.length };
-};
 
 // Generate Bezier commands for smooth bubble curves (Catmull-Rom to Cubic Bezier)
 const getBubblePathCommands = (points: Point[]) => {
@@ -251,25 +243,7 @@ export const handleExport = async (
         return getHexColorForZone(zone, zoneColors);
     };
 
-    const visibleRooms = rooms.filter(r => {
-        if (!r.isPlaced) return false;
-        if (r.floor === currentFloor) return true;
-        if (r.spaceType === 'multistory') {
-            const from = r.msFromFloor ?? r.floor;
-            const to = r.msToFloor ?? r.floor;
-            const minF = Math.min(from, to);
-            const maxF = Math.max(from, to);
-            return currentFloor >= minF && currentFloor <= maxF;
-        }
-        if (r.spaceType === 'verticalConnection') {
-            const from = r.vcFromFloor ?? r.floor;
-            const to = r.vcToFloor ?? r.floor;
-            const minF = Math.min(from, to);
-            const maxF = Math.max(from, to);
-            return currentFloor >= minF && currentFloor <= maxF;
-        }
-        return false;
-    });
+    const visibleRooms = rooms.filter(r => r.isPlaced && isOnFloor(r, currentFloor));
 
     const activeOverlayFloorId = floorOverlays?.[currentFloor] ?? null;
     const overlayRooms = activeOverlayFloorId !== null
@@ -876,8 +850,8 @@ export const handleExport = async (
             }
         }
 
-        const cx = (r.polygon ? 0 : r.width / 2) + (r.polygon ? calculateCentroid(r.polygon).x : 0);
-        const cy = (r.polygon ? 0 : r.height / 2) + (r.polygon ? calculateCentroid(r.polygon).y : 0);
+        const cx = (r.polygon ? 0 : r.width / 2) + (r.polygon ? vertexCentroid(r.polygon).x : 0);
+        const cy = (r.polygon ? 0 : r.height / 2) + (r.polygon ? vertexCentroid(r.polygon).y : 0);
 
         const widthVal = (r.polygon && r.polygon.length > 0) ?
             (Math.max(...r.polygon.map(p => p.x)) - Math.min(...r.polygon.map(p => p.x))) :
@@ -941,8 +915,8 @@ export const handleExport = async (
             }
         }
 
-        const cx = (r.polygon ? 0 : r.width / 2) + (r.polygon ? calculateCentroid(r.polygon).x : 0);
-        const cy = (r.polygon ? 0 : r.height / 2) + (r.polygon ? calculateCentroid(r.polygon).y : 0);
+        const cx = (r.polygon ? 0 : r.width / 2) + (r.polygon ? vertexCentroid(r.polygon).x : 0);
+        const cy = (r.polygon ? 0 : r.height / 2) + (r.polygon ? vertexCentroid(r.polygon).y : 0);
 
         const widthVal = (r.polygon && r.polygon.length > 0) ?
             (Math.max(...r.polygon.map(p => p.x)) - Math.min(...r.polygon.map(p => p.x))) :
@@ -981,8 +955,8 @@ export const handleExport = async (
             const symH = (r.polygon && r.polygon.length > 0) ? 
                 (Math.max(...r.polygon.map(p => p.y)) - Math.min(...r.polygon.map(p => p.y))) : 
                 r.height;
-            const symX = (r.polygon && r.polygon.length > 0) ? calculateCentroid(r.polygon).x - symW / 2 : 0;
-            const symY = (r.polygon && r.polygon.length > 0) ? calculateCentroid(r.polygon).y - symH / 2 : 0;
+            const symX = (r.polygon && r.polygon.length > 0) ? vertexCentroid(r.polygon).x - symW / 2 : 0;
+            const symY = (r.polygon && r.polygon.length > 0) ? vertexCentroid(r.polygon).y - symH / 2 : 0;
             const vcType = r.vcType || 'stair';
             const symbolColor = stroke;
 

@@ -1,5 +1,7 @@
 import { Room, Annotation, Point } from '../types';
 import { getConvexHull } from './geometry';
+import { isOnFloor } from './rooms';
+import { vertexCentroid } from './geometry';
 
 /**
  * Maps zone categories to standard AutoCAD ACI Color Codes.
@@ -14,18 +16,6 @@ const getDxfColorForZone = (zone: string): number => {
     case 'Service': return 8;     // Gray
     default: return 7;            // White/Black
   }
-};
-
-/**
- * Calculates the geometric centroid of a set of 2D points.
- */
-const calculateCentroid = (points: Point[]): Point => {
-  let x = 0, y = 0;
-  for (const p of points) {
-    x += p.x;
-    y += p.y;
-  }
-  return { x: x / points.length, y: y / points.length };
 };
 
 /**
@@ -98,25 +88,7 @@ export const generateDXF = (
   layerPrefix?: string,
   exportGrid?: boolean
 ): string => {
-  const visibleRooms = rooms.filter(r => {
-    if (!r.isPlaced) return false;
-    if (r.floor === currentFloor) return true;
-    if (r.spaceType === 'multistory') {
-      const from = r.msFromFloor ?? r.floor;
-      const to = r.msToFloor ?? r.floor;
-      const minF = Math.min(from, to);
-      const maxF = Math.max(from, to);
-      return currentFloor >= minF && currentFloor <= maxF;
-    }
-    if (r.spaceType === 'verticalConnection') {
-      const from = r.vcFromFloor ?? r.floor;
-      const to = r.vcToFloor ?? r.floor;
-      const minF = Math.min(from, to);
-      const maxF = Math.max(from, to);
-      return currentFloor >= minF && currentFloor <= maxF;
-    }
-    return false;
-  });
+  const visibleRooms = rooms.filter(r => r.isPlaced && isOnFloor(r, currentFloor));
   const visibleAnnotations = annotations.filter(a => a.floor === currentFloor);
 
   // Setup dynamic Layer names
@@ -306,8 +278,8 @@ export const generateDXF = (
     }
 
     // Draw Labels on lLabels
-    const cx = (room.polygon ? 0 : room.width / 2) + (room.polygon ? calculateCentroid(room.polygon).x : 0);
-    const cy = (room.polygon ? 0 : room.height / 2) + (room.polygon ? calculateCentroid(room.polygon).y : 0);
+    const cx = (room.polygon ? 0 : room.width / 2) + (room.polygon ? vertexCentroid(room.polygon).x : 0);
+    const cy = (room.polygon ? 0 : room.height / 2) + (room.polygon ? vertexCentroid(room.polygon).y : 0);
     const absX = room.x + cx + offsetX;
     const absY = -(room.y + cy + offsetY);
 
@@ -492,72 +464,4 @@ export const generateDXF = (
   dxf += formatLine(0, 'EOF');
 
   return dxf;
-};
-
-/**
- * Triggers a browser download of the DXF drawing file.
- */
-export const downloadDXF = (
-  projectName: string,
-  rooms: Room[],
-  annotations: Annotation[] = [],
-  currentFloor: number,
-  unitSystem?: 'metric' | 'imperial',
-  layerPrefix?: string,
-  exportGrid?: boolean
-) => {
-  let minX = Infinity, minY = Infinity;
-  const visibleRooms = rooms.filter(r => {
-    if (!r.isPlaced) return false;
-    if (r.floor === currentFloor) return true;
-    if (r.spaceType === 'multistory') {
-      const from = r.msFromFloor ?? r.floor;
-      const to = r.msToFloor ?? r.floor;
-      const minF = Math.min(from, to);
-      const maxF = Math.max(from, to);
-      return currentFloor >= minF && currentFloor <= maxF;
-    }
-    if (r.spaceType === 'verticalConnection') {
-      const from = r.vcFromFloor ?? r.floor;
-      const to = r.vcToFloor ?? r.floor;
-      const minF = Math.min(from, to);
-      const maxF = Math.max(from, to);
-      return currentFloor >= minF && currentFloor <= maxF;
-    }
-    return false;
-  });
-
-  if (visibleRooms.length > 0) {
-    visibleRooms.forEach(r => {
-      minX = Math.min(minX, r.x);
-      minY = Math.min(minY, r.y);
-    });
-  } else {
-    minX = 0;
-    minY = 0;
-  }
-
-  const offsetX = -minX + 50;
-  const offsetY = -minY + 50;
-
-  const dxfContent = generateDXF(
-    projectName,
-    rooms,
-    annotations,
-    currentFloor,
-    offsetX,
-    offsetY,
-    unitSystem,
-    layerPrefix,
-    exportGrid
-  );
-
-  const blob = new Blob([dxfContent], { type: 'application/dxf' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.download = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-floor-${currentFloor}.dxf`;
-  link.href = url;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
 };

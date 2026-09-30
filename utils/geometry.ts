@@ -1,5 +1,64 @@
 import { Point } from '../types';
 
+// --- Polygon measures ---
+
+/** Signed area (shoelace). The sign tells the winding direction. */
+export const signedArea = (pts: Point[]): number => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+        const p = pts[i], q = pts[(i + 1) % pts.length];
+        a += p.x * q.y - q.x * p.y;
+    }
+    return a / 2;
+};
+
+export const polygonArea = (pts: Point[]): number => Math.abs(signedArea(pts));
+
+/**
+ * Area enclosed by a bubble: the smooth closed curve through `points` (Catmull-Rom, drawn as cubic
+ * Béziers), flattened into short segments.
+ */
+export const bubbleArea = (points: Point[]): number => {
+    if (points.length < 3) return 0;
+    let area = 0;
+    const steps = 20;
+    for (let i = 0; i < points.length; i++) {
+        const p0 = points[(i - 1 + points.length) % points.length];
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const p3 = points[(i + 2) % points.length];
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+        let prevX = p1.x;
+        let prevY = p1.y;
+        for (let j = 1; j <= steps; j++) {
+            const t = j / steps;
+            const it = 1 - t;
+            const x = it * it * it * p1.x + 3 * it * it * t * cp1x + 3 * it * t * t * cp2x + t * t * t * p2.x;
+            const y = it * it * it * p1.y + 3 * it * it * t * cp1y + 3 * it * t * t * cp2y + t * t * t * p2.y;
+            area += prevX * y - x * prevY;
+            prevX = x;
+            prevY = y;
+        }
+    }
+    return Math.abs(area) / 2;
+};
+
+/**
+ * The average of the vertices. Cheaper than the area-weighted centre of gravity (polygonCentroid in
+ * utils/site) and different from it for uneven shapes; used where the vertex average was always used.
+ */
+export const vertexCentroid = (points: Point[]): Point => {
+    let x = 0, y = 0;
+    for (const p of points) {
+        x += p.x;
+        y += p.y;
+    }
+    return { x: x / points.length, y: y / points.length };
+};
+
 // Cross product of vectors OA and OB
 // A positive cross product indicates a counter-clockwise turn, 0 indicates a collinear points, and negative indicates a clockwise turn.
 const cross = (o: Point, a: Point, b: Point) => {

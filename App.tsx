@@ -46,14 +46,14 @@ import ZonesIconRaw from './lib/symbols/Zones.svg?raw';
 import brushCleaningSvgRaw from './lib/symbols/brush-cleaning.svg?raw';
 
 import { generateSpatialLayout } from './services/geminiService';
+import { polygonArea, bubbleArea, vertexCentroid } from './utils/geometry';
+import { PIXELS_PER_METER, isOnFloor } from './utils/rooms';
 
 // Shim process for libs that might expect it in Vite
 if (typeof window !== 'undefined' && !window.process) {
     (window as any).process = { env: {} };
 }
 
-// Configuration
-const PIXELS_PER_METER = 20;
 
 const COLOR_PALETTE: ZoneColor[] = [
     { bg: 'bg-[#f44336]/50', text: 'text-white', border: 'border-[#f44336]' },
@@ -73,54 +73,6 @@ const COLOR_PALETTE: ZoneColor[] = [
     { bg: 'bg-[#ff9800]/50', text: 'text-slate-900', border: 'border-[#ff9800]' },
     { bg: 'bg-[#ff5722]/50', text: 'text-white', border: 'border-[#ff5722]' },
 ];
-
-// --- Geometry Helpers for Shape Conversion ---
-const calculateCentroid = (points: Point[]): Point => {
-    let x = 0, y = 0;
-    for (const p of points) {
-        x += p.x;
-        y += p.y;
-    }
-    return { x: x / points.length, y: y / points.length };
-};
-
-const calculateCurvedArea = (points: Point[]): number => {
-    if (points.length < 3) return 0;
-    let area = 0;
-    const steps = 20;
-    for (let i = 0; i < points.length; i++) {
-        const p0 = points[(i - 1 + points.length) % points.length];
-        const p1 = points[i];
-        const p2 = points[(i + 1) % points.length];
-        const p3 = points[(i + 2) % points.length];
-        const cp1x = p1.x + (p2.x - p0.x) / 6;
-        const cp1y = p1.y + (p2.y - p0.y) / 6;
-        const cp2x = p2.x - (p3.x - p1.x) / 6;
-        const cp2y = p2.y - (p3.y - p1.y) / 6;
-        let prevX = p1.x;
-        let prevY = p1.y;
-        for (let j = 1; j <= steps; j++) {
-            const t = j / steps;
-            const it = 1 - t;
-            const x = it * it * it * p1.x + 3 * it * it * t * cp1x + 3 * it * t * t * cp2x + t * t * t * p2.x;
-            const y = it * it * it * p1.y + 3 * it * it * t * cp1y + 3 * it * t * t * cp2y + t * t * t * p2.y;
-            area += prevX * y - x * prevY;
-            prevX = x;
-            prevY = y;
-        }
-    }
-    return Math.abs(area) / 2;
-};
-
-const calculatePolygonArea = (points: Point[]): number => {
-    let area = 0;
-    for (let i = 0; i < points.length; i++) {
-        const j = (i + 1) % points.length;
-        area += points[i].x * points[j].y;
-        area -= points[j].x * points[i].y;
-    }
-    return Math.abs(area) / 2;
-};
 
 const isPointInPolygon = (p: Point, polygon: Point[]): boolean => {
     let inside = false;
@@ -431,25 +383,7 @@ export default function App() {
 
         const isCrossing = start.x > end.x; // Right-to-left
 
-        const visibleRooms = roomsRef.current.filter(r => {
-            if (!r.isPlaced) return false;
-            if (r.floor === currentFloor) return true;
-            if (r.spaceType === 'multistory') {
-                const from = r.msFromFloor ?? r.floor;
-                const to = r.msToFloor ?? r.floor;
-                const minF = Math.min(from, to);
-                const maxF = Math.max(from, to);
-                return currentFloor >= minF && currentFloor <= maxF;
-            }
-            if (r.spaceType === 'verticalConnection') {
-                const from = r.vcFromFloor ?? r.floor;
-                const to = r.vcToFloor ?? r.floor;
-                const minF = Math.min(from, to);
-                const maxF = Math.max(from, to);
-                return currentFloor >= minF && currentFloor <= maxF;
-            }
-            return false;
-        });
+        const visibleRooms = roomsRef.current.filter(r => r.isPlaced && isOnFloor(r, currentFloor));
         const newlySelectedRooms = new Set<string>();
 
         visibleRooms.forEach(room => {
@@ -703,27 +637,7 @@ export default function App() {
         const overlayId = floorOverlays[currentFloor] ?? null;
         const otherRooms = currentRooms.filter(r => {
             if (!r.isPlaced || r.id === excludeId) return false;
-            
-            const isVisibleOnFloor = (floorId: number) => {
-                if (r.floor === floorId) return true;
-                if (r.spaceType === 'multistory') {
-                    const from = r.msFromFloor ?? r.floor;
-                    const to = r.msToFloor ?? r.floor;
-                    const minF = Math.min(from, to);
-                    const maxF = Math.max(from, to);
-                    return floorId >= minF && floorId <= maxF;
-                }
-                if (r.spaceType === 'verticalConnection') {
-                    const from = r.vcFromFloor ?? r.floor;
-                    const to = r.vcToFloor ?? r.floor;
-                    const minF = Math.min(from, to);
-                    const maxF = Math.max(from, to);
-                    return floorId >= minF && floorId <= maxF;
-                }
-                return false;
-            };
-
-            return isVisibleOnFloor(currentFloor) || (overlayId !== null && isVisibleOnFloor(overlayId));
+            return isOnFloor(r, currentFloor) || (overlayId !== null && isOnFloor(r, overlayId));
         });
 
         if (appSettings.snapToObjects) {
@@ -1101,25 +1015,7 @@ export default function App() {
             return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
         };
 
-        const currentFloorRooms = rooms.filter(r => {
-            if (!r.isPlaced) return false;
-            if (r.floor === currentFloor) return true;
-            if (r.spaceType === 'multistory') {
-                const from = r.msFromFloor ?? r.floor;
-                const to = r.msToFloor ?? r.floor;
-                const minF = Math.min(from, to);
-                const maxF = Math.max(from, to);
-                return currentFloor >= minF && currentFloor <= maxF;
-            }
-            if (r.spaceType === 'verticalConnection') {
-                const from = r.vcFromFloor ?? r.floor;
-                const to = r.vcToFloor ?? r.floor;
-                const minF = Math.min(from, to);
-                const maxF = Math.max(from, to);
-                return currentFloor >= minF && currentFloor <= maxF;
-            }
-            return false;
-        });
+        const currentFloorRooms = rooms.filter(r => r.isPlaced && isOnFloor(r, currentFloor));
         const currentFloorAnnotations = annotations.filter(a =>
             a.floor === currentFloor &&
             a.points && a.points.length > 0 // Ensure annotation has points
@@ -1725,9 +1621,7 @@ export default function App() {
             if (selectedRoomIds.has(id) && selectedRoomIds.size > 1) {
                 return prev.map(r => {
                     if (selectedRoomIds.has(r.id) && r.isPlaced) {
-                        const isVisible = r.floor === currentFloor ||
-                            (r.spaceType === 'multistory' && currentFloor >= Math.min(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor) && currentFloor <= Math.max(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor)) ||
-                            (r.spaceType === 'verticalConnection' && currentFloor >= Math.min(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor) && currentFloor <= Math.max(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor));
+                        const isVisible = isOnFloor(r, currentFloor);
                         if (isVisible) {
                             return { ...r, x: r.x + dx, y: r.y + dy };
                         }
@@ -2124,9 +2018,7 @@ export default function App() {
     const handleZoneDrag = useCallback((zone: string, dx: number, dy: number) => {
         setRooms(prev => prev.map(r => {
             if (r.zone === zone && r.isPlaced) {
-                const isVisible = r.floor === currentFloor ||
-                    (r.spaceType === 'multistory' && currentFloor >= Math.min(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor) && currentFloor <= Math.max(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor)) ||
-                    (r.spaceType === 'verticalConnection' && currentFloor >= Math.min(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor) && currentFloor <= Math.max(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor));
+                const isVisible = isOnFloor(r, currentFloor);
                 if (isVisible) {
                     return { ...r, x: r.x + dx, y: r.y + dy };
                 }
@@ -2191,9 +2083,7 @@ export default function App() {
                 addToHistory();
                 setRooms(prev => prev.map(r => {
                     if (r.zone === selectedZone) {
-                        const isVisible = r.floor === currentFloor ||
-                            (r.spaceType === 'multistory' && currentFloor >= Math.min(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor) && currentFloor <= Math.max(r.msFromFloor ?? r.floor, r.msToFloor ?? r.floor)) ||
-                            (r.spaceType === 'verticalConnection' && currentFloor >= Math.min(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor) && currentFloor <= Math.max(r.vcFromFloor ?? r.floor, r.vcToFloor ?? r.floor));
+                        const isVisible = isOnFloor(r, currentFloor);
                         if (isVisible) {
                             return { ...r, isPlaced: false };
                         }
@@ -2278,7 +2168,7 @@ export default function App() {
                     });
 
                     // 2. Compute polygon area in pixels
-                    const polyAreaPx = (r.shape === 'bubble') ? calculateCurvedArea(points) : calculatePolygonArea(points);
+                    const polyAreaPx = (r.shape === 'bubble') ? bubbleArea(points) : polygonArea(points);
 
                     // Check if they form a rectangle/square
                     let isRect = false;
@@ -2328,7 +2218,7 @@ export default function App() {
 
                     if (!isRect) {
                         // Fit using Minimum Area Oriented Bounding Box (OBB)
-                        const centroid = calculateCentroid(absPoints);
+                        const centroid = vertexCentroid(absPoints);
                         let minArea = Infinity;
                         let bestTheta = 0;
                         let bestW = 0;
@@ -2426,11 +2316,11 @@ export default function App() {
                 }
                 if (shape === 'bubble') {
                     const targetAreaPx = r.area * (PIXELS_PER_METER * PIXELS_PER_METER);
-                    const centroid = calculateCentroid(points);
+                    const centroid = vertexCentroid(points);
                     const scale = 0.9;
                     points = points.map(p => ({ x: centroid.x + (p.x - centroid.x) * scale, y: centroid.y + (p.y - centroid.y) * scale }));
                     for (let i = 0; i < 10; i++) {
-                        const currentArea = calculateCurvedArea(points);
+                        const currentArea = bubbleArea(points);
                         if (currentArea === 0 || Math.abs(currentArea - targetAreaPx) < 10) break;
                         const correction = Math.sqrt(targetAreaPx / currentArea);
                         points = points.map(p => ({ x: centroid.x + (p.x - centroid.x) * correction, y: centroid.y + (p.y - centroid.y) * correction }));
@@ -3041,13 +2931,9 @@ export default function App() {
                                         const toRoom = rooms.find(r => r.id === conn.toId);
                                         if (!fromRoom || !toRoom || !fromRoom.isPlaced || !toRoom.isPlaced) return null;
 
-                                        const isFromVisible = fromRoom.floor === currentFloor ||
-                                            (fromRoom.spaceType === 'multistory' && currentFloor >= Math.min(fromRoom.msFromFloor ?? fromRoom.floor, fromRoom.msToFloor ?? fromRoom.floor) && currentFloor <= Math.max(fromRoom.msFromFloor ?? fromRoom.floor, fromRoom.msToFloor ?? fromRoom.floor)) ||
-                                            (fromRoom.spaceType === 'verticalConnection' && currentFloor >= Math.min(fromRoom.vcFromFloor ?? fromRoom.floor, fromRoom.vcToFloor ?? fromRoom.floor) && currentFloor <= Math.max(fromRoom.vcFromFloor ?? fromRoom.floor, fromRoom.vcToFloor ?? fromRoom.floor));
+                                        const isFromVisible = isOnFloor(fromRoom, currentFloor);
                                         
-                                        const isToVisible = toRoom.floor === currentFloor ||
-                                            (toRoom.spaceType === 'multistory' && currentFloor >= Math.min(toRoom.msFromFloor ?? toRoom.floor, toRoom.msToFloor ?? toRoom.floor) && currentFloor <= Math.max(toRoom.msFromFloor ?? toRoom.floor, toRoom.msToFloor ?? toRoom.floor)) ||
-                                            (toRoom.spaceType === 'verticalConnection' && currentFloor >= Math.min(toRoom.vcFromFloor ?? toRoom.floor, toRoom.vcToFloor ?? toRoom.floor) && currentFloor <= Math.max(toRoom.vcFromFloor ?? toRoom.floor, toRoom.vcToFloor ?? toRoom.floor));
+                                        const isToVisible = isOnFloor(toRoom, currentFloor);
 
                                         if (!isFromVisible || !isToVisible) return null;
 
@@ -3181,25 +3067,7 @@ export default function App() {
                                 style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
                             >
                                 {(() => {
-                                    const visibleRooms = rooms.filter(r => {
-                                        if (!r.isPlaced) return false;
-                                        if (r.floor === currentFloor) return true;
-                                        if (r.spaceType === 'multistory') {
-                                            const from = r.msFromFloor ?? r.floor;
-                                            const to = r.msToFloor ?? r.floor;
-                                            const minF = Math.min(from, to);
-                                            const maxF = Math.max(from, to);
-                                            return currentFloor >= minF && currentFloor <= maxF;
-                                        }
-                                        if (r.spaceType === 'verticalConnection') {
-                                            const from = r.vcFromFloor ?? r.floor;
-                                            const to = r.vcToFloor ?? r.floor;
-                                            const minF = Math.min(from, to);
-                                            const maxF = Math.max(from, to);
-                                            return currentFloor >= minF && currentFloor <= maxF;
-                                        }
-                                        return false;
-                                    });
+                                    const visibleRooms = rooms.filter(r => r.isPlaced && isOnFloor(r, currentFloor));
                                     const overlayRooms = activeOverlayFloorId !== null
                                         ? rooms.filter(r => r.isPlaced && r.floor === activeOverlayFloorId)
                                         : [];

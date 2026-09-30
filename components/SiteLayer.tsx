@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Point, Room, SiteProperties, SiteZone, CanvasGuide } from '../types';
 import { buildableArea, roomWorldPolygon, SiteViolation } from '../utils/site';
+import { isOnFloor } from '../utils/rooms';
 import { snapPoint, guideToLine, pointAtDistance, SnapContext, SnapKind, SnapResult } from '../utils/siteSnap';
 
 export type SiteTool = 'select' | 'boundary' | 'zone';
@@ -43,15 +44,6 @@ interface SiteLayerProps {
 
 const zoneId = () => `zone-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
-const roomOnFloor = (r: Room, f: number) => {
-    if (r.floor === f) return true;
-    const [a, b] = r.spaceType === 'verticalConnection' ? [r.vcFromFloor, r.vcToFloor]
-        : r.spaceType === 'multistory' ? [r.msFromFloor, r.msToFloor] : [undefined, undefined];
-    if (a === undefined && b === undefined) return false;
-    const lo = Math.min(a ?? r.floor, b ?? r.floor), hi = Math.max(a ?? r.floor, b ?? r.floor);
-    return f >= lo && f <= hi;
-};
-
 const fmt = (m: number) => (m >= 100 ? m.toFixed(1) : m.toFixed(2));
 
 const SNAP_LABEL: Record<SnapKind, string> = {
@@ -80,7 +72,7 @@ export const SiteLayer: React.FC<SiteLayerProps> = ({
 
     // Snap targets that don't change while the pointer moves
     const roomOutlines = useMemo(
-        () => rooms.filter(r => r.isPlaced && roomOnFloor(r, currentFloor)).map(r => roomWorldPolygon(r, PX, { points: true })),
+        () => rooms.filter(r => r.isPlaced && isOnFloor(r, currentFloor)).map(r => roomWorldPolygon(r, PX, { points: true })),
         [rooms, currentFloor, PX]
     );
     const guideLines = useMemo(() => guides.map(guideToLine), [guides]);
@@ -384,7 +376,7 @@ export const SiteLayer: React.FC<SiteLayerProps> = ({
     const boundarySelected = selection?.kind === 'boundary';
     const floorViolations = violations.filter(v => {
         const r = rooms.find(x => x.id === v.roomId);
-        return r && roomOnFloor(r, currentFloor);
+        return r && isOnFloor(r, currentFloor);
     });
 
     const draftPts = cursor && drawing ? [...draft, cursor] : draft;

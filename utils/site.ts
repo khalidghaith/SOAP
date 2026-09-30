@@ -1,22 +1,13 @@
 import { Point, Room, Floor, SiteProperties, AppSettings } from '../types';
+import { signedArea, polygonArea } from './geometry';
+import { PIXELS_PER_METER, roomFloorRange } from './rooms';
 
-// Site geometry is stored in world meters; rooms are stored in pixels.
-export const SITE_PX_PER_METER = 20;
+export { signedArea, polygonArea };
+
+// Site geometry is stored in world meters; rooms are stored in pixels (PIXELS_PER_METER).
 const EPS = 1e-6;
 
 // --- Polygon basics ---
-
-/** Signed area (shoelace). The sign tells the winding direction. */
-export const signedArea = (pts: Point[]): number => {
-    let a = 0;
-    for (let i = 0; i < pts.length; i++) {
-        const p = pts[i], q = pts[(i + 1) % pts.length];
-        a += p.x * q.y - q.x * p.y;
-    }
-    return a / 2;
-};
-
-export const polygonArea = (pts: Point[]): number => Math.abs(signedArea(pts));
 
 export const polygonPerimeter = (pts: Point[]): number =>
     pts.reduce((sum, p, i) => sum + Math.hypot(pts[(i + 1) % pts.length].x - p.x, pts[(i + 1) % pts.length].y - p.y), 0);
@@ -215,7 +206,7 @@ export const bubbleCurve = (pts: Point[], steps = 8): Point[] => {
  * rooms have a zero-size box, so they rotate about their origin (room.x, room.y).
  * `points: true` gives a bubble's points instead of its curve (what the user drags on the canvas).
  */
-export const roomWorldPolygon = (r: Room, pxPerMeter = SITE_PX_PER_METER, { points = false } = {}): Point[] => {
+export const roomWorldPolygon = (r: Room, pxPerMeter = PIXELS_PER_METER, { points = false } = {}): Point[] => {
     const isPoly = (r.polygon && r.polygon.length >= 3) || r.shape === 'bubble';
     const corners = r.polygon && r.polygon.length >= 3
         ? r.polygon
@@ -263,18 +254,6 @@ export const recenterShape = (r: Room): Room => {
     };
 };
 
-const floorRange = (r: Room): [number, number] => {
-    if (r.spaceType === 'verticalConnection') {
-        const a = r.vcFromFloor ?? r.floor, b = r.vcToFloor ?? r.floor;
-        return [Math.min(a, b), Math.max(a, b)];
-    }
-    if (r.spaceType === 'multistory') {
-        const a = r.msFromFloor ?? r.floor, b = r.msToFloor ?? r.floor;
-        return [Math.min(a, b), Math.max(a, b)];
-    }
-    return [r.floor, r.floor];
-};
-
 export interface SiteViolation {
     roomId: string;
     roomName: string;
@@ -300,7 +279,7 @@ export interface SiteReport {
  * Checks placed rooms against the site: boundary, setbacks, no-build zones and the numeric limits.
  * Basements are allowed under setbacks (common in zoning codes) but must stay inside the boundary.
  */
-export const analyzeSite = (site: SiteProperties, rooms: Room[], floors: Floor[], appSettings?: AppSettings, pxPerMeter = SITE_PX_PER_METER): SiteReport | null => {
+export const analyzeSite = (site: SiteProperties, rooms: Room[], floors: Floor[], appSettings?: AppSettings, pxPerMeter = PIXELS_PER_METER): SiteReport | null => {
     const boundary = site.boundary;
     if (!boundary || boundary.length < 3) return null;
     const siteArea = polygonArea(boundary);
@@ -333,7 +312,7 @@ export const analyzeSite = (site: SiteProperties, rooms: Room[], floors: Floor[]
     for (const r of placed) {
         if (r.spaceType === 'outdoor') continue;
         const area = polygonArea(roomWorldPolygon(r, pxPerMeter));
-        const [lo, hi] = floorRange(r);
+        const [lo, hi] = roomFloorRange(r);
         for (const f of aboveGround) {
             if (f.id < lo || f.id > hi) continue;
             topFloor = Math.max(topFloor, f.id);

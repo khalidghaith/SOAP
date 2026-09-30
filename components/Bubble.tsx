@@ -7,6 +7,7 @@ import { wrapText, getHexColorForZone, getHexBorderForZone } from '../utils/expo
 import stairSvgRaw from '../lib/symbols/stairs.svg?raw';
 import elevatorSvgRaw from '../lib/symbols/Elevator.svg?raw';
 import rampSvgRaw from '../lib/symbols/Ramp.svg?raw';
+import { polygonArea, bubbleArea, vertexCentroid } from '../utils/geometry';
 
 interface BubbleProps {
     room: Room;
@@ -35,56 +36,6 @@ interface BubbleProps {
     guides?: CanvasGuide[];
 }
 
-// area utility
-const calculatePolygonArea = (points: Point[]): number => {
-    let area = 0;
-    for (let i = 0; i < points.length; i++) {
-        const j = (i + 1) % points.length;
-        area += points[i].x * points[j].y;
-        area -= points[j].x * points[i].y;
-    }
-    return Math.abs(area) / 2;
-};
-
-// Calculate area of the rendered spline (Curved Area)
-// Flattens the curve into high-density segments for precision
-const calculateCurvedArea = (points: Point[]): number => {
-    if (points.length < 3) return 0;
-    let area = 0;
-    const steps = 20; // High density for precision
-
-    for (let i = 0; i < points.length; i++) {
-        const p0 = points[(i - 1 + points.length) % points.length];
-        const p1 = points[i];
-        const p2 = points[(i + 1) % points.length];
-        const p3 = points[(i + 2) % points.length];
-
-        // Catmull-Rom to Bezier control points
-        const cp1x = p1.x + (p2.x - p0.x) / 6;
-        const cp1y = p1.y + (p2.y - p0.y) / 6;
-        const cp2x = p2.x - (p3.x - p1.x) / 6;
-        const cp2y = p2.y - (p3.y - p1.y) / 6;
-
-        let prevX = p1.x;
-        let prevY = p1.y;
-
-        for (let j = 1; j <= steps; j++) {
-            const t = j / steps;
-            const it = 1 - t;
-            // Cubic Bezier formula
-            const x = it * it * it * p1.x + 3 * it * it * t * cp1x + 3 * it * t * t * cp2x + t * t * t * p2.x;
-            const y = it * it * it * p1.y + 3 * it * it * t * cp1y + 3 * it * t * t * cp2y + t * t * t * p2.y;
-
-            // Shoelace formula step
-            area += prevX * y - x * prevY;
-
-            prevX = x;
-            prevY = y;
-        }
-    }
-    return Math.abs(area) / 2;
-};
-
 // Catmull-Rom to Bezier conversion for smooth bubble curves
 const createBubblePath = (points: Point[]): string => {
     if (points.length < 3) return "";
@@ -107,15 +58,6 @@ const createBubblePath = (points: Point[]): string => {
     }
 
     return d + " Z";
-};
-
-const calculateCentroid = (points: Point[]): Point => {
-    let x = 0, y = 0;
-    for (const p of points) {
-        x += p.x;
-        y += p.y;
-    }
-    return { x: x / points.length, y: y / points.length };
 };
 
 const renderHatchDefs = (idPrefix: string, color: string, scale: number) => {
@@ -323,7 +265,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
         { x: 0, y: 0 }, { x: room.width, y: 0 }, { x: room.width, y: room.height }, { x: 0, y: room.height }
     ], [room.polygon, room.width, room.height]);
 
-    const centroid = useMemo(() => calculateCentroid(activePoints), [activePoints]);
+    const centroid = useMemo(() => vertexCentroid(activePoints), [activePoints]);
 
     const bounds = useMemo(() => {
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -367,7 +309,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
                 const newPoints = activePoints.filter((_, i) => !selectedVertices.has(i));
 
-                const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+                const areaPx = room.shape === 'bubble' ? bubbleArea(newPoints) : polygonArea(newPoints);
                 const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
                 onShapeEdited?.(room.id);
@@ -661,11 +603,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 newPoints[draggedVertex] = { x: targetX, y: targetY };
 
                 // 2. Calculate current area and centroid
-                const currentArea = calculateCurvedArea(newPoints);
+                const currentArea = bubbleArea(newPoints);
                 const targetArea = room.area * (pixelsPerMeter * pixelsPerMeter); // Target area in pixels
 
                 if (currentArea > 100) { // Avoid division by zero or tiny polys
-                    const centroid = calculateCentroid(newPoints);
+                    const centroid = vertexCentroid(newPoints);
 
                     // 3. Calculate Scale Factor needed to restore area
                     const scale = Math.sqrt(targetArea / currentArea);
@@ -827,7 +769,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     newPoints[index] = { x: nx, y: ny };
                 });
 
-                const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+                const areaPx = room.shape === 'bubble' ? bubbleArea(newPoints) : polygonArea(newPoints);
                 const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
 
@@ -952,7 +894,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                 newPoints[idx1] = moveAndSnap(newPoints[idx1]);
                 newPoints[idx2] = moveAndSnap(newPoints[idx2]);
 
-                const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+                const areaPx = room.shape === 'bubble' ? bubbleArea(newPoints) : polygonArea(newPoints);
                 const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
 
@@ -1250,7 +1192,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             // Preserve area by scaling if needed, or just update
             // For deletion, we usually accept shape change, but let's try to keep it simple first
             // Recalculate area
-            const areaPx = room.shape === 'bubble' ? calculateCurvedArea(newPoints) : calculatePolygonArea(newPoints);
+            const areaPx = room.shape === 'bubble' ? bubbleArea(newPoints) : polygonArea(newPoints);
             const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
 
             updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
@@ -1286,7 +1228,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
             const midY = (p1.y + p2.y) / 2;
 
             // Capture original area before modification to prevent rounding jumps
-            const originalAreaPx = room.shape === 'bubble' ? calculateCurvedArea(activePoints) : calculatePolygonArea(activePoints);
+            const originalAreaPx = room.shape === 'bubble' ? bubbleArea(activePoints) : polygonArea(activePoints);
 
             const newPoints = [...activePoints];
             // Insert at index + 1 (after the start node of the edge)
@@ -1294,11 +1236,11 @@ const BubbleComponent: React.FC<BubbleProps> = ({
 
             if (room.shape === 'bubble') {
                 // Step B: Before the frame renders, calculate the new curved area.
-                const currentArea = calculateCurvedArea(newPoints);
+                const currentArea = bubbleArea(newPoints);
 
                 // Instantaneous Scaling: If the new point changes the area, apply global scaling factor
                 if (currentArea > 100) { // Avoid division by zero or tiny polys
-                    const centroid = calculateCentroid(newPoints);
+                    const centroid = vertexCentroid(newPoints);
                     const scale = Math.sqrt(originalAreaPx / currentArea);
 
                     const scaledPoints = newPoints.map(p => ({
@@ -1311,7 +1253,7 @@ const BubbleComponent: React.FC<BubbleProps> = ({
                     updateRoom(room.id, { polygon: newPoints });
                 }
             } else {
-                const areaPx = calculatePolygonArea(newPoints);
+                const areaPx = polygonArea(newPoints);
                 const newArea = Number((areaPx / (pixelsPerMeter * pixelsPerMeter)).toFixed(2));
                 updateRoom(room.id, { polygon: newPoints, area: newArea > 0 ? newArea : room.area });
             }

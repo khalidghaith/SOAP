@@ -1,5 +1,6 @@
 import { Room, Floor, SiteProperties, SiteConstraints, SpaceType, VCType, ZoneColor, AppSettings, Point } from '../types';
 import { analyzeSite, roomWorldPolygon, polygonArea, recenterShape } from './site';
+import { PIXELS_PER_METER, roomFloorRange } from './rooms';
 export { classifyClient, type BridgeClientKind } from '../mcp/core';
 import { checkLayout } from '../.claude/skills/soap-space-planning/scripts/check_layout.mjs';
 import planningRulesMd from '../.claude/skills/soap-space-planning/SKILL.md?raw';
@@ -17,8 +18,7 @@ export const checkProject = (project: unknown, s: BridgeState) => {
 // Commands that AI clients send to SOAP through the MCP bridge (see mcp/hub.ts).
 // Everything is in meters; SOAP stores room geometry in pixels.
 
-export const BRIDGE_PX_PER_METER = 20;
-const PX = BRIDGE_PX_PER_METER;
+const PX = PIXELS_PER_METER;
 
 
 export interface BridgeState {
@@ -50,13 +50,8 @@ export class BridgeError extends Error {}
 const round = (v: number, d = 3) => Number(v.toFixed(d));
 
 const roomFloors = (r: Room): number[] => {
-    const range = (a?: number, b?: number) => {
-        const lo = Math.min(a ?? r.floor, b ?? r.floor), hi = Math.max(a ?? r.floor, b ?? r.floor);
-        return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
-    };
-    if (r.spaceType === 'verticalConnection') return range(r.vcFromFloor, r.vcToFloor);
-    if (r.spaceType === 'multistory') return range(r.msFromFloor, r.msToFloor);
-    return [r.floor];
+    const [lo, hi] = roomFloorRange(r);
+    return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
 };
 
 /** A room as the AI sees it: meters, rounded, with only meaningful fields. */

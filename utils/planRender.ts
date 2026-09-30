@@ -1,5 +1,6 @@
 import { Room, Floor, SiteProperties, ReferenceImage, Point, AppSettings } from '../types';
 import { roomWorldPolygon, buildableArea, analyzeSite, polygonArea, polygonCentroid } from './site';
+import { isOnFloor } from './rooms';
 
 // Renders one floor of a SOAP project as a clean, labelled plan image for AI clients (MCP get_plan_image).
 // Drawn from project data (not a screen capture) so it always shows the whole floor with a meter grid whose
@@ -38,15 +39,7 @@ export interface PlanRender {
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const fmt = (v: number) => (Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : v.toFixed(1));
 
-export const roomOnFloor = (r: Room, f: number) => {
-    if (!r.isPlaced) return false;
-    if (r.floor === f) return true;
-    const [a, b] = r.spaceType === 'verticalConnection' ? [r.vcFromFloor, r.vcToFloor]
-        : r.spaceType === 'multistory' ? [r.msFromFloor, r.msToFloor] : [undefined, undefined];
-    if (a === undefined && b === undefined) return false;
-    const lo = Math.min(a ?? r.floor, b ?? r.floor), hi = Math.max(a ?? r.floor, b ?? r.floor);
-    return f >= lo && f <= hi;
-};
+const roomOnFloor = (r: Room, f: number) => r.isPlaced && isOnFloor(r, f);
 
 /** A "nice" grid step (1, 2, 5, 10, 20, 50 m...) giving at most ~`target` lines across `span`. */
 export const niceStep = (span: number, target = 12) => {

@@ -1,4 +1,5 @@
 import { Room } from '../types';
+import { roomFloorRange } from './rooms';
 
 export const applyMagneticPhysics = (
     rooms: Room[],
@@ -15,20 +16,6 @@ export const applyMagneticPhysics = (
     // paddingParam goes from 0 to 40 pixels, architectural default is 10
     const padding = paddingParam ?? 10;
 
-    const getFloorRange = (r: Room) => {
-        if (r.spaceType === 'multistory') {
-            const from = r.msFromFloor ?? r.floor;
-            const to = r.msToFloor ?? r.floor;
-            return { min: Math.min(from, to), max: Math.max(from, to) };
-        }
-        if (r.spaceType === 'verticalConnection') {
-            const from = r.vcFromFloor ?? r.floor;
-            const to = r.vcToFloor ?? r.floor;
-            return { min: Math.min(from, to), max: Math.max(from, to) };
-        }
-        return { min: r.floor, max: r.floor };
-    };
-
     let moved = false;
 
     // Pairwise comparison
@@ -44,9 +31,9 @@ export const applyMagneticPhysics = (
             const b = nextRooms[j];
             if (!b.isPlaced) continue;
 
-            const rangeA = getFloorRange(a);
-            const rangeB = getFloorRange(b);
-            const overlap = Math.max(rangeA.min, rangeB.min) <= Math.min(rangeA.max, rangeB.max);
+            const [loA, hiA] = roomFloorRange(a);
+            const [loB, hiB] = roomFloorRange(b);
+            const overlap = Math.max(loA, loB) <= Math.min(hiA, hiB);
             if (!overlap) continue;
 
             const centerA = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
