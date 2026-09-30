@@ -37,7 +37,8 @@ export const convertRoomShape = (r: Room, shape: RoomShape): Room => {
             let isRect = false;
             let W = 0, H = 0, rx = 0, ry = 0, rotDeg = 0;
 
-            if (absPoints.length === 4) {
+            // A bubble's outline is the curve, not its four points, so it always takes the area-matched fit below
+            if (absPoints.length === 4 && r.shape !== 'bubble') {
                 const [A0, A1, A2, A3] = absPoints;
                 const v0 = { x: A1.x - A0.x, y: A1.y - A0.y };
                 const v1 = { x: A2.x - A1.x, y: A2.y - A1.y };

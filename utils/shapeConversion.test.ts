@@ -46,6 +46,15 @@ describe('convertRoomShape', () => {
         close(roomCenter(back).y, roomCenter(r).y, 3);
     });
 
+    it('keeps the area when a bubble goes back to a rect', () => {
+        const r = rect({ rotation: 10 });
+        const back = convertRoomShape(convertRoomShape(r, 'bubble'), 'rect');
+        expect(Math.abs(back.area - r.area)).toBeLessThan(0.1);
+        close(back.rotation!, 10, 1);
+        close(roomCenter(back).x, roomCenter(r).x, 1);
+        close(roomCenter(back).y, roomCenter(r).y, 1);
+    });
+
     it('fits an L-shaped polygon with a rect of the same area', () => {
         const L = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 100, y: 100 }, { x: 100, y: 200 }, { x: 0, y: 200 }];
         const poly: Room = { ...rect(), shape: 'polygon', polygon: L, area: polygonArea(L) / (PX * PX) };
