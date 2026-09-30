@@ -7,6 +7,9 @@ import { Floor } from '../types';
 import { SketchToolbar } from './SketchToolbar';
 import { ZonesIcon, BrushCleaningIcon } from './icons';
 
+/** Canvas modes and side panels that can't be open together. */
+export type CanvasTool = 'snap' | 'style' | 'reference' | 'site' | 'guides' | 'sketch';
+
 interface CanvasToolbarProps {
     viewMode: 'CANVAS' | 'VOLUMES';
     // Grid

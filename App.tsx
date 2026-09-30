@@ -24,7 +24,7 @@ import { useCanvasViewport } from './hooks/useCanvasViewport';
 import { useGuides } from './hooks/useGuides';
 import { GuideLines, GuideActionsPanel } from './components/GuideLayer';
 import { AppHeader, ViewMode } from './components/AppHeader';
-import { CanvasToolbar } from './components/CanvasToolbar';
+import { CanvasToolbar, CanvasTool } from './components/CanvasToolbar';
 import { canvasContentBounds } from './utils/canvasBounds';
 import { SpacePropertiesPanel } from './components/SpacePropertiesPanel';
 import { ZonePropertiesPanel } from './components/ZonePropertiesPanel';
@@ -86,8 +86,15 @@ export default function App() {
     const [viewMode, setViewMode] = useState<ViewMode>('EDITOR');
     const [referenceScaleState, setReferenceScaleState] = useState<ReferenceScaleState | null>(null);
     const [selectedReferenceImageId, setSelectedReferenceImageId] = useState<string | null>(null);
-    const [isGuidesMode, setIsGuidesMode] = useState(false);
-    const [isSiteMode, setIsSiteMode] = useState(false);
+    // The canvas mode or side panel in use. They share the space beside the toolbar, so opening one closes the others.
+    const [activeTool, setActiveTool] = useState<CanvasTool | null>(null);
+    const toggleTool = (tool: CanvasTool) => setActiveTool(current => (current === tool ? null : tool));
+    const isGuidesMode = activeTool === 'guides';
+    const isSiteMode = activeTool === 'site';
+    const isSketchMode = activeTool === 'sketch';
+    const isReferenceMode = activeTool === 'reference';
+    const showSnapPanel = activeTool === 'snap';
+    const showStylePanel = activeTool === 'style';
     const [siteTool, setSiteTool] = useState<SiteTool>('select');
     const [siteSelection, setSiteSelection] = useState<SiteSelection | null>(null);
     const [fitRequest, setFitRequest] = useState(0);
@@ -100,7 +107,6 @@ export default function App() {
     const [showExportModal, setShowExportModal] = useState(false);
     const [showHelpModal, setShowHelpModal] = useState(false);
     const [showAboutModal, setShowAboutModal] = useState(false);
-    const [showSnapPanel, setShowSnapPanel] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showSitePropertiesModal, setShowSitePropertiesModal] = useState(false);
     const [showBridgesModal, setShowBridgesModal] = useState(false);
@@ -109,8 +115,6 @@ export default function App() {
     const [showAiLayoutModal, setShowAiLayoutModal] = useState(false);
 
     // Sketch State
-    const [isSketchMode, setIsSketchMode] = useState(false);
-    const [isReferenceMode, setIsReferenceMode] = useState(false);
     const [activeSketchType, setActiveSketchType] = useState<AnnotationType | 'eraser' | 'select'>('select');
     const [sketchProperties, setSketchProperties] = useState({
         stroke: '#f97316',
@@ -140,7 +144,6 @@ export default function App() {
 
     const [canvasStyle, setCanvasStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
     const [volumesStyle, setVolumesStyle] = useState<DiagramStyle>(DIAGRAM_STYLES[0]);
-    const [showStylePanel, setShowStylePanel] = useState(false);
     const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
     const [selectedZone, setSelectedZone] = useState<string | null>(null);
 
@@ -1318,11 +1321,13 @@ export default function App() {
         return () => bridge.setHandler(null);
     }, []);
 
-    const closeSiteMode = () => {
-        setIsSiteMode(false);
-        setSiteSelection(null);
-        setSiteTool('select');
-    };
+    // Leaving site mode drops its selection and tool
+    useEffect(() => {
+        if (!isSiteMode) {
+            setSiteSelection(null);
+            setSiteTool('select');
+        }
+    }, [isSiteMode]);
 
     const handleDeleteReferenceImage = (id: string) => {
         addToHistory();
@@ -1704,9 +1709,7 @@ export default function App() {
                     onOpenApiKey={() => setShowApiKeyModal(true)}
                     onOpenSettings={() => {
                         setShowSettingsModal(true);
-                        setShowSnapPanel(false);
-                        setShowStylePanel(false);
-                        setIsReferenceMode(false);
+                        setActiveTool(current => (current === 'snap' || current === 'style' || current === 'reference' ? null : current));
                     }}
                     onOpenHelp={() => setShowHelpModal(true)}
                     onOpenAbout={() => setShowAboutModal(true)}
@@ -2348,73 +2351,21 @@ export default function App() {
                                     onOverlayFloorChange={floorId => setFloorOverlays(prev => ({ ...prev, [currentFloor]: floorId }))}
                                     snapPanelOpen={showSnapPanel}
                                     snapEnabled={snapEnabled}
-                                    onToggleSnapPanel={() => {
-                                        const newValue = !showSnapPanel;
-                                        setShowSnapPanel(newValue);
-                                        if (newValue) {
-                                            setShowStylePanel(false);
-                                            setIsReferenceMode(false);
-                                            setIsSketchMode(false);
-                                        }
-                                    }}
+                                    onToggleSnapPanel={() => toggleTool('snap')}
                                     magnetMode={isMagnetMode}
                                     onToggleMagnet={() => setIsMagnetMode(!isMagnetMode)}
                                     showZones={showZones}
                                     onToggleZones={() => setShowZones(!showZones)}
                                     referenceMode={isReferenceMode}
-                                    onToggleReference={() => {
-                                        const newValue = !isReferenceMode;
-                                        setIsReferenceMode(newValue);
-                                        if (newValue) {
-                                            closeSiteMode();
-                                            setIsSketchMode(false);
-                                            setShowStylePanel(false);
-                                            setShowSnapPanel(false);
-                                        }
-                                    }}
+                                    onToggleReference={() => toggleTool('reference')}
                                     siteMode={isSiteMode}
-                                    onToggleSite={() => {
-                                        if (isSiteMode) { closeSiteMode(); return; }
-                                        setIsSiteMode(true);
-                                        setIsSketchMode(false);
-                                        setIsReferenceMode(false);
-                                        setIsGuidesMode(false);
-                                        setShowStylePanel(false);
-                                        setShowSnapPanel(false);
-                                    }}
+                                    onToggleSite={() => toggleTool('site')}
                                     guidesMode={isGuidesMode}
-                                    onToggleGuides={() => {
-                                        const newValue = !isGuidesMode;
-                                        setIsGuidesMode(newValue);
-                                        if (newValue) {
-                                            closeSiteMode();
-                                            setIsSketchMode(false);
-                                            setIsReferenceMode(false);
-                                            setShowStylePanel(false);
-                                            setShowSnapPanel(false);
-                                        }
-                                    }}
+                                    onToggleGuides={() => toggleTool('guides')}
                                     sketchMode={isSketchMode}
-                                    onToggleSketch={() => {
-                                        const newValue = !isSketchMode;
-                                        setIsSketchMode(newValue);
-                                        if (newValue) {
-                                            closeSiteMode();
-                                            setIsReferenceMode(false);
-                                            setShowStylePanel(false);
-                                            setShowSnapPanel(false);
-                                        }
-                                    }}
+                                    onToggleSketch={() => toggleTool('sketch')}
                                     stylePanelOpen={showStylePanel}
-                                    onToggleStylePanel={() => {
-                                        const newValue = !showStylePanel;
-                                        setShowStylePanel(newValue);
-                                        if (newValue) {
-                                            setIsReferenceMode(false);
-                                            setIsSketchMode(false);
-                                            setShowSnapPanel(false);
-                                        }
-                                    }}
+                                    onToggleStylePanel={() => toggleTool('style')}
                                     volumesViewType={volumesViewState.viewType}
                                     onVolumesViewTypeChange={viewType => handleViewStateChange({ viewType }, true)}
                                     onClearCanvas={handleClearCanvas}
@@ -2436,7 +2387,7 @@ export default function App() {
                                                     setCanvasStyle(style);
                                                 }
                                             }}
-                                            onClose={() => setShowStylePanel(false)}
+                                            onClose={() => setActiveTool(null)}
                                             settings={appSettings}
                                             onUpdateSettings={setAppSettings}
                                             viewMode={viewMode}
@@ -2454,7 +2405,7 @@ export default function App() {
                                         <SnapPanel
                                             settings={appSettings}
                                             onUpdateSettings={setAppSettings}
-                                            onClose={() => setShowSnapPanel(false)}
+                                            onClose={() => setActiveTool(null)}
                                             snapEnabled={snapEnabled}
                                             onToggleSnapEnabled={setSnapEnabled}
                                             gridSizeIndex={gridSizeIndex}
@@ -2485,7 +2436,7 @@ export default function App() {
                                             onAddImagery={handleAddSiteImagery}
                                             onRotate={rotateSite}
                                             onSelectRoom={(id) => {
-                                                closeSiteMode();
+                                                setActiveTool(null);
                                                 const room = rooms.find(r => r.id === id);
                                                 if (room && room.floor !== currentFloor) setCurrentFloor(room.floor);
                                                 setSelectedRoomIds(new Set([id]));
